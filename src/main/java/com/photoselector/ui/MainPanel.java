@@ -22,6 +22,9 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial") // 界面组件不参与序列化
 public final class MainPanel extends JPanel {
 
+    /** 底栏（照片条）的默认高度。 */
+    private static final int BOTTOM_HEIGHT = 170;
+
     private final ToolBarPanel toolBar = new ToolBarPanel();
 
     private final CardLayout centerCards = new CardLayout();
@@ -33,7 +36,12 @@ public final class MainPanel extends JPanel {
     private final CardLayout bottomCards = new CardLayout();
     private final JPanel bottomArea = new JPanel(bottomCards);
 
+    private final JSplitPane centerRight;
+    private final JSplitPane mainSplit;
+    private final JSplitPane outerSplit;
+
     private ViewMode mode = ViewMode.BROWSE;
+    private boolean bottomPlaced;
 
     public MainPanel() {
         super(new BorderLayout());
@@ -41,17 +49,33 @@ public final class MainPanel extends JPanel {
 
         buildAreas();
 
-        // 中栏与右栏可左右拖动分配宽度；左栏与它们之间同理
-        JSplitPane centerRight = split(centerArea, rightArea, 1.0);
-        JSplitPane mainSplit = split(leftColumn(), centerRight, 0.0);
+        // 三道分隔条：左栏 | 中右，中栏 | 右栏，主体 | 底栏，全都可以拖着调整
+        centerRight = Splitters.horizontal(centerArea, rightArea, 1.0);
+        mainSplit = Splitters.horizontal(leftColumn(), centerRight, 0.0);
+        outerSplit = Splitters.vertical(mainSplit, bottomArea, 1.0);
 
         toolBar.modeButton().addActionListener(e -> toggleMode());
 
         add(toolBar, BorderLayout.NORTH);
-        add(mainSplit, BorderLayout.CENTER);
-        add(bottomArea, BorderLayout.SOUTH);
+        add(outerSplit, BorderLayout.CENTER);
 
         setMode(ViewMode.BROWSE);
+    }
+
+    /**
+     * 第一次布局时把底栏上方那条分隔条摆到位。
+     *
+     * <p>JSplitPane 的默认规则是"按上半部分的首选高度"决定横分隔条的位置，
+     * 照那样底栏会抢走大半高度。我们要的是"底栏固定高度、其余留给上方"，
+     * 所以显式摆一次；摆完就交给用户拖，不再干预。
+     */
+    @Override
+    public void doLayout() {
+        super.doLayout();
+        if (!bottomPlaced && outerSplit.getHeight() > 0) {
+            bottomPlaced = true;
+            outerSplit.setDividerLocation(Math.max(0, outerSplit.getHeight() - BOTTOM_HEIGHT));
+        }
     }
 
     /** 切换视图模式：三块区域同时换卡片，工具栏按钮文字同步。 */
@@ -96,16 +120,6 @@ public final class MainPanel extends JPanel {
         PlaceholderPanel panel = new PlaceholderPanel(title, background);
         panel.setPreferredSize(new Dimension(width, height));
         return panel;
-    }
-
-    private static JSplitPane split(JComponent left, JComponent right, double resizeWeight) {
-        JSplitPane pane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, left, right);
-        pane.setBorder(null);
-        pane.setDividerSize(4);
-        pane.setContinuousLayout(true); // 拖动分隔条时实时重排，不松手才动
-        pane.setBackground(Theme.PANEL);
-        pane.setResizeWeight(resizeWeight); // 窗口变大时，多出来的宽度分给谁
-        return pane;
     }
 
     private void toggleMode() {

@@ -6,8 +6,10 @@ import java.util.List;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.Icon;
 import javax.swing.JPanel;
 
+import com.photoselector.ui.theme.Icons;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -24,7 +26,7 @@ final class ToolBarPanel extends JPanel {
     private final List<ToolButton> cursorTools = new ArrayList<>();
 
     /** 最右边的模式切换按钮。 */
-    private final ToolButton modeButton = new ToolButton("整理模式");
+    private final ToolButton modeButton = new ToolButton("整理模式", Icons.layout());
 
     ToolBarPanel() {
         super(new FlowLayout(FlowLayout.LEFT, 4, 5));
@@ -32,17 +34,19 @@ final class ToolBarPanel extends JPanel {
         setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
 
         // 左组 · 文件与历史
-        add(new ToolButton("重新选择工作区"));
-        add(new ToolButton("保存"));
-        add(new ToolButton("重置"));
-        add(new ToolButton("撤销"));
-        add(new ToolButton("重做"));
+        add(new ToolButton("重新选择工作区", Icons.folder()));
+        add(new ToolButton("保存", Icons.save()));
+        add(new ToolButton("重置", Icons.reset()));
+        add(new ToolButton("撤销", Icons.undo()));
+        add(new ToolButton("重做", Icons.redo()));
 
         add(Box.createHorizontalStrut(28)); // 用留白分组，不画竖线，跟 Capture One 一致
 
         // 中组 · 光标工具
-        for (String name : new String[] {"选择", "平移", "裁切", "旋转", "翻转"}) {
-            ToolButton tool = new ToolButton(name);
+        String[] cursorToolNames = {"选择", "平移", "裁切", "旋转", "翻转"};
+        Icon[] cursorToolIcons = {Icons.select(), Icons.pan(), Icons.crop(), Icons.rotate(), Icons.flip()};
+        for (int i = 0; i < cursorToolNames.length; i++) {
+            ToolButton tool = new ToolButton(cursorToolNames[i], cursorToolIcons[i]);
             tool.addActionListener(e -> activate(tool));
             cursorTools.add(tool);
             add(tool);
@@ -52,8 +56,8 @@ final class ToolBarPanel extends JPanel {
         add(Box.createHorizontalStrut(28));
 
         // 右组 · 视图辅助
-        add(new ToolButton("网格"));
-        add(new ToolButton("适应窗口"));
+        add(new ToolButton("网格", Icons.grid()));
+        add(new ToolButton("适应窗口", Icons.fitToWindow()));
         add(modeButton);
     }
 

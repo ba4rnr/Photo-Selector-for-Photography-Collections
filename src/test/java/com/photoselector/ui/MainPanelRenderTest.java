@@ -49,6 +49,28 @@ class MainPanelRenderTest {
         assertTrue(sampleColors(image).size() > 3, "整理模式也应当画出内容");
     }
 
+    @Test
+    void 工具栏图标能画出来() throws Exception {
+        // 图标只有 18 像素，放大三倍另存一张，方便肉眼检查线条画得对不对
+        int scale = 3;
+        ToolBarPanel toolBar = new ToolBarPanel();
+        toolBar.setSize(1000, 64);
+        layoutTree(toolBar);
+
+        BufferedImage image = new BufferedImage(1000 * scale, 64 * scale, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setColor(Theme.PANEL);
+        g.fillRect(0, 0, image.getWidth(), image.getHeight());
+        g.scale(scale, scale);
+        toolBar.paint(g);
+        g.dispose();
+
+        Path output = Path.of("target", "ui-toolbar.png");
+        Files.createDirectories(output.getParent());
+        ImageIO.write(image, "png", output.toFile());
+        assertTrue(sampleColors(image).size() > 3, "工具栏应当画出图标和文字");
+    }
+
     /** 离屏渲染指定模式下的整个界面，写出 PNG 并返回图像。 */
     private static BufferedImage render(ViewMode mode, String fileName) throws Exception {
         Theme.install();

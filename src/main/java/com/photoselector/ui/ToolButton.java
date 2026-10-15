@@ -5,7 +5,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.SwingConstants;
 
 import com.photoselector.ui.theme.Theme;
 
@@ -21,15 +23,20 @@ final class ToolButton extends JButton {
 
     private boolean active;
 
-    ToolButton(String text) {
+    ToolButton(String text, Icon icon) {
         super(text);
         setFont(Theme.FONT_SMALL);
         setForeground(Theme.TEXT);
         setBackground(Theme.PANEL);
+        setIcon(icon);
+        // 图标在上、文字在下，跟 Capture One 的工具栏一致
+        setVerticalTextPosition(SwingConstants.BOTTOM);
+        setHorizontalTextPosition(SwingConstants.CENTER);
+        setIconTextGap(3);
         setContentAreaFilled(false); // 背景不再由外观画，改由下面的 paintComponent 负责
         setFocusPainted(false);
         setBorderPainted(false);
-        setBorder(BorderFactory.createEmptyBorder(5, 9, 5, 9));
+        setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
         setRolloverEnabled(true);
     }
 
