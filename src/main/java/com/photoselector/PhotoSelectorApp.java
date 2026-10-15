@@ -1,10 +1,14 @@
 package com.photoselector;
 
+import javax.swing.SwingUtilities;
+
+import com.photoselector.ui.MainFrame;
+import com.photoselector.ui.theme.Theme;
+
 /**
  * 程序入口。
  *
- * <p>目前只是一个占位实现，用来验证项目骨架、构建与运行链路是否正常。
- * 真正的照片筛选功能会在后续迭代中接入这里。
+ * <p>负责装好外观、开出主窗口。真正的照片筛选逻辑在 {@code core} 与 {@code io} 包里。
  */
 public final class PhotoSelectorApp {
 
@@ -24,6 +28,11 @@ public final class PhotoSelectorApp {
     }
 
     public static void main(String[] args) {
-        System.out.println(APP_NAME + " — 项目骨架已就绪。");
+        // Swing 的铁律：界面必须在事件分发线程（EDT）上创建和修改。
+        // invokeLater 把这段任务排进 EDT 的队列，而不是在 main 线程里直接开窗口。
+        SwingUtilities.invokeLater(() -> {
+            Theme.install();
+            new MainFrame().setVisible(true);
+        });
     }
 }
