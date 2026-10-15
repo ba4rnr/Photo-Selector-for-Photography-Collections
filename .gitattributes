@@ -1,0 +1,20 @@
+# 统一换行符为 LF，避免不同机器上出现无意义的整文件改动
+* text=auto eol=lf
+
+# Windows 脚本必须保持 CRLF，否则可能无法执行
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Unix 脚本保持 LF
+*.sh text eol=lf
+mvnw text eol=lf
+
+# 二进制文件不做换行符转换
+*.jar binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary

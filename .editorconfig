@@ -1,0 +1,23 @@
+# IntelliJ IDEA、VS Code 等编辑器都会自动读取这份配置
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.java]
+indent_size = 4
+
+[*.{xml,yml,yaml,json,properties}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+trim_trailing_whitespace = false
+
+# Windows 批处理脚本必须保持 CRLF
+[*.{cmd,bat}]
+end_of_line = crlf
