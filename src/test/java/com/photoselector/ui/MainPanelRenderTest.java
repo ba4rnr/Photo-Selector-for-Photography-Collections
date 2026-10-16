@@ -11,6 +11,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -21,6 +22,7 @@ import java.util.Set;
 import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
+import javax.swing.SwingUtilities;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
 import javax.swing.plaf.basic.BasicSplitPaneUI;
 
@@ -83,9 +85,14 @@ class MainPanelRenderTest {
     @Test
     void 指针压到分隔条上时会亮出白线() throws Exception {
         Theme.install();
+
+        // 与主截图用同一套搭法，保证这里看到的布局和真实窗口一致
         MainPanel mainPanel = new MainPanel();
-        mainPanel.setSize(1200, 800);
-        layoutTree(mainPanel);
+        JPanel screen = new JPanel(new BorderLayout());
+        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }), BorderLayout.NORTH);
+        screen.add(mainPanel, BorderLayout.CENTER);
+        screen.setSize(WIDTH, HEIGHT);
+        layoutTree(screen);
 
         BasicSplitPaneDivider divider = findFirstDivider(mainPanel);
         assertNotNull(divider, "应当在界面里找到分隔条");
@@ -101,9 +108,53 @@ class MainPanelRenderTest {
 
         BufferedImage hovered = paintDivider(divider);
         assertNotEquals(fingerprint(plain), fingerprint(hovered), "压上去之后画出来的样子应当变了");
-        assertTrue(containsColor(hovered, Theme.DIVIDER_HINT), "此时应当出现那条白线");
+        assertTrue(containsColor(hovered, Theme.DIVIDER_HINT), "此时应当出现细白边");
+
+        // 白边是"描在边上"，中间那条分隔线本身不该跟着变色
+        assertEquals(Theme.BORDER.getRGB() & 0xFFFFFF,
+                hovered.getRGB(divider.getWidth() / 2, divider.getHeight() / 2) & 0xFFFFFF,
+                "中间的分隔线悬停时应当保持原色");
 
         writeDividerSheet(plain, hovered);
+        writeHoveredWindow(screen);
+    }
+
+    /** 把"指针正压在某条分隔条上"的整窗画面另存一张，便于看实际效果。 */
+    private static void writeHoveredWindow(JPanel screen) throws Exception {
+        BufferedImage image = new BufferedImage(screen.getWidth(), screen.getHeight(),
+                BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        paintScreen(screen, g);
+        g.dispose();
+        ImageIO.write(image, "png", Path.of("target", "ui-divider-context.png").toFile());
+    }
+
+    /**
+     * 把整个界面画到给定画布上。
+     *
+     * <p>这里得多画一道：分隔条（{@code BasicSplitPaneDivider}）是纯 {@code Container}
+     * 而不是 {@code JComponent}。离屏渲染时所有组件都没有 peer，父容器的绘制流程
+     * 会把这类子组件当成"交给原生系统绘制"而跳过，于是分隔条不会出现在截图里。
+     * 真实窗口里它有 peer，会正常绘制——所以这里手动补画一次，让截图忠实反映真实样子。
+     */
+    private static void paintScreen(JPanel screen, Graphics2D g) {
+        screen.paint(g);
+        paintDividers(screen, screen, g);
+    }
+
+    private static void paintDividers(Container container, JPanel screen, Graphics2D g) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof BasicSplitPaneDivider divider) {
+                Point at = SwingUtilities.convertPoint(divider, new Point(0, 0), screen);
+                Graphics2D shifted = (Graphics2D) g.create();
+                shifted.translate(at.x, at.y);
+                divider.paint(shifted);
+                shifted.dispose();
+            }
+            if (child instanceof Container nested) {
+                paintDividers(nested, screen, g);
+            }
+        }
     }
 
     /** 在界面里找出第一根分隔条。 */
@@ -197,7 +248,7 @@ class MainPanelRenderTest {
 
         BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
-        screen.paint(g);
+        paintScreen(screen, g);
         g.dispose();
 
         Path output = Path.of("target", fileName);
