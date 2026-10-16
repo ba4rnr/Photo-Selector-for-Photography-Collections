@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
 import com.photoselector.io.WorkspaceStore;
 import com.photoselector.testing.TestImages;
@@ -124,6 +125,43 @@ class DragAndCloseTest {
             assertEquals(1, window.confirms.get(), "有改动时应当问一次");
             assertEquals(1, window.exits.get(), "退出动作应当执行一次");
             assertFalse(Files.exists(targetJpg(window, "010.jpg")), "选不保存，磁盘上不该多出东西");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
+    void 目标文件夹里的照片可以拖着换位置() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            TargetPanel target = window.panel.targetPanelForTest();
+
+            // 坐标都按"面板自己"算：目标面板上的每张照片都看得见，
+            // 直接用它的格位就行，不必绕窗口坐标（绕了反而容易落到面板外面）
+            Point onFirstCell = new Point(target.cellXForTest(0) + 20,
+                    target.rowHeightForTest() / 2);
+            Point rightOfSecond = new Point(target.cellRightForTest(1) + 6,
+                    target.rowHeightForTest() / 2);
+            SwingUtilities.invokeAndWait(() -> {
+                press(target, onFirstCell);
+                drag(target, new Point(onFirstCell.x + 12, onFirstCell.y));
+                drag(target, rightOfSecond);
+            });
+            assertEquals(2, target.dropHintIndex(), "落点应当标在第二张右边那个缝里"
+                    + "（面板 " + target.getWidth() + "x" + target.getHeight()
+                    + "，列数 " + target.columnsForTest() + "）");
+
+            SwingUtilities.invokeAndWait(() -> release(target, rightOfSecond));
+
+            Session session = target.session();
+            assertEquals(2, session.size(), "换位置不该改变总数");
+            assertEquals("旧B.jpg", session.entryAt(0).source().getFileName().toString(),
+                    "原来第二张现在排头");
+            assertEquals("旧A.jpg", session.entryAt(1).source().getFileName().toString(),
+                    "被拖的那张落在它后面");
+            assertEquals("020", session.nameAt(1), "编号跟着位置现算");
         } finally {
             window.dispose();
         }

@@ -40,8 +40,9 @@ class CloseDialogTest {
         });
         try {
             AtomicReference<Integer> answer = new AtomicReference<>();
-            // 模态对话框一旦弹出来就会占住调用线程，所以先排好"点按钮"这件事再弹。
-            // 反复试而不是只试一次：对话框弹出需要一点时间，一次没找到就没机会了
+            // 整个过程都排在界面线程上：对话框弹出时界面线程会进入自己的事件循环，
+            // 定时器就在那里面跑。放到别的线程上试过，弹出与点击之间会错开一拍，
+            // 结果偶发地"对话框还没等点就关了"。
             javax.swing.Timer clicker = new javax.swing.Timer(100, null);
             clicker.addActionListener(e -> {
                 AbstractButton button = findButton(frame, "不保存");
@@ -51,9 +52,12 @@ class CloseDialogTest {
                 button.doClick();
                 clicker.stop();
             });
-            clicker.start();
-            answer.set(MainPanel.askToSaveForTest(frame));
+            SwingUtilities.invokeLater(() -> {
+                clicker.start();
+                answer.set(MainPanel.askToSaveForTest(frame));
+            });
 
+            waitUntil(() -> answer.get() != null, "对话框给出答案");
             assertEquals(JOptionPane.NO_OPTION, answer.get(),
                     "点「不保存」要返回 NO_OPTION，否则关闭流程会把它当成别的东西");
         } finally {
@@ -89,11 +93,15 @@ class CloseDialogTest {
                 discard.doClick();
                 clicker.stop();
             });
-            clicker.start();
-            int answer = MainPanel.askToSaveForTest(frame);
+            AtomicReference<Integer> answerRef = new AtomicReference<>();
+            SwingUtilities.invokeLater(() -> {
+                clicker.start();
+                answerRef.set(MainPanel.askToSaveForTest(frame));
+            });
 
+            waitUntil(() -> answerRef.get() != null, "对话框给出答案");
             assertEquals("保存|不保存", seen.get());
-            assertEquals(JOptionPane.NO_OPTION, answer);
+            assertEquals(JOptionPane.NO_OPTION, answerRef.get());
         } finally {
             SwingUtilities.invokeAndWait(() -> frame.dispose());
         }
@@ -140,5 +148,15 @@ class CloseDialogTest {
             }
         });
         return result.get();
+    }
+
+    /** 等一个条件成立（对话框是异步给出答案的）。 */
+    private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(condition.getAsBoolean(), "等不到：" + what);
     }
 }

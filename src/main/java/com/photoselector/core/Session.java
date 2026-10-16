@@ -88,6 +88,22 @@ public final class Session {
         return numbering.nameFor(index);
     }
 
+    /**
+     * 某个素材文件现在排在序列的第几位；不在序列里返回 -1。
+     *
+     * <p>面板里拖动排序时要靠它把"拖哪一张"换成一个位置。按规范化后的路径比，
+     * 不按文件名——目标文件夹里同名不同目录的两张是完全不同的照片。
+     */
+    public int indexOf(Path source) {
+        Path normalized = source.toAbsolutePath().normalize();
+        for (int i = 0; i < sequence.size(); i++) {
+            if (sequence.get(i).source().equals(normalized)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /** 整个序列的显示名，按当前顺序现算。 */
     public List<String> names() {
         List<String> names = new ArrayList<>(sequence.size());

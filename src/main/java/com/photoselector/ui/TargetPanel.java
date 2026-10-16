@@ -264,6 +264,19 @@ final class TargetPanel extends JPanel {
         return session;
     }
 
+    /** 某一张照片手里有没有缩略图；拖动时拿它当"跟着鼠标的那张图"。 */
+    BufferedImage thumbnailOf(Path photo) {
+        return thumbnails.get(photo);
+    }
+
+    /** 点中的那张照片；还没点过、或者中间商换过了就是 null。 */
+    Path selectedPhoto() {
+        if (session == null || chosenIndex < 0 || chosenIndex >= session.size()) {
+            return null;
+        }
+        return session.entryAt(chosenIndex).source();
+    }
+
     /** 序列变了（挑入、撤销、挪动）之后调用：重新取图并重画。 */
     void refresh() {
         updatePreferredSize();

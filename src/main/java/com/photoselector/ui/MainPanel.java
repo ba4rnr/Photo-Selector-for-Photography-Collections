@@ -202,6 +202,14 @@ public final class MainPanel extends JPanel {
         // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
         DragOut.install(viewer, viewer::photo, viewer::ghostThumbnail,
                 viewer::isDragOutEnabled, this::addToTargetAt);
+
+        // 目标文件夹里的照片也能拖：往旁边一放就是重排顺序（白线照旧标落点）。
+        // 这两块是"同一个序列的两个视图"（选图模式的窄栏、展开排序模式的大网格），
+        // 拖哪一块都是改同一个中间商的顺序。
+        DragOut.install(targetPanel, targetPanel::selectedPhoto, this::selectedThumbnailOf,
+                () -> true, this::reorder);
+        DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::selectedThumbnailOf,
+                () -> true, this::reorder);
         toolBar.setOnToolChanged(viewer::setCursorTool);
 
         buildAreas();
@@ -466,6 +474,39 @@ public final class MainPanel extends JPanel {
             targetPanel.refresh();
             arrangePanel.refresh();
         }
+    }
+
+    /** 目标面板里那张"正在被拖的"照片的缩略图，给跟着鼠标的提示图用。 */
+    private java.awt.image.BufferedImage selectedThumbnailOf() {
+        Path photo = targetPanel.selectedPhoto();
+        return photo == null ? null : targetPanel.thumbnailOf(photo);
+    }
+
+    /**
+     * 在目标序列里把一张照片挪到别的位置——面板内拖动排序走的就是它。
+     *
+     * <p>落点 {@code slot} 是"插在第几项之前"的视觉槽位：比如把第 0 张拖到
+     * 第 3 个缝里，意思就是"挪完之后它排在这三张的后面"。
+     * 挪走自己之后，后面的槽位会整体前移一格，所以目标位置要相应减一。
+     *
+     * <p>这个动作只改中间商和画面，磁盘要等「保存」才动——和别处一样。
+     */
+    private void reorder(Path photo, int slot) {
+        Session session = targetPanel.session();
+        if (session == null || saving) {
+            return;
+        }
+        int from = session.indexOf(photo);
+        if (from < 0) {
+            return; // 不在序列里（比如面板刚换过中间商），没什么可挪的
+        }
+        int to = slot - (slot > from ? 1 : 0);
+        if (to < 0 || to >= session.size() || to == from) {
+            return; // 落回原地或越界：不产生无意义的历史
+        }
+        session.move(from, to);
+        targetPanel.refresh();
+        arrangePanel.refresh();
     }
 
     /**
