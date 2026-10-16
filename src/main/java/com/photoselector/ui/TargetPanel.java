@@ -165,6 +165,11 @@ final class TargetPanel extends JPanel {
         setDropHint(-1);
     }
 
+    /** 当前标出的落点（没标就是 -1）。给测试和排查用。 */
+    int dropHintIndex() {
+        return dropHint;
+    }
+
     /** 某一格对应的条目下标；点在空白处返回 -1。 */
     int indexAt(Point point) {
         if (session == null || session.isEmpty() || point.y < HEADER_HEIGHT) {

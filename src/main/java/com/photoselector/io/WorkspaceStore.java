@@ -40,8 +40,8 @@ public final class WorkspaceStore {
         this(defaultConfigFile());
     }
 
-    /** 供测试指定配置文件的位置。 */
-    WorkspaceStore(Path configFile) {
+    /** 指定配置文件的位置；想挑别处存（测试、便携版）就用它。 */
+    public WorkspaceStore(Path configFile) {
         this.configFile = configFile;
     }
 

@@ -5,6 +5,7 @@ import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -16,6 +17,7 @@ import java.util.function.Supplier;
 
 import javax.swing.JComponent;
 import javax.swing.JRootPane;
+import javax.swing.JViewport;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.ui.theme.Theme;
@@ -55,7 +57,7 @@ final class DragOut {
      */
     static void install(JComponent source, Supplier<Path> photo, Supplier<BufferedImage> ghost,
                         BooleanSupplier enabled, BiConsumer<Path, Integer> onDropped) {
-        source.addMouseListener(new MouseAdapter() {
+        MouseAdapter handler = new MouseAdapter() {
 
             private Point pressedAt;
             private TargetPanel hinted;
@@ -112,9 +114,15 @@ final class DragOut {
             }
 
             private Point toTargetPoint(TargetPanel target, Point pointInSource) {
-                return SwingUtilities.convertPoint(source, pointInSource, target);
+                JRootPane root = SwingUtilities.getRootPane(source);
+                return fromWindow(root, toWindow(source, pointInSource, root), target);
             }
-        });
+        };
+        source.addMouseListener(handler);
+        // 这一行是必须的：鼠标一动一动的那种事件走的是"鼠标移动监听器"，
+        // 不注册它，下面的 mouseDragged 一次都不会被调用——
+        // 表现就是"拖着照片什么都没发生"：没有跟着鼠标的缩略图，没有白线，松手也放不进去。
+        source.addMouseMotionListener(handler);
     }
 
     // ─────────────────────────── 跟着鼠标的那张图 ───────────────────────────
@@ -125,7 +133,45 @@ final class DragOut {
             return; // 还没挂到窗口上（离屏渲染），没有玻璃板可用
         }
         GhostLayer layer = layerOf(root);
-        layer.show(image, SwingUtilities.convertPoint(source, pointInSource, layer));
+        // 位置一路换成"窗口内部"的坐标：玻璃板自己就长在窗口原点，
+        // 所以这个位置可以直接拿来画，中间不再经过屏幕坐标（那条路会绕远、还会错位）
+        layer.show(image, toWindow(source, pointInSource, root));
+    }
+
+    /**
+     * 把一个组件内部的坐标换算成"相对某个祖先"的坐标，并且把沿途的滚动也算进去。
+     *
+     * <p>为什么不直接用 {@code SwingUtilities.convertPoint}：那个方法会绕道"屏幕坐标"
+     * （多显示器、缩放这些情况下屏幕坐标和窗口坐标并不是简单相加），
+     * 实测在本机能把点算出去一千多像素，跟着鼠标的缩略图就整个跑到窗口外面了。
+     * 这里只沿着父链累加位置，不碰屏幕坐标。
+     *
+     * <p>滚动为什么也要算：素材条比它的窗口大，它挂在滚动面板里、自己并不跟着滚，
+     * 滚的是外层的视口。视口里显示的是组件的哪一段，要由 {@code viewPosition} 说。
+     */
+    private static Point toWindow(Component from, Point pointInFrom, Component ancestor) {
+        Point inAncestor = new Point(pointInFrom);
+        for (Component c = from; c != null && c != ancestor; c = c.getParent()) {
+            inAncestor.translate(c.getX(), c.getY());
+            if (c instanceof JViewport viewport) {
+                // 往上走：出视口要把滚出去的那一段减掉
+                inAncestor.translate(-viewport.getViewPosition().x, -viewport.getViewPosition().y);
+            }
+        }
+        return inAncestor;
+    }
+
+    /** 反过来：把"相对某个祖先"的坐标换算成组件内部的坐标。 */
+    private static Point fromWindow(Component ancestor, Point inAncestor, Component to) {
+        Point inTo = new Point(inAncestor);
+        for (Component c = to; c != null && c != ancestor; c = c.getParent()) {
+            inTo.translate(-c.getX(), -c.getY());
+            if (c instanceof JViewport viewport) {
+                // 往下走：进视口要把滚出去的那一段加回来
+                inTo.translate(viewport.getViewPosition().x, viewport.getViewPosition().y);
+            }
+        }
+        return inTo;
     }
 
     private static void hideGhost(JComponent source) {
@@ -135,13 +181,27 @@ final class DragOut {
         }
     }
 
-    /** 一块窗口只装一块玻璃板，两次拖动共用。 */
+    /**
+     * 一块窗口只装一块玻璃板，两次拖动共用。
+     *
+     * <p>必须显式给它定大小：这块板子是程序运行中途才换上去了，
+     * 那会儿窗口早就布局完了，不需要再布局一次——等于是没人给它尺寸，
+     * 它就一直停在 0×0，画什么都画不出来（拖动时"什么都看不见"就是这个原因）。
+     * 之后窗口再变大小，靠监听器跟着调。
+     */
     private static GhostLayer layerOf(JRootPane root) {
         if (root.getGlassPane() instanceof GhostLayer layer) {
             return layer;
         }
         GhostLayer layer = new GhostLayer();
         root.setGlassPane(layer);
+        layer.setBounds(0, 0, root.getWidth(), root.getHeight());
+        root.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                layer.setBounds(0, 0, root.getWidth(), root.getHeight());
+            }
+        });
         return layer;
     }
 
@@ -157,6 +217,17 @@ final class DragOut {
         private BufferedImage image;
         private Point at;
 
+        /** 拖到哪儿、画多大；没在拖返回 null。 */
+        Rectangle boundsOfGhost() {
+            if (at == null) {
+                return null;
+            }
+            int width = image == null ? 60 : GHOST_WIDTH;
+            int height = image == null ? 40
+                    : Math.max(1, Math.round(image.getHeight() * (float) GHOST_WIDTH / image.getWidth()));
+            return new Rectangle(at.x + 12, at.y + 12, width, height);
+        }
+
         void show(BufferedImage ghost, Point where) {
             this.image = ghost;
             this.at = where;
@@ -168,6 +239,19 @@ final class DragOut {
             image = null;
             at = null;
             setVisible(false);
+        }
+
+        /**
+         * 对"这一点上是谁"的提问永远回答"不是我"。
+         *
+         * <p>玻璃板盖着整扇窗口。它一旦显示出来，命中判断就会先撞上它——那样
+         * `getDeepestComponentAt` 永远只找到这块板子，落点面板就成了"找不到"，
+         * 白线也就无从谈起（正是"没有白线"的第二个原因）。
+         * 这里让它彻底透明：鼠标事件、命中判断都当它不存在，它只负责画画。
+         */
+        @Override
+        public boolean contains(int x, int y) {
+            return false;
         }
 
         @Override
@@ -202,7 +286,7 @@ final class DragOut {
         if (root == null) {
             return null;
         }
-        Point inRoot = SwingUtilities.convertPoint(source, pointInSource, root);
+        Point inRoot = toWindow(source, pointInSource, root);
         return panelOf(SwingUtilities.getDeepestComponentAt(root, inRoot.x, inRoot.y));
     }
 
@@ -218,5 +302,14 @@ final class DragOut {
             }
         }
         return null;
+    }
+
+    /** 跟着鼠标走的那张图现在画在哪、画的是什么尺寸；没在拖就是 null。给测试用。 */
+    static Rectangle ghostBoundsForTest(JComponent source) {
+        JRootPane root = SwingUtilities.getRootPane(source);
+        if (root == null || !(root.getGlassPane() instanceof GhostLayer layer)) {
+            return null;
+        }
+        return layer.boundsOfGhost();
     }
 }

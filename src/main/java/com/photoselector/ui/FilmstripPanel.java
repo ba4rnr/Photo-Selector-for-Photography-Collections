@@ -234,6 +234,23 @@ final class FilmstripPanel extends JPanel {
         return bounds;
     }
 
+    /** 一个格子的宽度。给测试算格子位置用（它随缩略图大小变，不是常量）。 */
+    int cellWidthForTest() {
+        return cellWidth;
+    }
+
+    /** 全部组按顺序铺平之后第 index 张照片。给测试用。 */
+    Path photoAtForTest(int index) {
+        int remaining = index;
+        for (PhotoGroup group : groups) {
+            if (remaining < group.size()) {
+                return group.photos().get(remaining);
+            }
+            remaining -= group.size();
+        }
+        return null;
+    }
+
     /**
      * 把素材条装进一个配好滚动条的滚动面板。
      *
