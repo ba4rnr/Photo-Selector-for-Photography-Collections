@@ -29,6 +29,15 @@ public final class Icons {
     /** 线条粗细，1.4 在深色底上不刺眼又看得清。 */
     private static final float STROKE = 1.4f;
 
+    /**
+     * 目录树的勾选框图标。
+     *
+     * <p>缓存成常量而不是每次现造：渲染器每重绘一行都要取一次图标，
+     * 滚动时一秒能重绘几十次，没必要每次都新建对象。
+     */
+    private static final Icon CHECKED = buildCheckBox(true);
+    private static final Icon UNCHECKED = buildCheckBox(false);
+
     private Icons() {
     }
 
@@ -198,6 +207,10 @@ public final class Icons {
      * 点在它上面是切换勾选，点在别处是选中节点。
      */
     public static Icon checkBox(boolean checked) {
+        return checked ? CHECKED : UNCHECKED;
+    }
+
+    private static Icon buildCheckBox(boolean checked) {
         return stroke(g -> {
             g.draw(new Rectangle2D.Double(3, 3, 12, 12));
             if (checked) {

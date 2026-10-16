@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 
 import com.photoselector.ui.theme.Theme;
 
@@ -97,6 +98,36 @@ final class FilmstripPanel extends JPanel {
     /** 已经拿到缩略图的张数。测试和排查用。 */
     int loadedCount() {
         return loaded.get();
+    }
+
+    /**
+     * 把素材条装进一个配好滚动条的滚动面板。
+     *
+     * <p>这里挂了两个监听，缺一不可：
+     * <ul>
+     *   <li>视口<b>滚动</b>时要重算可见范围。</li>
+     *   <li>视口<b>大小</b>变化时也要重算。这一条最容易漏：素材条自身比视口宽得多，
+     *       窗口横向拉宽时它的尺寸根本没变、收不到自己的 resize 事件，
+     *       新露出来的格子就会一直空着，直到用户滚一下才补上。</li>
+     * </ul>
+     */
+    JScrollPane wrapInScrollPane() {
+        JScrollPane scroll = new JScrollPane(this,
+                JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(Theme.PANEL);
+        scroll.getHorizontalScrollBar().setUnitIncrement(40); // 滚一格别只挪几个像素
+        Theme.themeScrollBar(scroll.getHorizontalScrollBar());
+
+        scroll.getViewport().addChangeListener(e -> requestVisibleThumbnails());
+        scroll.getViewport().addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                requestVisibleThumbnails();
+            }
+        });
+        return scroll;
     }
 
     /** 根据当前可见范围，为看得见的格子请求缩略图。滚动时由外部调用。 */

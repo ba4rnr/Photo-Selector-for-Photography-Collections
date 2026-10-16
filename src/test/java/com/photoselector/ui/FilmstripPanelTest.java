@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.Set;
 
 import javax.imageio.ImageIO;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.Test;
@@ -155,6 +157,59 @@ class FilmstripPanelTest {
         assertTrue(countColors(cutEdge) > 3,
                 "半露的那张也应当完整画出来、只是被裁掉一截，而不是画一半或干脆不画");
         loader.shutdown();
+    }
+
+    @Test
+    void 视口变宽后新露出来的格子也会去取图() throws Exception {
+        Theme.install();
+
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            photos.add(TestImages.writeJpeg(tempDir.resolve("wide-" + i + ".jpg"), 900, 600));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        // 用生产代码里那套滚动面板，连同它挂的监听一起测
+        JScrollPane scroll = filmstrip.wrapInScrollPane();
+
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(400, 190);
+            filmstrip.setPhotos(photos, 120);
+            layoutTree(scroll);
+        });
+        int before = waitUntilStable(filmstrip, 2);
+        assertTrue(before < photos.size(), "窄视口下不应当把 12 张全解出来");
+
+        // 一次拉宽到远超"一屏 + 预取余量"，新露出来的格子必须被重新请求。
+        // 离屏渲染时组件不会自己派发 resize 事件，所以这里手动补一个——
+        // 真实窗口里这个事件是系统发的。
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(2400, 190);
+            layoutTree(scroll);
+            scroll.getViewport().dispatchEvent(
+                    new ComponentEvent(scroll.getViewport(), ComponentEvent.COMPONENT_RESIZED));
+        });
+
+        int after = waitUntilStable(filmstrip, before + 1);
+        assertTrue(after > before,
+                "视口变宽之后，新露出来的格子也该去取图（原来 " + before + " 张，现在 " + after + " 张）");
+        loader.shutdown();
+    }
+
+    /** 等到缩略图张数不再增长（至少到 {@code atLeast} 张）为止，返回最终张数。 */
+    private static int waitUntilStable(FilmstripPanel filmstrip, int atLeast) throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        int lastSeen = -1;
+        while (System.currentTimeMillis() < deadline) {
+            int now = filmstrip.loadedCount();
+            if (now >= atLeast && now == lastSeen) {
+                return now;
+            }
+            lastSeen = now;
+            Thread.sleep(50);
+        }
+        return filmstrip.loadedCount();
     }
 
     private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {

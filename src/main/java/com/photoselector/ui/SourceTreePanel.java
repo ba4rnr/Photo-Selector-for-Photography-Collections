@@ -104,6 +104,9 @@ final class SourceTreePanel extends JPanel {
         tree.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                if (!javax.swing.SwingUtilities.isLeftMouseButton(e)) {
+                    return; // 右键留给以后的上下文菜单用
+                }
                 handleClick(e.getPoint());
             }
         });
@@ -224,10 +227,19 @@ final class SourceTreePanel extends JPanel {
     private static List<Path> listChildren(Path folder) {
         try (Stream<Path> entries = Files.list(folder)) {
             List<Path> all = new ArrayList<>(entries.toList());
-            all.sort(Comparator
-                    .comparing((Path p) -> !Files.isDirectory(p)) // 文件夹在前
-                    .thenComparing(p -> p.getFileName().toString()));
-            return all;
+            // 先分一次组，再各自排序。
+            // 如果直接拿 Files.isDirectory 当排序键，排序过程会调用它 O(n log n) 次，
+            // 每个文件都变成一次文件系统查询——几百个文件就是几千次。
+            List<Path> folders = new ArrayList<>();
+            List<Path> files = new ArrayList<>();
+            for (Path path : all) {
+                (Files.isDirectory(path) ? folders : files).add(path);
+            }
+            Comparator<Path> byName = Comparator.comparing(p -> p.getFileName().toString());
+            folders.sort(byName);
+            files.sort(byName);
+            folders.addAll(files);
+            return folders;
         } catch (IOException e) {
             return List.of(); // 读不了就当空的，界面上表现为"这个文件夹没有东西"
         }

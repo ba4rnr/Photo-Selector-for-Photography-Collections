@@ -3,7 +3,6 @@ package com.photoselector.ui;
 import java.awt.Dimension;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.io.IOException;
 import java.nio.file.Path;
 
 import javax.swing.BorderFactory;
@@ -32,6 +31,7 @@ public final class MainFrame extends JFrame {
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setContentPane(mainPanel);
         setJMenuBar(createMenuBar(mainPanel, this::chooseFolder, this::dispose));
+        mainPanel.setOnFolderOpened(this::folderOpened);
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
@@ -108,13 +108,17 @@ public final class MainFrame extends JFrame {
         }
 
         Path folder = chooser.getSelectedFile().toPath();
-        try {
-            int count = mainPanel.setRootFolder(folder);
-            setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "读不了这个文件夹：\n" + e.getMessage(),
+        mainPanel.setRootFolder(folder); // 扫描在后台进行，结果通过回调通知
+    }
+
+    /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */
+    private void folderOpened(Path folder, int count) {
+        if (count < 0) {
+            JOptionPane.showMessageDialog(this, "读不了这个文件夹：\n" + folder,
                     "打开失败", JOptionPane.ERROR_MESSAGE);
+            return;
         }
+        setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
     }
 
     private static JMenu menu(String text) {

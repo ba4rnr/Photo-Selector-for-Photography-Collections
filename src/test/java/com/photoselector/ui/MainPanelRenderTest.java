@@ -17,6 +17,7 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -24,6 +25,7 @@ import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 import javax.swing.JSplitPane;
 import javax.swing.SwingUtilities;
+import org.junit.jupiter.api.io.TempDir;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
 import javax.swing.plaf.basic.BasicSplitPaneUI;
 
@@ -43,6 +45,14 @@ class MainPanelRenderTest {
 
     private static final int WIDTH = 1440;
     private static final int HEIGHT = 900;
+
+    @TempDir
+    Path tempDir;
+
+    /** 测试一律用临时缓存目录，别往用户真实的缓存里写东西。 */
+    private MainPanel newMainPanel() {
+        return new MainPanel(tempDir.resolve("cache"));
+    }
 
     @Test
     void 浏览模式能构建并绘制出非空画面() throws Exception {
@@ -90,14 +100,23 @@ class MainPanelRenderTest {
                 "没有用 -Dphotoselector.samples=<目录> 指定样例照片，跳过");
 
         Theme.install();
-        MainPanel mainPanel = new MainPanel();
+        MainPanel mainPanel = newMainPanel();
         JPanel screen = new JPanel(new BorderLayout());
         screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
         screen.add(mainPanel, BorderLayout.CENTER);
         screen.setSize(WIDTH, HEIGHT);
 
-        int count = mainPanel.setRootFolder(Path.of(configured));
-        assertTrue(count > 0, "样例目录里应当有照片");
+        // 扫描在后台跑，结果通过回调回来
+        AtomicInteger opened = new AtomicInteger(-2);
+        mainPanel.setOnFolderOpened((folder, count) -> opened.set(count));
+        SwingUtilities.invokeAndWait(() -> mainPanel.setRootFolder(Path.of(configured)));
+
+        long openDeadline = System.currentTimeMillis() + 30_000;
+        while (opened.get() == -2 && System.currentTimeMillis() < openDeadline) {
+            Thread.sleep(50);
+        }
+        int count = opened.get();
+        assertTrue(count > 0, "样例目录里应当有照片，实际拿到：" + count);
         layoutTree(screen);
 
         // 素材条只为"看得见的那十几格"取图，所以这里等它稳定下来就够了，
@@ -128,7 +147,7 @@ class MainPanelRenderTest {
         Theme.install();
 
         // 与主截图用同一套搭法，保证这里看到的布局和真实窗口一致
-        MainPanel mainPanel = new MainPanel();
+        MainPanel mainPanel = newMainPanel();
         JPanel screen = new JPanel(new BorderLayout());
         screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
         screen.add(mainPanel, BorderLayout.CENTER);
@@ -274,10 +293,10 @@ class MainPanelRenderTest {
     }
 
     /** 离屏渲染指定模式下的整个界面，写出 PNG 并返回图像。 */
-    private static BufferedImage render(ViewMode mode, String fileName) throws Exception {
+    private BufferedImage render(ViewMode mode, String fileName) throws Exception {
         Theme.install();
 
-        MainPanel mainPanel = new MainPanel();
+        MainPanel mainPanel = newMainPanel();
         mainPanel.setMode(mode);
 
         // 菜单栏平时挂在窗口上，这里和主内容拼进同一个容器，好一起画下来
