@@ -48,7 +48,10 @@ final class TargetPanel extends JPanel {
     private static final int GAP = 8;
 
     /** 表头（目标文件夹路径 + 张数）占的高度。 */
-    private static final int HEADER_HEIGHT = 26;
+    private static final int HEADER_HEIGHT = 34;
+
+    /** 表头右侧给「展开」按钮预留的宽度；路径再长也不许占过来。 */
+    private static final int HEADER_BUTTON_SPACE = 76;
 
     /** 名字那一行占的高度。 */
     private static final int CAPTION_HEIGHT = 18;
@@ -243,14 +246,34 @@ final class TargetPanel extends JPanel {
 
     private void paintHeader(Graphics2D g) {
         g.setFont(Theme.FONT_SMALL);
+        FontMetrics metrics = g.getFontMetrics();
+        int baseline = 22;
+
+        String label = "目标文件夹：";
+        String path = session == null ? "还没选" : session.targetFolder().toString();
+        String count = session == null ? "" : "共 " + session.size() + " 张";
+
+        // 右侧先给「展开」按钮留一块地方，张数贴着它左边放、永远看得见；
+        // 路径只能占"标签之后、张数之前"的那一段，超长就在中间用省略号掐掉
+        int pathX = PADDING + metrics.stringWidth(label);
+        int rightEdge = Math.max(pathX + 24, getWidth() - PADDING - HEADER_BUTTON_SPACE);
+        int countWidth = count.isEmpty() ? 0 : metrics.stringWidth(count) + GAP;
+        boolean showCount = rightEdge - countWidth - pathX >= 40;
+        if (!showCount) {
+            countWidth = 0; // 面板窄到摆不下，先让张数让位，别和路径叠在一起
+        }
+
         g.setColor(Theme.TEXT_MUTED);
-        String text = session == null
-                ? "目标文件夹：还没选"
-                : "目标文件夹：" + session.targetFolder() + "   共 " + session.size() + " 张";
-        g.drawString(shorten(text, g.getFontMetrics(), getWidth() - PADDING * 2), PADDING, 17);
+        g.drawString(label, PADDING, baseline);
+        g.setColor(Theme.TEXT);
+        g.drawString(shortenMiddle(path, metrics, rightEdge - countWidth - pathX), pathX, baseline);
+        if (showCount) {
+            g.setColor(Theme.TEXT_MUTED);
+            g.drawString(count, rightEdge - countWidth + GAP, baseline);
+        }
 
         g.setColor(Theme.BORDER);
-        g.fillRect(PADDING, HEADER_HEIGHT - 6, Math.max(0, getWidth() - PADDING * 2), 1);
+        g.fillRect(PADDING, HEADER_HEIGHT - 7, Math.max(0, getWidth() - PADDING * 2), 1);
     }
 
     /** 只画看得见的那几行。 */
@@ -345,6 +368,32 @@ final class TargetPanel extends JPanel {
     private void onThumbnail(Path source, BufferedImage image) {
         thumbnails.put(source, image);
         repaint();
+    }
+
+    /**
+     * 路径太长就在中间截断：头（盘符）和尾（文件夹名）都留着，中间用省略号省掉。
+     *
+     * <p>尾部最有用——认出"这是哪个文件夹"靠的就是最后一段，所以头最多只占
+     * 三分之一的宽度，剩下的尽量都留给尾部。
+     */
+    static String shortenMiddle(String text, FontMetrics metrics, int maxWidth) {
+        if (metrics.stringWidth(text) <= maxWidth) {
+            return text;
+        }
+        String ellipsis = "…";
+        int headMax = Math.max(1, maxWidth / 3);
+        int headEnd = 1;
+        while (headEnd < text.length()
+                && metrics.stringWidth(text.substring(0, headEnd + 1) + ellipsis) <= headMax) {
+            headEnd++;
+        }
+        int tailStart = text.length() - 1;
+        while (tailStart > headEnd
+                && metrics.stringWidth(text.substring(0, headEnd) + ellipsis
+                        + text.substring(tailStart - 1)) <= maxWidth) {
+            tailStart--;
+        }
+        return text.substring(0, headEnd) + ellipsis + text.substring(tailStart);
     }
 
     /** 文字太长就截断成"前面…"。 */

@@ -87,6 +87,21 @@ class TargetPanelTest {
     }
 
     @Test
+    void 路径太长时中间截断_盘符和文件夹名都留着() {
+        Theme.install();
+        java.awt.FontMetrics metrics = new javax.swing.JLabel().getFontMetrics(Theme.FONT_SMALL);
+
+        String path = "C:\\Users\\BA4RNR\\Desktop\\摄影集_大时代";
+        String shortened = TargetPanel.shortenMiddle(path, metrics, 170);
+
+        assertTrue(metrics.stringWidth(shortened) <= 170, "截断之后要真的放得下");
+        assertTrue(shortened.contains("…"), "超过长度就该用省略号");
+        assertTrue(shortened.startsWith("C:\\"), "盘符要留着");
+        assertTrue(shortened.endsWith("摄影集_大时代"), "尾部（文件夹名）最有用，不许掐掉");
+        assertEquals(path, TargetPanel.shortenMiddle(path, metrics, 4000), "放得下就原样显示");
+    }
+
+    @Test
     void 没选目标文件夹时挑不进去也不会崩() throws Exception {
         Theme.install();
         Path source = Files.createDirectories(tempDir.resolve("素材"));
