@@ -122,6 +122,49 @@ class FilmstripPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 视口边缘被切一半的照片照样正常绘制() throws Exception {
+        Theme.install();
+
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            photos.add(TestImages.writeJpeg(tempDir.resolve("half-" + i + ".jpg"), 900, 600));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+
+        // 故意把宽度设成"三格半"：右边那半张正好被切在视口边缘上
+        int cellWidth = Math.round(120 * 1.5f) + 8; // 与 FilmstripPanel 内部算法一致
+        int width = cellWidth * 3 + cellWidth / 2;
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(width, 190);
+            filmstrip.setPhotos(photos, 120);
+            layoutTree(filmstrip);
+        });
+
+        waitUntilLoaded(filmstrip, photos.size());
+
+        BufferedImage rendered = render(filmstrip);
+        Path output = Path.of("target", "ui-filmstrip-partial.png");
+        Files.createDirectories(output.getParent());
+        ImageIO.write(rendered, "png", output.toFile());
+
+        // 被切的那半张：视口最右边这一条里应当有照片的颜色，而不是一片背景
+        BufferedImage cutEdge = rendered.getSubimage(width - 40, 12, 38, 116);
+        assertTrue(countColors(cutEdge) > 3,
+                "半露的那张也应当完整画出来、只是被裁掉一截，而不是画一半或干脆不画");
+        loader.shutdown();
+    }
+
+    private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (filmstrip.loadedCount() < expected && System.currentTimeMillis() < deadline) {
+            Thread.sleep(30);
+        }
+        assertEquals(expected, filmstrip.loadedCount(), "缩略图应当全部到位");
+    }
+
     private static BufferedImage render(FilmstripPanel filmstrip) {
         BufferedImage image = new BufferedImage(filmstrip.getWidth(), filmstrip.getHeight(),
                 BufferedImage.TYPE_INT_RGB);
