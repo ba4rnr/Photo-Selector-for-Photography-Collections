@@ -463,10 +463,29 @@ class DragAndCloseTest {
         }
 
         void dispose() throws Exception {
+            // 先把后台取图等干净：解码线程可能还攥着临时目录里的文件，
+            // 直接 dispose 的话 JUnit 删临时目录会失败（Windows 上文件被占着）
+            awaitLoaders();
             SwingUtilities.invokeAndWait(() -> {
                 frame.setVisible(false);
                 frame.dispose();
             });
+        }
+
+        /** 等素材条和目标面板背后那两个取图线程池把手上的活儿干完。 */
+        private void awaitLoaders() throws Exception {
+            long deadline = System.currentTimeMillis() + 20_000;
+            while (System.currentTimeMillis() < deadline) {
+                java.util.concurrent.atomic.AtomicInteger flying =
+                        new java.util.concurrent.atomic.AtomicInteger();
+                SwingUtilities.invokeAndWait(() -> flying.set(
+                        panel.filmstripForTest().inFlightForTest()
+                                + panel.targetPanelForTest().inFlightForTest()));
+                if (flying.get() == 0) {
+                    return;   // 都干完了
+                }
+                Thread.sleep(30);
+            }
         }
     }
 

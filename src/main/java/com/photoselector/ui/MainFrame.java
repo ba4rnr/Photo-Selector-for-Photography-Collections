@@ -157,7 +157,9 @@ public final class MainFrame extends JFrame {
 
     /** 应用一个工作区：界面切过去，配置写回文件。 */
     public void showWorkspace(Workspace workspace) {
-        mainPanel.applyWorkspace(workspace); // 扫描在后台进行，结果通过回调通知
+        // 走 switchWorkspace：有没保存的改动就复用关窗口那套「保存 / 不保存 / 取消」，
+        // 等保存真跑完再切（扫描在后台进行，结果通过回调通知）
+        mainPanel.switchWorkspace(workspace);
     }
 
     /** 用户改了默认放大倍率：记下来，下次打开还是它。 */

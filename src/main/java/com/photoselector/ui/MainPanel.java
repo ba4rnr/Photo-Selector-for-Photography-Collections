@@ -149,8 +149,13 @@ public final class MainPanel extends JPanel {
      */
     private boolean saving;
 
-    /** 这一轮关闭流程里，保存是不是跑完了。下一次 saveFinished 就是收尾信号。 */
-    private boolean saveFinishedDuringClose;
+    /**
+     * 保存跑完之后要接着做的事（退出程序、切到新工作区）；没有就是 null。
+     *
+     * <p>为什么要有它：保存是后台活儿，"选保存 → 保存完再执行"这件事必须挂在
+     * 保存完成的回调上。关窗口和换工作区共用这一条路。
+     */
+    private Runnable afterSave;
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -575,14 +580,15 @@ public final class MainPanel extends JPanel {
         this.onSaveFinished = listener == null ? result -> { } : listener;
     }
 
-    /** 保存结束时的内部收尾：如果这次保存是关闭流程的一部分，就接着把程序关掉。 */
+    /** 保存结束时的内部收尾：如果之前排了"保存完要接着做的事"，就接着做。 */
     private void handleSaveFinished(Saver.Result result) {
-        // 先交给外部：它可能会弹个"哪几张没成"的报告。关窗口走的那次不弹，
-        // 由外部自己看 saveFinishedDuringClose 决定（见 MainFrame.saveFinished）。
+        // 先交给外部：它可能会弹个"哪几张没成"的报告。
+        // 关窗口 / 换工作区走的那次不弹——由外部看 isClosingAfterSave() 决定（见 MainFrame）。
         onSaveFinished.accept(result);
-        if (saveFinishedDuringClose) {
-            saveFinishedDuringClose = false;
-            onExit.run();
+        Runnable next = afterSave;
+        afterSave = null;
+        if (next != null) {
+            next.run();
         }
     }
 
@@ -619,14 +625,9 @@ public final class MainPanel extends JPanel {
         return session != null && session.isDirty();
     }
 
-    /**
-     * 眼下这次保存是不是"关窗口"流程的一部分。
-     *
-     * <p>给外部用的：关窗口的那次保存结束后程序马上就走，这时候再弹"保存完了"的对话框，
-     * 用户只会看到它闪一下——不如干脆别弹。
-     */
+    /** 眼下这次保存是不是"保存完就退出 / 换工作区"的一部分。 */
     public boolean isClosingAfterSave() {
-        return saveFinishedDuringClose;
+        return afterSave != null;
     }
 
     /**
@@ -634,38 +635,73 @@ public final class MainPanel extends JPanel {
      *
      * <p>放在 {@code MainPanel} 而不是主窗口里，是因为它要摸的是"有没有改动""保存完成没"
      * 这些界面自己的状态；主窗口只负责把"要走了"这件事接过去。
-     *
-     * <p>三步：没改动就直接走；有改动先问一句；选了保存就等保存真跑完再走。
-     * 保存是后台活儿，所以"退出"必须挂在保存完成的回调上，而不是问完就走——
-     * 那样等于在保存还没写完磁盘时把程序撤了。
      */
     public void requestClose() {
         if (closing) {
             return; // 已经在走关闭流程了，别问第二遍
         }
+        // 关窗口这条路的收尾就是"退出"，和换工作区共用同一套
+        //「有改动先问 → 选保存就等保存 → 再执行」的逻辑
+        confirmChangesOrAbort(this::exitAfterSave);
+    }
+
+    /**
+     * 换工作区（或换目标文件夹）之前先处理掉没保存的改动。
+     *
+     * <p>用户的决定：这里复用关窗口那套「保存 / 不保存 / 取消」——
+     * 选保存要等保存真的跑完再切（和关窗口一样，不能问完就跑）；
+     * 选不保存就直接切，磁盘保持原样；把对话框关掉算取消，什么都不做。
+     */
+    public void switchWorkspace(Workspace newWorkspace) {
         if (!isDirty()) {
-            onExit.run();
+            applyWorkspace(newWorkspace);
             return;
         }
+        confirmChangesOrAbort(() -> applyWorkspace(newWorkspace));
+    }
 
+    /**
+     * 「有没保存的改动」的通用收尾：没改动就直接做；有改动先问一句；
+     * 选保存就等保存真跑完再做。
+     *
+     * <p>关窗口、换工作区都走这条——用户明确要求复用这一套，
+     * 免得两处行为悄悄长歪（一处等保存、一处不等）。
+     *
+     * @param action 该做的事情：退出程序，或者切到新工作区
+     */
+    private void confirmChangesOrAbort(Runnable action) {
+        if (!isDirty()) {
+            action.run();
+            return;
+        }
         int choice = confirmSaveOnClose.apply(this);
         if (choice == JOptionPane.CLOSED_OPTION) {
-            return; // 把对话框直接关掉：当作"取消"，程序留着
+            return; // 把对话框直接关掉：当作"取消"，什么都不做
         }
         if (choice == JOptionPane.NO_OPTION) {
             // 不保存：中间商连同垃圾桶一起消失，磁盘上什么都没变（见《软件设计》第 7 节）
-            onExit.run();
+            action.run();
             return;
         }
 
-        closing = true;
-        saveFinishedDuringClose = true;
+        Runnable previous = afterSave;
+        afterSave = () -> {
+            // 万一以后真有两条路同时走到这儿，先来后到都执行，别丢事
+            if (previous != null) {
+                previous.run();
+            }
+            action.run();
+        };
         if (!save()) {
-            // 连快照都没拍成（回调刚刚已经说清原因了）：把状态退回原样，
-            // 否则窗口会卡在"点了保存、等一个永远不来的回调"上
-            closing = false;
-            saveFinishedDuringClose = false;
+            // 连快照都没拍成（回调刚刚已经说清原因了）：把待办退回原样，
+            // 否则状态会卡在"点了保存、等一个永远不来的回调"上
+            afterSave = previous;
         }
+    }
+
+    /** 关窗口那条路的收尾：真的退出。 */
+    private void exitAfterSave() {
+        onExit.run();
     }
 
     /** 关闭流程走完后真正退出的动作（主窗口拿去收线程池、关窗口）。 */

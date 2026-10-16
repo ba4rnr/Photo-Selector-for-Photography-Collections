@@ -106,12 +106,78 @@ class CloseOnExitTest {
         panel.main.shutdown();
     }
 
+    @Test
+    void 换工作区时_有没保存的改动也问同一套话() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(true);
+        Path newSource = Files.createDirectories(tempDir.resolve("素材2"));
+        Files.createDirectories(newSource.resolve("001_拍摄"));
+        Path newTarget = Files.createDirectories(tempDir.resolve("成片2"));
+
+        AtomicInteger asked = new AtomicInteger();
+        panel.main.setConfirmSaveOnClose(owner -> {
+            asked.incrementAndGet();
+            return JOptionPane.CLOSED_OPTION; // 把对话框关掉 = 取消
+        });
+
+        SwingUtilities.invokeAndWait(() ->
+                panel.main.switchWorkspace(new Workspace(newSource, Set.of(), newTarget)));
+
+        assertEquals(1, asked.get(), "有没保存的改动，换工作区也该先问一句");
+        assertEquals(panel.target, panel.main.targetPanelForTest().session().targetFolder(),
+                "取消之后还留在原来的目标文件夹，什么都没变");
+        assertFalse(Files.isRegularFile(panel.target.resolve("010.jpg")), "没有写盘");
+        panel.main.shutdown();
+    }
+
+    @Test
+    void 换工作区时选不保存_直接切走() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(true);
+        Path newSource = Files.createDirectories(tempDir.resolve("素材2"));
+        Files.createDirectories(newSource.resolve("001_拍摄"));
+        Path newTarget = Files.createDirectories(tempDir.resolve("成片2"));
+
+        panel.main.setConfirmSaveOnClose(owner -> JOptionPane.NO_OPTION);
+        SwingUtilities.invokeAndWait(() ->
+                panel.main.switchWorkspace(new Workspace(newSource, Set.of(), newTarget)));
+
+        waitUntil(() -> panel.main.targetPanelForTest().session() != null
+                        && panel.main.targetPanelForTest().session().targetFolder().equals(newTarget),
+                "切到新工作区的目标文件夹");
+        assertFalse(Files.isRegularFile(panel.target.resolve("010.jpg")),
+                "选不保存，旧的目标文件夹不该被写");
+        panel.main.shutdown();
+    }
+
+    @Test
+    void 换工作区时选保存_先保存到旧文件夹再切走() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(true);
+        Path newSource = Files.createDirectories(tempDir.resolve("素材2"));
+        Files.createDirectories(newSource.resolve("001_拍摄"));
+        Path newTarget = Files.createDirectories(tempDir.resolve("成片2"));
+
+        panel.main.setConfirmSaveOnClose(owner -> JOptionPane.YES_OPTION);
+        SwingUtilities.invokeAndWait(() ->
+                panel.main.switchWorkspace(new Workspace(newSource, Set.of(), newTarget)));
+
+        // 保存是后台活儿：先等它写盘，再等切换完成
+        waitUntil(() -> Files.isRegularFile(panel.target.resolve("010.jpg")),
+                "保存把照片复制进旧的目标文件夹");
+        waitUntil(() -> panel.main.targetPanelForTest().session() != null
+                        && panel.main.targetPanelForTest().session().targetFolder().equals(newTarget),
+                "保存完之后才切到新工作区");
+        panel.main.shutdown();
+    }
+
     /** 一个装好素材和目标文件夹的界面，外加"要挑进去的那张照片"。 */
     private final class Panel {
 
         final MainPanel main;
         final Path target;
         final Path photoToAdd;
+        final Path source = tempDir.resolve("素材");
 
         /**
          * @param addPhoto 是否先挑一张进去，造出"没保存的改动"

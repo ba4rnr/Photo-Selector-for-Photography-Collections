@@ -253,6 +253,11 @@ final class FilmstripPanel extends JPanel {
         return loaded.get();
     }
 
+    /** 还在路上的取图请求数。测试用它等后台收工，免得临时目录删不掉。 */
+    int inFlightForTest() {
+        return loader.inFlightCount();
+    }
+
     boolean isCollapsed(Path folder) {
         return collapsed.contains(folder);
     }

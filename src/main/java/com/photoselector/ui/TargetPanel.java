@@ -309,6 +309,11 @@ final class TargetPanel extends JPanel {
         return thumbnails.size();
     }
 
+    /** 还在路上的取图请求数。测试用它等后台收工。 */
+    int inFlightForTest() {
+        return loader.inFlightCount();
+    }
+
     /** 某一张的缩略图在不在手里。测试用。 */
     boolean isLoaded(Path photo) {
         return thumbnails.containsKey(photo);
