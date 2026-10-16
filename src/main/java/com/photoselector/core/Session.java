@@ -99,10 +99,14 @@ public final class Session {
      */
     public boolean add(Path source) {
         Objects.requireNonNull(source, "source 不能为空");
-        if (contains(source)) {
+        // 先按同一套规则规范化，再去重。
+        // 条目里存的永远是规范化后的路径，这里不跟着规范化的话，
+        // "photos/a.jpg" 和绝对路径会被当成两张不同的照片。
+        Path normalized = source.toAbsolutePath().normalize();
+        if (contains(normalized)) {
             return false;
         }
-        TargetEntry entry = new TargetEntry(source, Origin.PENDING);
+        TargetEntry entry = new TargetEntry(normalized, Origin.PENDING);
         sequence.add(entry);
         // 反向动作：把刚加入的这条拿掉。
         // 唯一性约束保证此刻序列里恰好只有这一条来自该 source。
@@ -119,7 +123,10 @@ public final class Session {
      */
     public void move(int from, int to) {
         checkIndex(from);
-        int target = Math.min(to, sequence.size() - 1);
+        // 目标位置先夹到合法范围，再动序列。
+        // 校验必须发生在任何改动之前——否则一旦中途抛异常，
+        // 条目已经离开序列，模型就处于"改了一半"的状态。
+        int target = Math.max(0, Math.min(to, sequence.size() - 1));
         if (from == target) {
             return; // 原地没动，不产生无意义的历史
         }

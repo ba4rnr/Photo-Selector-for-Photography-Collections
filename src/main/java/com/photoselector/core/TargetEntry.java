@@ -21,6 +21,11 @@ public record TargetEntry(Path source, Origin origin) {
     public TargetEntry {
         Objects.requireNonNull(source, "source 不能为空");
         Objects.requireNonNull(origin, "origin 不能为空");
+        // 统一成"绝对的、去过 . 和 .."的路径。
+        // 不这么做的话，同一张照片写成 "photos/a.jpg"、"photos/./a.jpg"、
+        // 或绝对路径，会被当成三张不同的照片，去重就失效了。
+        // （Windows 的大小写和斜杠差异由 Path 自己处理，不用我们操心。）
+        source = source.toAbsolutePath().normalize();
     }
 
     /** 文件名（不含目录），界面显示用。 */

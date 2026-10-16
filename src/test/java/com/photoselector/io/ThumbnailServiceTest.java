@@ -70,6 +70,65 @@ class ThumbnailServiceTest {
     }
 
     @Test
+    void 文件不在了就给一张占位图() {
+        ThumbnailService service = new ThumbnailService(tempDir.resolve("cache"));
+
+        BufferedImage image = service.thumbnail(tempDir.resolve("早就被删了.jpg"), 100);
+
+        assertEquals(100, image.getHeight(), "取不到图不该抛异常，而是一张占位图");
+        assertEquals(150, image.getWidth());
+    }
+
+    @Test
+    void 文件损坏时也给占位图() throws Exception {
+        Path broken = tempDir.resolve("broken.jpg");
+        Files.write(broken, new byte[] {1, 2, 3, 4, 5});
+        ThumbnailService service = new ThumbnailService(tempDir.resolve("cache"));
+
+        BufferedImage image = service.thumbnail(broken, 100);
+
+        assertEquals(100, image.getHeight(), "坏文件不该让整批取图一起崩掉");
+    }
+
+    @Test
+    void 内存缓存按字节数淘汰最久没用的() throws Exception {
+        Path cacheDir = tempDir.resolve("cache");
+        // 每张 300×200 的缩略图约 24 万字节，把预算设成只放得下一张
+        ThumbnailService service = new ThumbnailService(cacheDir, 300_000, 64L * 1024 * 1024, 200);
+
+        for (int i = 0; i < 3; i++) {
+            Path photo = TestImages.writeJpeg(tempDir.resolve("p" + i + ".jpg"), 900, 600);
+            service.thumbnail(photo, 200);
+        }
+
+        assertEquals(1, service.cachedCount(), "预算只够一张，多余的应当被淘汰");
+        assertTrue(service.cachedBytes() <= 300_000, "占用的字节数不该超出预算");
+    }
+
+    @Test
+    void 磁盘缓存超过上限时会删掉最旧的() throws Exception {
+        Path cacheDir = tempDir.resolve("cache");
+        Path first = TestImages.writeJpeg(tempDir.resolve("first.jpg"), 800, 600);
+
+        // 先量出一张缓存文件有多大，再把上限设成"刚好放得下一张再多一点"
+        ThumbnailService probe = new ThumbnailService(cacheDir);
+        probe.thumbnail(first, 100);
+        long oneFileBytes = Files.size(probe.cacheFileFor(first, 100));
+
+        ThumbnailService service = new ThumbnailService(cacheDir, 64L * 1024 * 1024, oneFileBytes + 200, 1);
+
+        service.thumbnail(first, 100);
+        service.thumbnail(TestImages.writeJpeg(tempDir.resolve("second.jpg"), 800, 600), 100);
+        service.thumbnail(TestImages.writeJpeg(tempDir.resolve("third.jpg"), 800, 600), 100);
+
+        long remaining;
+        try (Stream<Path> entries = Files.list(cacheDir)) {
+            remaining = entries.filter(Files::isRegularFile).count();
+        }
+        assertEquals(1, remaining, "超上限时应当只留下最新的那一张");
+    }
+
+    @Test
     void 真实照片的联系表() throws Exception {
         String configured = System.getProperty("photoselector.samples");
         assumeTrue(configured != null && Files.isDirectory(Path.of(configured)),

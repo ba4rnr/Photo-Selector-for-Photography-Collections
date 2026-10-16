@@ -123,4 +123,45 @@ class SessionTest {
         assertThrows(IndexOutOfBoundsException.class, () -> session.move(5, 0));
         assertThrows(IndexOutOfBoundsException.class, () -> session.trash(5));
     }
+
+    @Test
+    void 目标位置越界时会被夹住而不是把序列改坏() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.add(PHOTO_C);
+
+        session.move(0, -5); // 夹到 0，等于原地不动
+        assertEquals(List.of("L1000001.JPG", "L1000002.JPG", "L1000003.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+
+        session.move(0, 99); // 夹到末尾
+        assertEquals(List.of("L1000002.JPG", "L1000003.JPG", "L1000001.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+    }
+
+    @Test
+    void 越界失败之后序列必须原封不动() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+
+        // 起点的校验必须发生在任何改动之前，否则条目已经离开序列，模型就废了
+        assertThrows(IndexOutOfBoundsException.class, () -> session.move(9, 0));
+        assertEquals(2, session.size());
+        assertEquals(List.of("L1000001.JPG", "L1000002.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+    }
+
+    @Test
+    void 同一张照片的不同路径写法算同一张() {
+        Session session = newSession();
+
+        assertTrue(session.add(PHOTO_A));
+        assertFalse(session.add(Path.of("photos", ".", "L1000001.JPG")),
+                "带 ./ 的写法不该绕过重复检查");
+        assertFalse(session.add(PHOTO_A.toAbsolutePath()),
+                "绝对路径也不该绕过重复检查");
+        assertEquals(1, session.size());
+    }
 }
