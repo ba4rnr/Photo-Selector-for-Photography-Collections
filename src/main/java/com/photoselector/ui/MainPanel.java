@@ -5,13 +5,12 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
-import java.util.stream.Stream;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -21,6 +20,7 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.ThumbnailService;
+import com.photoselector.core.PhotoGroup;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -34,11 +34,11 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial") // 界面组件不参与序列化
 public final class MainPanel extends JPanel {
 
-    /** 底栏（照片条）的默认高度。 */
-    private static final int BOTTOM_HEIGHT = 170;
-
     /** 素材条里缩略图的高度。 */
     private static final int FILMSTRIP_THUMBNAIL_HEIGHT = 120;
+
+    /** 底栏（照片条）的默认高度：按组头、缩略图、文件名加滚动条算出来。 */
+    private static final int BOTTOM_HEIGHT = FilmstripPanel.preferredHeight(FILMSTRIP_THUMBNAIL_HEIGHT);
 
     private final ToolBarPanel toolBar = new ToolBarPanel();
 
@@ -60,6 +60,9 @@ public final class MainPanel extends JPanel {
 
     /** 某个文件夹被打开时通知外部（参数是文件夹和张数，张数为 -1 表示读失败）。 */
     private BiConsumer<Path, Integer> onFolderOpened = (folder, count) -> { };
+
+    /** 扫描出来的全部组；剔除哪些由目录树的勾选状态决定。 */
+    private List<PhotoGroup> scannedGroups = List.of();
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -97,8 +100,9 @@ public final class MainPanel extends JPanel {
         outerSplit = Splitters.vertical(mainSplit, bottomArea, 1.0);
 
         toolBar.modeButton().addActionListener(e -> toggleMode());
-        // 目录树里点一个文件夹，底部素材条就加载它
-        sourceTree.setOnFolderChosen(this::showFolder);
+        // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组
+        sourceTree.setOnFolderChosen(filmstrip::scrollToGroup);
+        sourceTree.setOnInclusionChanged(this::applyGroups);
 
         add(toolBar, BorderLayout.NORTH);
         add(outerSplit, BorderLayout.CENTER);
@@ -157,51 +161,39 @@ public final class MainPanel extends JPanel {
      * @return 这个文件夹里有多少张能读的照片
      */
     /**
-     * 打开一个素材文件夹：<b>扫描放到后台</b>，扫完回到界面线程换掉素材条。
+     * 选一个根文件夹：左栏目录树立刻换成它，整个档案夹在<b>后台</b>扫成若干组交给素材条。
      *
-     * <p>列目录是文件系统操作，一个几千张的文件夹在界面线程上扫会卡住几百毫秒，
-     * 所以这里立刻返回，结果通过 {@link #setOnFolderOpened} 通知。
-     */
-    public void showFolder(Path folder) {
-        scanPool.submit(() -> {
-            List<Path> photos = List.of();
-            boolean success = true;
-            try {
-                photos = PhotoFiles.imagesIn(folder);
-            } catch (IOException e) {
-                success = false;
-            }
-
-            List<Path> found = photos;
-            boolean ok = success;
-            SwingUtilities.invokeLater(() -> {
-                if (ok) {
-                    filmstrip.setPhotos(found, FILMSTRIP_THUMBNAIL_HEIGHT);
-                    onFolderOpened.accept(folder, found.size());
-                } else {
-                    onFolderOpened.accept(folder, -1);
-                }
-            });
-        });
-    }
-
-    /**
-     * 选一个根文件夹：左栏目录树立刻换成它，然后在后台找出第一个有照片的子文件夹打开。
-     *
-     * <p>打开一个拍摄档案夹之后直接看到东西，比看到一片空白强得多。
+     * <p>列目录是文件系统操作，一个档案夹可能有几十个子目录、上千张照片，
+     * 在界面线程上扫会卡住；所以这里立刻返回，结果通过 {@link #setOnFolderOpened} 通知。
      */
     public void setRootFolder(Path folder) {
         sourceTree.setRoot(folder);
         scanPool.submit(() -> {
-            Path first = firstFolderWithPhotos(folder);
+            List<PhotoGroup> groups;
+            try {
+                groups = PhotoFiles.groupsIn(folder);
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> onFolderOpened.accept(folder, -1));
+                return;
+            }
+
             SwingUtilities.invokeLater(() -> {
-                if (first == null) {
-                    onFolderOpened.accept(folder, 0);
-                } else {
-                    showFolder(first);
-                }
+                scannedGroups = groups;
+                applyGroups();
+                onFolderOpened.accept(folder, filmstrip.photoCount());
             });
         });
+    }
+
+    /** 按目录树的勾选状态筛一遍：被剔除的组不进素材条。 */
+    private void applyGroups() {
+        List<PhotoGroup> included = new ArrayList<>();
+        for (PhotoGroup group : scannedGroups) {
+            if (sourceTree.isIncluded(group.folder())) {
+                included.add(group);
+            }
+        }
+        filmstrip.setGroups(included, FILMSTRIP_THUMBNAIL_HEIGHT);
     }
 
     /** 设置"某个文件夹被打开"的回调。 */
@@ -209,28 +201,20 @@ public final class MainPanel extends JPanel {
         this.onFolderOpened = listener == null ? (folder, count) -> { } : listener;
     }
 
-    /** 在根目录的直接子文件夹里找第一个装着照片的；根目录自己散落着照片就用它。 */
-    private static Path firstFolderWithPhotos(Path root) {
-        try {
-            if (!PhotoFiles.imagesIn(root).isEmpty()) {
-                return root;
-            }
-            try (Stream<Path> children = Files.list(root)) {
-                for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-                    if (!PhotoFiles.imagesIn(child).isEmpty()) {
-                        return child;
-                    }
-                }
-            }
-        } catch (IOException e) {
-            return null;
-        }
-        return null;
-    }
 
     /** 素材条上已经拿到缩略图的张数。给测试和排查用。 */
     int loadedThumbnails() {
         return filmstrip.loadedCount();
+    }
+
+    /** 素材条上现在有几组。给测试和排查用。 */
+    int filmstripGroupCount() {
+        return filmstrip.groupCount();
+    }
+
+    /** 目录树，给测试用。 */
+    SourceTreePanel sourceTreeForTest() {
+        return sourceTree;
     }
 
     /** 关窗口时收掉后台取图的线程池。 */

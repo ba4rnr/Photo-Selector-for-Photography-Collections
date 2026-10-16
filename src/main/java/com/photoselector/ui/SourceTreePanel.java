@@ -77,6 +77,9 @@ final class SourceTreePanel extends JPanel {
 
     private Consumer<Path> onFolderChosen = folder -> { };
 
+    /** 勾选状态变了（有文件夹被纳入或剔除）时通知外部。 */
+    private Runnable onInclusionChanged = () -> { };
+
     SourceTreePanel() {
         super(new BorderLayout());
         setBackground(Theme.PANEL);
@@ -137,6 +140,11 @@ final class SourceTreePanel extends JPanel {
         this.onFolderChosen = listener == null ? folder -> { } : listener;
     }
 
+    /** 勾选状态变化时通知外部。 */
+    void setOnInclusionChanged(Runnable listener) {
+        this.onInclusionChanged = listener == null ? () -> { } : listener;
+    }
+
     /** 这个文件夹是否纳入范围（勾上的就是纳入）。 */
     boolean isIncluded(Path folder) {
         return !excluded.contains(folder);
@@ -193,6 +201,7 @@ final class SourceTreePanel extends JPanel {
             excluded.add(folder);
         }
         tree.repaint();
+        onInclusionChanged.run();
     }
 
     /** 第一次展开时，把占位节点换成真正的子项。 */

@@ -3,8 +3,11 @@ package com.photoselector.io;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+
+import com.photoselector.core.PhotoGroup;
 
 /** 文件夹扫描：找出一个目录里我们能读的照片。 */
 public final class PhotoFiles {
@@ -28,5 +31,33 @@ public final class PhotoFiles {
                     .sorted()
                     .toList();
         }
+    }
+
+    /**
+     * 把一个根文件夹扫成若干组。
+     *
+     * <p>分组单位是根目录下的<b>直接子文件夹</b>：每个子文件夹一组，
+     * 根目录自己散落的照片另算一组（名字取根目录名）。空文件夹不成组。
+     *
+     * <p>不往下递归是有意的——`000_成片C` 下面还有一层按日期的文件夹，
+     * 那种结构应该把 `000_成片C` 自己选成根，而不是指望扫描器替你想。
+     */
+    public static List<PhotoGroup> groupsIn(Path root) throws IOException {
+        List<PhotoGroup> groups = new ArrayList<>();
+
+        List<Path> loose = imagesIn(root);
+        if (!loose.isEmpty()) {
+            groups.add(new PhotoGroup(root.getFileName().toString(), root, loose));
+        }
+
+        try (Stream<Path> children = Files.list(root)) {
+            for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
+                List<Path> photos = imagesIn(child);
+                if (!photos.isEmpty()) {
+                    groups.add(new PhotoGroup(child.getFileName().toString(), child, photos));
+                }
+            }
+        }
+        return groups;
     }
 }

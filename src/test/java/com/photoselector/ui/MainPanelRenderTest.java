@@ -17,6 +17,7 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashSet;
 import java.util.Set;
@@ -32,6 +33,7 @@ import javax.swing.plaf.basic.BasicSplitPaneUI;
 import org.junit.jupiter.api.Test;
 
 import com.photoselector.ui.theme.Theme;
+import com.photoselector.testing.TestImages;
 
 /**
  * 窗口骨架的冒烟测试：组件能搭起来、能画出一张像样的图。
@@ -139,6 +141,32 @@ class MainPanelRenderTest {
         paintScreen(screen, g);
         g.dispose();
         ImageIO.write(image, "png", Path.of("target", "ui-workspace.png").toFile());
+        mainPanel.shutdown();
+    }
+
+    @Test
+    void 剔除一组之后素材条里就没有它了() throws Exception {
+        Theme.install();
+
+        Path root = Files.createDirectories(tempDir.resolve("档案夹"));
+        for (String name : List.of("001_第一组", "002_第二组")) {
+            Path folder = Files.createDirectories(root.resolve(name));
+            TestImages.writeJpeg(folder.resolve("photo.jpg"), 300, 200);
+        }
+
+        MainPanel mainPanel = newMainPanel();
+        SwingUtilities.invokeAndWait(() -> mainPanel.setRootFolder(root));
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (mainPanel.filmstripGroupCount() < 2 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(30);
+        }
+        assertEquals(2, mainPanel.filmstripGroupCount(), "两个子文件夹应当分成两组");
+
+        // 把第一组从范围里剔除——这就是设计里说的"剔除文件夹"
+        Path first = root.resolve("001_第一组");
+        SwingUtilities.invokeAndWait(() -> mainPanel.sourceTreeForTest().toggleIncluded(first));
+        assertEquals(1, mainPanel.filmstripGroupCount(), "剔除之后素材条里不该再有它");
         mainPanel.shutdown();
     }
 

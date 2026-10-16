@@ -1,6 +1,7 @@
 package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -8,6 +9,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
 import java.awt.event.ComponentEvent;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.io.PhotoFiles;
+import com.photoselector.core.PhotoGroup;
 import com.photoselector.testing.TestImages;
 import com.photoselector.ui.theme.Theme;
 
@@ -38,6 +41,11 @@ class FilmstripPanelTest {
 
     @TempDir
     Path tempDir;
+
+    /** 把一堆照片当成一个组交给素材条。 */
+    private static List<PhotoGroup> oneGroup(String name, List<Path> photos) {
+        return List.of(new PhotoGroup(name, photos.get(0).getParent(), photos));
+    }
 
     @Test
     void 打开文件夹后缩略图会陆续到位并画出来() throws Exception {
@@ -53,7 +61,7 @@ class FilmstripPanelTest {
 
         SwingUtilities.invokeAndWait(() -> {
             filmstrip.setSize(1000, 190);
-            filmstrip.setPhotos(photos, 120);
+            filmstrip.setGroups(oneGroup("照片", photos), 120);
             layoutTree(filmstrip);
         });
 
@@ -108,7 +116,7 @@ class FilmstripPanelTest {
 
         SwingUtilities.invokeAndWait(() -> {
             filmstrip.setSize(width * photos.size(), 190);
-            filmstrip.setPhotos(photos, height);
+            filmstrip.setGroups(oneGroup("照片", photos), height);
             layoutTree(filmstrip);
         });
 
@@ -141,7 +149,7 @@ class FilmstripPanelTest {
         int width = cellWidth * 3 + cellWidth / 2;
         SwingUtilities.invokeAndWait(() -> {
             filmstrip.setSize(width, 190);
-            filmstrip.setPhotos(photos, 120);
+            filmstrip.setGroups(oneGroup("照片", photos), 120);
             layoutTree(filmstrip);
         });
 
@@ -175,7 +183,7 @@ class FilmstripPanelTest {
 
         SwingUtilities.invokeAndWait(() -> {
             scroll.setSize(400, 190);
-            filmstrip.setPhotos(photos, 120);
+            filmstrip.setGroups(oneGroup("照片", photos), 120);
             layoutTree(scroll);
         });
         int before = waitUntilStable(filmstrip, 2);
@@ -210,6 +218,52 @@ class FilmstripPanelTest {
             Thread.sleep(50);
         }
         return filmstrip.loadedCount();
+    }
+
+    @Test
+    void 按子文件夹分组_点组头可以收起() throws Exception {
+        Theme.install();
+
+        Path folderA = Files.createDirectories(tempDir.resolve("001_第一组"));
+        Path folderB = Files.createDirectories(tempDir.resolve("002_第二组"));
+        List<Path> photosA = new ArrayList<>();
+        List<Path> photosB = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            photosA.add(TestImages.writeJpeg(folderA.resolve("a" + i + ".jpg"), 900, 600));
+            photosB.add(TestImages.writeJpeg(folderB.resolve("b" + i + ".jpg"), 900, 600));
+        }
+
+        // 这条测试不等缩略图加载完就结束，后台可能还在写缓存文件。
+        // 缓存放到 target 下，免得拖累临时目录的清理。
+        ThumbnailLoader loader = new ThumbnailLoader(
+                new ThumbnailService(Path.of("target", "test-cache-collapse")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(1200, 200);
+            filmstrip.setGroups(List.of(
+                    new PhotoGroup("001_第一组", folderA, photosA),
+                    new PhotoGroup("002_第二组", folderB, photosB)), 120);
+            layoutTree(filmstrip);
+        });
+
+        assertEquals(2, filmstrip.groupCount());
+        assertEquals(8, filmstrip.photoCount());
+        int expandedWidth = filmstrip.getPreferredSize().width;
+
+        // 点第一组的组头（组头在顶部那一条里）
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                40, 8, 1, false, MouseEvent.BUTTON1)));
+        assertTrue(filmstrip.isCollapsed(folderA), "点组头应当把这一组收起来");
+        assertTrue(filmstrip.getPreferredSize().width < expandedWidth, "收起之后整条应当变窄");
+
+        // 再点一次展开
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                40, 8, 1, false, MouseEvent.BUTTON1)));
+        assertFalse(filmstrip.isCollapsed(folderA));
+        assertEquals(expandedWidth, filmstrip.getPreferredSize().width);
+        loader.shutdown();
     }
 
     private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {
