@@ -6,11 +6,13 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -52,6 +54,13 @@ final class FilmstripPanel extends JPanel {
 
     /** 组头占的高度：箭头 + 文件夹名 + 张数。 */
     private static final int HEADER_HEIGHT = 24;
+
+    /** 组内四周的留白：外圈画了边框之后，照片不贴着框线。 */
+    private static final int PAD = 6;
+
+    /** 收起时那张"文件夹缩略图"的尺寸：照片按"盖满"的方式取中间一块。 */
+    private static final int COLLAPSED_PREVIEW_WIDTH = 132;
+    private static final int COLLAPSED_PREVIEW_HEIGHT = 92;
 
     /** 可见范围之外再多要几屏，滚动时不至于出现大片空白。 */
     private static final int KEEP_SCREENS = 3;
@@ -150,6 +159,15 @@ final class FilmstripPanel extends JPanel {
         return collapsed.contains(folder);
     }
 
+    /** 只留给测试用：每一组当前占的矩形（外圈边框的范围）。 */
+    List<Rectangle> groupBoundsForTest() {
+        List<Rectangle> bounds = new ArrayList<>();
+        for (GroupBox box : computeLayout()) {
+            bounds.add(new Rectangle(box.x(), 1, box.width(), contentBottom(box.collapsed()) - 1));
+        }
+        return bounds;
+    }
+
     /**
      * 把素材条装进一个配好滚动条的滚动面板。
      *
@@ -198,10 +216,21 @@ final class FilmstripPanel extends JPanel {
 
         Set<Path> keep = new HashSet<>();
         for (GroupBox box : computeLayout()) {
-            if (box.collapsed() || box.right() < windowStart || box.x() > windowEnd) {
+            if (box.right() < windowStart || box.x() > windowEnd) {
                 continue;
             }
             List<Path> photos = groups.get(box.index()).photos();
+            if (box.collapsed()) {
+                // 收起的那一组也要图：缩略图卡上要显示第一张照片
+                if (!photos.isEmpty()) {
+                    Path first = photos.get(0);
+                    keep.add(first);
+                    if (!thumbnails.containsKey(first)) {
+                        loader.load(first, thumbnailHeight, image -> onThumbnail(first, image));
+                    }
+                }
+                continue;
+            }
             int first = Math.max(0, (windowStart - box.x()) / cellWidth);
             int last = Math.min(photos.size() - 1, (windowEnd - box.x()) / cellWidth);
             for (int i = first; i <= last; i++) {
@@ -260,18 +289,24 @@ final class FilmstripPanel extends JPanel {
             PhotoGroup group = groups.get(i);
             boolean isCollapsed = collapsed.contains(group.folder());
             int width = isCollapsed
-                    ? collapsedWidth(group)
-                    : GAP + group.size() * cellWidth;
+                    ? collapsedWidth()
+                    : PAD * 2 + group.size() * cellWidth - GAP;
             boxes.add(new GroupBox(i, x, width, isCollapsed));
             x += width + GAP;
         }
         return boxes;
     }
 
-    /** 收起时只留一条窄边，宽度刚好放得下组头那行字。 */
-    private int collapsedWidth(PhotoGroup group) {
-        FontMetrics metrics = getFontMetrics(Theme.FONT_SMALL);
-        return 26 + metrics.stringWidth(headerText(group)) + 8;
+    /** 收起时留一张"文件夹缩略图"的宽度。 */
+    private static int collapsedWidth() {
+        return PAD * 2 + COLLAPSED_PREVIEW_WIDTH;
+    }
+
+    /** 一组下端那条边框线的高度：收起的贴着缩略图收口，展开的到文件名下面一点。 */
+    private int contentBottom(boolean collapsed) {
+        return collapsed
+                ? HEADER_HEIGHT + 4 + COLLAPSED_PREVIEW_HEIGHT + PAD
+                : HEADER_HEIGHT + 4 + thumbnailHeight + CAPTION_HEIGHT + PAD;
     }
 
     private static String headerText(PhotoGroup group) {
@@ -289,6 +324,8 @@ final class FilmstripPanel extends JPanel {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                 RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON); // 圆角边框与文件夹缩略图都靠它
 
         Rectangle clip = g2.getClipBounds();
         for (GroupBox box : computeLayout()) {
@@ -302,22 +339,78 @@ final class FilmstripPanel extends JPanel {
     private void paintGroup(Graphics2D g, GroupBox box) {
         PhotoGroup group = groups.get(box.index());
 
-        paintChevron(g, box.x() + 6, 8, !box.collapsed());
+        // 每个文件夹一圈灰色细边框，先把"一组到哪儿为止"交代清楚
+        g.setColor(Theme.GROUP_BORDER);
+        g.drawRoundRect(box.x(), 1, box.width() - 1, contentBottom(box.collapsed()) - 1, 6, 6);
+
+        paintChevron(g, box.x() + PAD + 2, 8, !box.collapsed());
         g.setFont(Theme.FONT_SMALL);
         g.setColor(box.collapsed() ? Theme.TEXT : Theme.TEXT_MUTED);
         FontMetrics metrics = g.getFontMetrics();
-        g.drawString(shorten(headerText(group), metrics, box.width() - 30), box.x() + 22, 16);
+        g.drawString(shorten(headerText(group), metrics, box.width() - PAD * 2 - 24),
+                box.x() + PAD + 18, 16);
 
-        if (!box.collapsed()) {
+        if (box.collapsed()) {
+            paintCollapsedPreview(g, group, box);
+        } else {
             for (int i = 0; i < group.size(); i++) {
-                paintCell(g, group, i, box.x() + i * cellWidth, HEADER_HEIGHT + 4);
+                paintCell(g, group, i, box.x() + PAD + i * cellWidth, HEADER_HEIGHT + 4);
             }
         }
+    }
 
-        // 组与组之间画一条淡淡的分隔线，好看出"组"的边界
-        g.setColor(Theme.BORDER);
-        g.drawLine(box.right(), HEADER_HEIGHT, box.right(),
-                getHeight() - 4);
+    /**
+     * 收起时的样子：一个文件夹形状，里面嵌着第一张照片。
+     *
+     * <p>照片按"盖满"的方式缩放再取中间一部分——就像 Windows 资源管理器里
+     * 那个能预览内容的文件夹大图标，扫一眼就知道这组拍的是什么。
+     */
+    private void paintCollapsedPreview(Graphics2D g, PhotoGroup group, GroupBox box) {
+        int x = box.x() + PAD;
+        int y = HEADER_HEIGHT + 4;
+        int width = COLLAPSED_PREVIEW_WIDTH;
+        int height = COLLAPSED_PREVIEW_HEIGHT;
+        int tabWidth = Math.max(30, width / 3);
+        int tabHeight = 12;
+
+        // 耳朵先画、身体后画还把耳朵的下半截盖掉，接缝就自然消失了
+        RoundRectangle2D tab = new RoundRectangle2D.Double(x, y, tabWidth, tabHeight * 2.0, 6, 6);
+        RoundRectangle2D body = new RoundRectangle2D.Double(x, y + tabHeight, width, height - tabHeight, 6, 6);
+
+        g.setColor(Theme.CANVAS);
+        g.fill(tab);
+        g.setColor(Theme.GROUP_BORDER);
+        g.draw(tab);
+
+        g.setColor(Theme.CANVAS);
+        g.fill(body);
+        g.setColor(Theme.GROUP_BORDER);
+        g.draw(body);
+
+        if (group.photos().isEmpty()) {
+            return;
+        }
+        BufferedImage image = thumbnails.get(group.photos().get(0));
+        if (image == null) {
+            return; // 图还没解出来：先留一个空的文件夹轮廓
+        }
+
+        Shape clip = g.getClip();
+        g.setClip(new RoundRectangle2D.Double(x + 3, y + tabHeight + 3,
+                width - 6, height - tabHeight - 6, 4, 4));
+        paintCover(g, image, x + 3, y + tabHeight + 3, width - 6, height - tabHeight - 6);
+        g.setClip(clip);
+    }
+
+    /** 等比放大到刚好盖满给定方框，多出来的部分裁掉（居中）。 */
+    private static void paintCover(Graphics2D g, BufferedImage image, int x, int y,
+                                   int width, int height) {
+        double scale = Math.max((double) width / image.getWidth(),
+                (double) height / image.getHeight());
+        int drawWidth = Math.max(1, (int) Math.round(image.getWidth() * scale));
+        int drawHeight = Math.max(1, (int) Math.round(image.getHeight() * scale));
+        g.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2,
+                drawWidth, drawHeight, null);
     }
 
     private void paintCell(Graphics2D g, PhotoGroup group, int index, int x, int y) {

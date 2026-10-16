@@ -46,6 +46,9 @@ public final class Theme {
     /** 分隔线，比面板再深一点。 */
     public static final Color BORDER = new Color(0x1A1A1A);
 
+    /** 素材条上每个文件夹外圈的细边框：比分隔线亮，能看出"一组到这儿为止"。 */
+    public static final Color GROUP_BORDER = new Color(0x505050);
+
     /** 指针压到分隔条上时的提示色：一条细白线，等于"这里可以拖"。 */
     public static final Color DIVIDER_HINT = new Color(0xFFFFFF);
 

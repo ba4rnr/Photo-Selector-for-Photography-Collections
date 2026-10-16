@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
@@ -78,6 +79,7 @@ class FilmstripPanelTest {
         ImageIO.write(rendered, "png", output.toFile());
 
         assertTrue(countColors(rendered) > 3, "素材条应当画出照片，而不是一片空白");
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -94,6 +96,7 @@ class FilmstripPanelTest {
 
         BufferedImage rendered = render(filmstrip);
         assertTrue(countColors(rendered) > 1, "空素材条上应当有一行提示文字");
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -129,6 +132,7 @@ class FilmstripPanelTest {
         Path output = Path.of("target", "ui-filmstrip-samples.png");
         ImageIO.write(render(filmstrip), "png", output.toFile());
         System.out.println("素材条截图已写出：" + output.toAbsolutePath());
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -164,6 +168,7 @@ class FilmstripPanelTest {
         BufferedImage cutEdge = rendered.getSubimage(width - 40, 12, 38, 116);
         assertTrue(countColors(cutEdge) > 3,
                 "半露的那张也应当完整画出来、只是被裁掉一截，而不是画一半或干脆不画");
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -202,6 +207,7 @@ class FilmstripPanelTest {
         int after = waitUntilStable(filmstrip, before + 1);
         assertTrue(after > before,
                 "视口变宽之后，新露出来的格子也该去取图（原来 " + before + " 张，现在 " + after + " 张）");
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -218,6 +224,106 @@ class FilmstripPanelTest {
             Thread.sleep(50);
         }
         return filmstrip.loadedCount();
+    }
+
+    /**
+     * 等后台解码全部收工。
+     *
+     * <p>不等的话，测试刚结束、JUnit 就去删临时目录，而某个后台线程可能还捏着
+     * 里面的照片文件在读——Windows 上这会让删目录整个失败。
+     */
+    private static void awaitIdle(ThumbnailLoader loader) throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (loader.inFlightCount() > 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+    }
+
+    @Test
+    void 每组都有一圈灰色细边框() throws Exception {
+        Theme.install();
+
+        Path folderA = Files.createDirectories(tempDir.resolve("001_第一组"));
+        Path folderB = Files.createDirectories(tempDir.resolve("002_第二组"));
+        List<Path> photosA = new ArrayList<>();
+        List<Path> photosB = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            photosA.add(TestImages.writeJpeg(folderA.resolve("a" + i + ".jpg"), 900, 600));
+            photosB.add(TestImages.writeJpeg(folderB.resolve("b" + i + ".jpg"), 900, 600));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(
+                new ThumbnailService(Path.of("target", "test-cache-group-border")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(1200, 200);
+            filmstrip.setGroups(List.of(
+                    new PhotoGroup("001_第一组", folderA, photosA),
+                    new PhotoGroup("002_第二组", folderB, photosB)), 120);
+            layoutTree(filmstrip);
+        });
+
+        List<Rectangle> bounds = filmstrip.groupBoundsForTest();
+        assertEquals(2, bounds.size(), "两组应当各占一块");
+
+        BufferedImage rendered = render(filmstrip);
+        for (Rectangle box : bounds) {
+            // 左边框那一条竖线，从上到下都应当是边框色（避开上下两条圆角边）
+            for (int y = 40; y < 120; y++) {
+                assertEquals(Theme.GROUP_BORDER.getRGB() & 0xFFFFFF,
+                        rendered.getRGB(box.x, y) & 0xFFFFFF,
+                        "第 " + box.x + " 列应当是这一组的竖直边框，y=" + y);
+            }
+        }
+        awaitIdle(loader);
+        loader.shutdown();
+    }
+
+    @Test
+    void 收起之后显示第一张照片作为预览() throws Exception {
+        Theme.install();
+
+        Path folderA = Files.createDirectories(tempDir.resolve("001_第一组"));
+        Path folderB = Files.createDirectories(tempDir.resolve("002_第二组"));
+        List<Path> photosA = new ArrayList<>();
+        List<Path> photosB = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            photosA.add(TestImages.writeJpeg(folderA.resolve("a" + i + ".jpg"), 900, 600));
+            photosB.add(TestImages.writeJpeg(folderB.resolve("b" + i + ".jpg"), 900, 600));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(
+                new ThumbnailService(Path.of("target", "test-cache-collapsed-preview")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(1200, 200);
+            filmstrip.setGroups(List.of(
+                    new PhotoGroup("001_第一组", folderA, photosA),
+                    new PhotoGroup("002_第二组", folderB, photosB)), 120);
+            layoutTree(filmstrip);
+        });
+
+        // 点第一组的组头把它收起来
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                40, 8, 1, false, MouseEvent.BUTTON1)));
+        assertTrue(filmstrip.isCollapsed(folderA), "点组头应当把这一组收起来");
+
+        // 四张都在最开始请求过，等它们全部到位，第一张肯定在其中
+        assertEquals(4, waitUntilStable(filmstrip, 4), "缩略图应当全部到位");
+
+        BufferedImage rendered = render(filmstrip);
+        Rectangle first = filmstrip.groupBoundsForTest().get(0);
+        // 取"文件夹身体"中间那一块：避开顶上的小耳朵和边框，看照片有没有画上去
+        BufferedImage preview = rendered.getSubimage(first.x + 10, 34, 110, 76);
+        assertTrue(countColors(preview) > 3, "收起后的缩略图里应当能看到第一张照片，而不是空文件夹");
+        assertTrue(hasColorNear(preview, 0xFF8B16, 60), "预览里应当有照片的颜色（测试图片是橙色底）");
+
+        Path output = Path.of("target", "ui-filmstrip-collapsed.png");
+        Files.createDirectories(output.getParent());
+        ImageIO.write(rendered, "png", output.toFile());
+        awaitIdle(loader);
+        loader.shutdown();
     }
 
     @Test
@@ -263,6 +369,7 @@ class FilmstripPanelTest {
                 40, 8, 1, false, MouseEvent.BUTTON1)));
         assertFalse(filmstrip.isCollapsed(folderA));
         assertEquals(expandedWidth, filmstrip.getPreferredSize().width);
+        awaitIdle(loader);
         loader.shutdown();
     }
 
@@ -291,6 +398,21 @@ class FilmstripPanelTest {
             }
         }
         return colors.size();
+    }
+
+    /** 图里有没有"接近某个颜色"的像素。边界模糊的断言全靠它，别拿色相去猜。 */
+    private static boolean hasColorNear(BufferedImage image, int target, int tolerance) {
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+                if (Math.abs(((rgb >> 16) & 0xFF) - ((target >> 16) & 0xFF)) <= tolerance
+                        && Math.abs(((rgb >> 8) & 0xFF) - ((target >> 8) & 0xFF)) <= tolerance
+                        && Math.abs((rgb & 0xFF) - (target & 0xFF)) <= tolerance) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** 离屏布局：让没有真正显示的组件也把位置算出来。 */
