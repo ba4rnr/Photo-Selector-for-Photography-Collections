@@ -78,8 +78,8 @@ final class FolderPickerDialog extends JDialog {
     /** 左侧栏宽度。 */
     private static final int SIDEBAR_WIDTH = 190;
 
-    /** 左侧栏的一项；分区标题没有路径，只是把两类位置隔开。 */
-    private record Place(Path path, String label, Icon icon, boolean header) {
+    /** 左侧栏的一项；分区标题没有路径，只是把两类位置隔开。（包内可见，测试要检查它的指向。） */
+    record Place(Path path, String label, Icon icon, boolean header) {
 
         static Place header(String label) {
             return new Place(null, label, null, true);
@@ -614,15 +614,26 @@ final class FolderPickerDialog extends JDialog {
         }
     }
 
-    private static List<Place> quickPlaces() {
+    /** 快速访问里的几项。包内可见，测试用它钉住"桌面别指到文档去"。 */
+    static List<Place> quickPlaces() {
         FileSystemView view = FileSystemView.getFileSystemView();
         Path home = Path.of(System.getProperty("user.home", "."));
+
+        // Windows 上这两个壳文件夹的名字和直觉是反的（JDK 实测）：
+        // getDefaultDirectory() 给的是"文档"，getHomeDirectory() 才是"桌面"。
+        // 它们会跟着"文件夹重定向"走，所以优先信它们，其次才是 user.home 下的同名目录。
+        Path desktop = view.getHomeDirectory().toPath();
+        if (desktop.equals(home)) {
+            desktop = null; // 某些实现里"家"就是用户目录，那不能拿来当桌面
+        }
+        Path documents = view.getDefaultDirectory().toPath();
+
         List<Place> places = new ArrayList<>();
         addPlace(places, home, "主文件夹", Icons.home());
-        addPlace(places, view.getDefaultDirectory().toPath(), "桌面", Icons.desktop());
-        addPlace(places, home.resolve("Documents"), "文档", Icons.file());
-        addPlace(places, home.resolve("Downloads"), "下载", Icons.save());
-        addPlace(places, home.resolve("Pictures"), "图片", Icons.pictures());
+        addFirstExisting(places, "桌面", Icons.desktop(), desktop, home.resolve("Desktop"), oneDrive("Desktop"));
+        addFirstExisting(places, "文档", Icons.file(), documents, home.resolve("Documents"), oneDrive("Documents"));
+        addFirstExisting(places, "下载", Icons.save(), home.resolve("Downloads"), oneDrive("Downloads"));
+        addFirstExisting(places, "图片", Icons.pictures(), home.resolve("Pictures"), oneDrive("Pictures"));
         return places;
     }
 
@@ -630,6 +641,27 @@ final class FolderPickerDialog extends JDialog {
         if (Files.isDirectory(path)) {
             places.add(Place.of(path.toAbsolutePath().normalize(), label, icon));
         }
+    }
+
+    /** 取第一个真实存在的候选；一个都没有就不列，不给用户一个点了没反应的空壳。 */
+    private static void addFirstExisting(List<Place> places, String label, Icon icon, Path... candidates) {
+        for (Path candidate : candidates) {
+            if (candidate != null && Files.isDirectory(candidate)) {
+                addPlace(places, candidate, label, icon);
+                return;
+            }
+        }
+    }
+
+    /** OneDrive 下的同名文件夹：桌面 / 文档可能被"文件夹重定向"挪到了那里。 */
+    private static Path oneDrive(String folderName) {
+        for (String env : new String[] {"OneDrive", "OneDriveConsumer", "OneDriveCommercial"}) {
+            String root = System.getenv(env);
+            if (root != null && !root.isBlank()) {
+                return Path.of(root, folderName);
+            }
+        }
+        return null;
     }
 
     /** 起点：优先主文件夹；主文件夹不在了就退到工作目录，再不行挑第一个盘。 */

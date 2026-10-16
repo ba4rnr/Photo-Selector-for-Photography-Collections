@@ -1,7 +1,9 @@
 package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.Component;
 import java.awt.Container;
@@ -11,7 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.imageio.ImageIO;
@@ -32,6 +36,26 @@ class FolderPickerDialogTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void 快速访问里的桌面别指到文档去() {
+        Theme.install();
+
+        Map<String, Path> byLabel = new LinkedHashMap<>();
+        for (FolderPickerDialog.Place place : FolderPickerDialog.quickPlaces()) {
+            byLabel.put(place.label(), place.path());
+        }
+
+        Path desktop = byLabel.get("桌面");
+        assumeTrue(desktop != null, "这台机器上没探测到桌面文件夹，跳过");
+        // 曾经的 bug：桌面接在 FileSystemView.getDefaultDirectory() 上，
+        // 而它在 Windows 上给的是"文档"
+        assertEquals("Desktop", desktop.getFileName().toString(),
+                "桌面应当指向真正的桌面文件夹");
+        assertNotEquals(desktop, byLabel.get("文档"), "桌面和文档不能是同一个文件夹");
+        assertEquals(byLabel.size(), new HashSet<>(byLabel.values()).size(),
+                "快速访问里不该有两项指向同一个地方");
+    }
 
     @Test
     void 只列出子文件夹_并且默认答案就是当前文件夹() throws Exception {
