@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JComponent;
+import javax.swing.AbstractAction;
 import javax.swing.InputMap;
 import javax.swing.JRootPane;
 import javax.swing.KeyStroke;
@@ -132,6 +133,30 @@ final class FilmstripPanel extends JPanel {
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     handleClick(e.getX(), e.getY());
                 }
+            }
+        });
+        // 焦点在素材条上时，← / → 就在这一层直接处理掉。
+        // 这一条是防身的：Swing 里"焦点组件的祖先链"先于"窗口级快捷键"被检查，
+        // 分隔条、滚动面板这类容器都自带方向键绑定，谁没摘干净都会把过片截走。
+        // 绑定在组件自己的 WHEN_FOCUSED 上最优先，不再看容器的脸色。
+        bindArrowKeys();
+    }
+
+    private void bindArrowKeys() {
+        getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "filmstrip-previous");
+        getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "filmstrip-next");
+        getActionMap().put("filmstrip-previous", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                moveCurrent(-1);
+            }
+        });
+        getActionMap().put("filmstrip-next", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                moveCurrent(1);
             }
         });
     }

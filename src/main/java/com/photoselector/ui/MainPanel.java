@@ -218,6 +218,12 @@ public final class MainPanel extends JPanel {
         centerRight = Splitters.horizontal(centerArea, rightArea, 1.0);
         mainSplit = Splitters.horizontal(leftColumn(), centerRight, 0.0);
         outerSplit = Splitters.vertical(mainSplit, bottomArea, 1.0);
+        // 分隔条默认把 ← / → 绑在"焦点组件之祖先"这一层（作用是挪分隔条），
+        // 而这一层先于窗口级快捷键被检查——素材条长在里面，方向键会被它截走。
+        // 这个程序里 ← / → 是"换照片"，所以把这几个绑定摘掉。
+        ScrollKeys.stripArrowKeys(centerRight);
+        ScrollKeys.stripArrowKeys(mainSplit);
+        ScrollKeys.stripArrowKeys(outerSplit);
 
         toolBar.modeButton().addActionListener(e -> toggleMode());
         // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组

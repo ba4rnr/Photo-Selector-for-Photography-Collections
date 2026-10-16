@@ -244,6 +244,32 @@ class FilmstripPanelTest {
     }
 
     @Test
+    void 分隔条也不能抢走左右方向键() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        JScrollPane scroll = filmstrip.wrapInScrollPane();
+
+        // 素材条长在分隔条里面，而 JSplitPane 默认把 ← / → 绑在
+        // "焦点组件之祖先"这一层（用来挪分隔条）——不摘掉，方向键就会被它吃掉
+        javax.swing.JSplitPane split = new javax.swing.JSplitPane(
+                javax.swing.JSplitPane.VERTICAL_SPLIT, new javax.swing.JPanel(), scroll);
+        ScrollKeys.stripArrowKeys(split);
+        SwingUtilities.invokeAndWait(() -> {
+            split.setSize(800, 400);
+            layoutTree(split);
+        });
+
+        assertFalse(filmstrip.arrowKeySwallowedByAncestor(
+                        javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT, 0)),
+                "左方向键不该被祖先链（含分隔条）截走");
+        assertFalse(filmstrip.arrowKeySwallowedByAncestor(
+                        javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT, 0)),
+                "右方向键不该被祖先链（含分隔条）截走");
+        loader.shutdown();
+    }
+
+    @Test
     void 素材条上左右方向键不会被滚动面板吃掉() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));

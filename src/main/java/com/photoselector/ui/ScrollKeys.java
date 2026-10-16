@@ -26,16 +26,27 @@ final class ScrollKeys {
 
     /** 摘掉某个滚动面板上的左右方向键绑定，其余按键不动。 */
     static void dropArrowKeys(JScrollPane scroll) {
+        stripArrowKeys(scroll);
+    }
+
+    /**
+     * 摘掉某个容器上的左右方向键绑定（"焦点组件之祖先"那一层）。
+     *
+     * <p>不只是滚动面板会抢：{@code JSplitPane} 也把 ← / → 绑在同一层，
+     * 作用是"挪分隔条"（positiveIncrement）。素材条就长在分隔条里面，
+     * 于是它一点焦点，方向键又被分隔条吃掉了。凡是有这种绑定的容器都得摘。
+     */
+    static void stripArrowKeys(JComponent component) {
         // 光 remove 不够：这张表挂在外观默认表下面，本层删掉之后
         // get() 会顺着父表又找回来。所以把外观那一份抄成独立表（不挂父表），
         // 去掉左右键，再整体换上去。
-        InputMap builtIn = scroll.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
+        InputMap builtIn = component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
         InputMap stripped = new InputMap();
         for (KeyStroke key : builtIn.allKeys()) {
             stripped.put(key, builtIn.get(key));
         }
         stripped.remove(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0));
         stripped.remove(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0));
-        scroll.setInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT, stripped);
+        component.setInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT, stripped);
     }
 }

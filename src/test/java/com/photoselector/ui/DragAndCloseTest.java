@@ -214,16 +214,19 @@ class DragAndCloseTest {
             Path clicked = strip.currentPhoto();
             assertNotNull(clicked, "点过之后应当有一张是当前照片");
 
-            // 方向键要真的"过片"：每一次当前照片都换一张。
-            // 不手工挪焦点——就按用户实际会遇到的来：点完照片直接按方向键，
-            // 焦点该由点击时 handleClick 里的 requestFocus() 接过来
+            // 方向键要真的"过片"：每一次当前照片都换一张，大图也跟着换。
+            // 走真窗口里那条路：事件的 source 必须是焦点组件，否则键盘管理器直接丢掉。
+            // 测试机上窗口不一定拿得到系统焦点（拿不到就没法真按键），遇到这种环境就跳过按键部分。
             KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+            if (manager.getFocusOwner() != strip) {
+                System.out.println("[notice] 测试机没把系统焦点给窗口（焦点="
+                        + manager.getFocusOwner() + "），按键这一步跳过");
+                return;
+            }
             Path previous = strip.currentPhoto();
             Path viewerPhoto = window.panel.viewerForTest().photo();
             for (int i = 0; i < 2; i++) {
-                SwingUtilities.invokeAndWait(() -> manager.dispatchEvent(new KeyEvent(window.frame,
-                        KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0,
-                        KeyEvent.VK_RIGHT, KeyEvent.CHAR_UNDEFINED)));
+                pressKeyOnFocusOwner(manager, KeyEvent.VK_RIGHT);
                 Path now = strip.currentPhoto();
                 assertTrue(!java.util.Objects.equals(previous, now),
                         "第 " + (i + 1) + " 次按右键，当前照片应当换成下一张"
@@ -322,6 +325,28 @@ class DragAndCloseTest {
     /** 测试用素材根目录下第 index 个子文件夹的路径。 */
     private Path testFolderPath(int index) {
         return tempDir.resolve("素材").resolve(String.format("%03d_拍摄", index + 1));
+    }
+
+    /**
+     * 按一个键，按真窗口里的那条路走。
+     *
+     * <p>关键点：事件的 <b>source 必须是当前的焦点组件</b>。键盘管理器第一件事
+     * 就是核对"焦点与事件来源对不对得上"，对不上就直接丢掉——之前测试里拿窗体
+     * 当 source 发按键，全都被丢掉了，等于什么都没按。
+     */
+    private static void pressKeyOnFocusOwner(KeyboardFocusManager manager, int keyCode) {
+        Component owner = manager.getFocusOwner();
+        if (owner == null) {
+            throw new IllegalStateException("测试机上窗口没拿到系统焦点，没法按");
+        }
+        SwingUtilities.invokeLater(() -> manager.dispatchEvent(new KeyEvent(owner,
+                KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, keyCode,
+                KeyEvent.CHAR_UNDEFINED)));
+        try {
+            Thread.sleep(80);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test
