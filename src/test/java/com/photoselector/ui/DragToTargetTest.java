@@ -117,6 +117,26 @@ class DragToTargetTest {
         panel.shutdown();
     }
 
+    @Test
+    void 拖动是拖照片还是搬画面_由工具栏上的工具决定() throws Exception {
+        MainPanel panel = panelWithPhotos();
+        ViewerPanel viewer = panel.viewerForTest();
+
+        assertEquals(CursorTool.SELECT, panel.toolBar().activeTool(), "默认选中\"选择\"");
+        assertTrue(viewer.isDragOutEnabled(), "选择工具下，拖动是把照片拖出去");
+        assertTrue(!viewer.canPan(), "选择工具下不搬画面");
+
+        // 换成"平移"：拖动改成搬画面，不再往外拖照片
+        SwingUtilities.invokeAndWait(() -> {
+            ToolBarPanel toolBar = panel.toolBar();
+            toolBar.setOnToolChanged(viewer::setCursorTool);
+            toolBar.setActiveToolForTest(CursorTool.PAN);
+        });
+        assertTrue(!viewer.isDragOutEnabled(), "平移工具下拖动不往外拖照片");
+        assertTrue(viewer.canPan() || !viewer.hasImage(), "平移工具下才允许搬画面");
+        panel.shutdown();
+    }
+
     private static void paint(javax.swing.JComponent component) {
         BufferedImage image = new BufferedImage(Math.max(1, component.getWidth()),
                 Math.max(1, component.getHeight()), BufferedImage.TYPE_INT_RGB);

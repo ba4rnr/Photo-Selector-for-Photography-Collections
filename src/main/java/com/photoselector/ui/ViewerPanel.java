@@ -94,6 +94,9 @@ final class ViewerPanel extends JPanel {
     private int dragOffsetX;
     private int dragOffsetY;
 
+    /** 当前的光标工具。它决定在大图上按住左键拖动是什么意思。 */
+    private CursorTool tool = CursorTool.SELECT;
+
     /** 表头上两个按钮的位置，画的时候算出来，点击时做命中判断。 */
     private Rectangle fitButtonBounds;
     private Rectangle actualButtonBounds;
@@ -376,9 +379,30 @@ final class ViewerPanel extends JPanel {
         if (image == null) {
             return false;
         }
+        if (tool != CursorTool.PAN) {
+            return false; // 只有"平移"工具才搬画面，这正是它存在的理由
+        }
         Rectangle area = imageArea();
         Dimension size = scaledSize();
         return size.width > area.width || size.height > area.height;
+    }
+
+    /**
+     * 换光标工具。
+     *
+     * <p>工具栏上的"选择 / 平移"就是干这个的：选择时拖动是拖照片出去，
+     * 平移时拖动才是搬画面。
+     */
+    void setCursorTool(CursorTool cursorTool) {
+        this.tool = cursorTool;
+        setCursor(cursorTool == CursorTool.PAN
+                ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                : Cursor.getDefaultCursor());
+    }
+
+    /** 现在拖动是不是"把照片拖出去"。 */
+    boolean isDragOutEnabled() {
+        return tool == CursorTool.SELECT;
     }
 
     private static boolean hit(Point point, Rectangle bounds) {

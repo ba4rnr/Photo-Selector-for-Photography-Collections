@@ -141,8 +141,9 @@ public final class MainPanel extends JPanel {
 
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里
         DragOut.install(filmstrip, filmstrip::currentPhoto, this::addToTarget);
-        // 大图能平移时，拖动是在平移而不是在往外拖——加一道开关，两者不会同时触发
-        DragOut.install(viewer, viewer::photo, () -> !viewer.canPan(), this::addToTarget);
+        // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
+        DragOut.install(viewer, viewer::photo, viewer::isDragOutEnabled, this::addToTarget);
+        toolBar.setOnToolChanged(viewer::setCursorTool);
 
         buildAreas();
 
