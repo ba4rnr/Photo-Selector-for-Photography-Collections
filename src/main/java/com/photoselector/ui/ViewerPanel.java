@@ -51,6 +51,18 @@ final class ViewerPanel extends JPanel {
     private static final double MAX_SCALE = 8.0;
 
     /**
+     * 滚轮走的档位表。
+     *
+     * <p>取的是 25 / 33 / 50 / 66 这类"能一眼看懂的比例"，再往上按 100、133、200、300……
+     * 走到 800%。这样既有足够的密度（不会一步从 14% 跳到 100%），
+     * 又保证整百的那些常用档——100%、200%、300%、400%——都恰好落在表上，
+     * 滚到它们时不会有零头。
+     */
+    private static final double[] ZOOM_STEPS = {
+        0.14, 0.25, 0.33, 0.50, 0.66, 1.00, 1.33, 2.00, 3.00, 4.00, 6.00, 8.00
+    };
+
+    /**
      * 打开一张照片时的默认放大倍率。
      *
      * <p>用一个固定比例而不是"适应窗口"，是为了让不同的照片都按同一个倍率显示——
@@ -128,7 +140,7 @@ final class ViewerPanel extends JPanel {
 
             @Override
             public void mouseWheelMoved(MouseWheelEvent e) {
-                zoomStep(-e.getWheelRotation() > 0 ? 1 : -1);
+                zoomStep(-e.getWheelRotation() > 0 ? 1 : -1, e.getPoint());
             }
         };
         addMouseListener(mouse);
@@ -168,40 +180,93 @@ final class ViewerPanel extends JPanel {
         onZoomChanged.run();
     }
 
+    /** 滚轮缩放：在档位表上走一格。基准点取视图中心（不跟随鼠标）。 */
+    void zoomStep(int direction) {
+        zoomStep(direction, new Point(getWidth() / 2, getHeight() / 2));
+    }
+
     /**
-     * 滚轮缩放：在"整百倍率"的档位之间跳。
+     * 滚轮缩放：在档位表上走一格，并且<b>以鼠标所指的那一点为基准</b>。
      *
-     * <p>档位是 {@code 100%、200%、300%……}，外加最下面那档默认的
-     * {@link #DEFAULT_SCALE}（14%）。<b>第一格一定是跳到 100%</b>——
-     * 之前做成连续倍数（14% → 16% → 18%……）是个错误：那样靠滚轮根本到不了 100%，
-     * 而 100% 恰恰是看合焦最常用的那一档。
+     * <p>以鼠标为基准的意思是：缩放前后，光标下面始终是同一个图片像素。
+     * 放大看细节时这一点很要紧——不然每滚一格画面都往中心跑，得反复拖回来。
      *
-     * <p>从别的比例（比如"适应窗口"算出来的 63%）滚下去，也是先落到最近的整百档：
+     * <p>从"适应窗口"算出来的零碎比例（比如 63%）起步时，先按方向落到相邻档：
      * 往上取比它大的那一档，往下取比它小的那一档——方向感比"绝对最近"更重要。
      *
      * @param direction 正数放大，负数缩小
+     * @param anchor    以屏幕上的哪一点为基准
      */
-    void zoomStep(int direction) {
+    void zoomStep(int direction, Point anchor) {
         if (image == null) {
             return;
         }
         double current = fitToWindow ? fitScale() : customScale;
-        fitToWindow = false;
 
-        if (direction > 0) {
-            // 还没到 100% 就直接跳到 100%，否则往下一个整百档去
-            customScale = current < 1.0 ? 1.0 : Math.floor(current) + 1.0;
-        } else {
-            // 100% 及以下就退回默认那档；再往下没有更小的整百档了
-            customScale = current <= 1.0 ? DEFAULT_SCALE : Math.ceil(current) - 1.0;
-            if (customScale < 1.0) {
-                customScale = DEFAULT_SCALE;
+        int below = stepIndexBelow(current);
+        boolean exact = Math.abs(ZOOM_STEPS[below] - current) < 1e-6;
+        int next = direction > 0 ? below + 1 : (exact ? below - 1 : below);
+        next = Math.max(0, Math.min(ZOOM_STEPS.length - 1, next));
+
+        zoomAround(ZOOM_STEPS[next], anchor);
+        onZoomChanged.run();
+    }
+
+    /** 档位表里"不大于这个比例"的最后一档。 */
+    private static int stepIndexBelow(double scale) {
+        int index = 0;
+        for (int i = 0; i < ZOOM_STEPS.length; i++) {
+            if (ZOOM_STEPS[i] <= scale + 1e-6) {
+                index = i;
             }
         }
-        customScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, customScale));
+        return index;
+    }
+
+    /**
+     * 缩放到指定比例，并让 {@code anchor} 下面那个图片像素留在原地。
+     *
+     * <p>算法就是解一个一次方程：设光标下的图片坐标是 (u, v)，
+     * 那么缩放后想让 {@code 图片左上角 + u × 新比例 == 光标} 仍然成立，
+     * 反推出新的偏移量即可。
+     */
+    private void zoomAround(double newScale, Point anchor) {
+        Rectangle area = imageArea();
+        double oldScale = currentScale();
+        Dimension before = scaledSize();
+        int x0 = area.x + (area.width - before.width) / 2 + offsetX;
+        int y0 = area.y + (area.height - before.height) / 2 + offsetY;
+        double imageX = (anchor.x - x0) / oldScale;
+        double imageY = (anchor.y - y0) / oldScale;
+
+        fitToWindow = false;
+        customScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+
+        Dimension after = scaledSize();
+        offsetX = (int) Math.round(anchor.x - imageX * customScale
+                - area.x - (area.width - after.width) / 2.0);
+        offsetY = (int) Math.round(anchor.y - imageY * customScale
+                - area.y - (area.height - after.height) / 2.0);
         clampOffset();
         repaint();
-        onZoomChanged.run();
+    }
+
+    /**
+     * 屏幕上某一点对应的图片像素坐标。
+     *
+     * <p>给"以鼠标为基准缩放"用的，测试也拿它验证"光标下始终是同一个像素"。
+     */
+    Point imagePointAt(Point screenPoint) {
+        if (image == null) {
+            return null;
+        }
+        Rectangle area = imageArea();
+        Dimension size = scaledSize();
+        double scale = currentScale();
+        int x0 = area.x + (area.width - size.width) / 2 + offsetX;
+        int y0 = area.y + (area.height - size.height) / 2 + offsetY;
+        return new Point((int) Math.round((screenPoint.x - x0) / scale),
+                (int) Math.round((screenPoint.y - y0) / scale));
     }
 
     void setOnZoomChanged(Runnable listener) {

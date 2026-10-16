@@ -130,30 +130,73 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        // 从默认的 14% 起，第一格必须直接落到 100%——不然靠滚轮到不了 100%
-        assertEquals(14, viewer.zoomPercent());
-        SwingUtilities.invokeAndWait(() -> viewer.zoomStep(1));
-        assertEquals(100, viewer.zoomPercent(), "第一格应当跳到 100%");
-        viewer.zoomStep(1);
-        assertEquals(200, viewer.zoomPercent());
-        viewer.zoomStep(1);
-        assertEquals(300, viewer.zoomPercent());
+        assertEquals(14, viewer.zoomPercent(), "起点是默认那一档");
 
-        viewer.zoomStep(-1);
-        assertEquals(200, viewer.zoomPercent());
-        viewer.zoomStep(-1);
-        assertEquals(100, viewer.zoomPercent());
-        viewer.zoomStep(-1);
-        assertEquals(14, viewer.zoomPercent(), "再往下回到默认那档");
-        viewer.zoomStep(-1);
-        assertEquals(14, viewer.zoomPercent(), "已经在最低档，再滚也不动");
+        // 一路往上滚：档位要够密，但 100、200、300、400 这些整百档必须都恰好踩得到
+        List<Integer> visited = new ArrayList<>();
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 12; i++) {
+                viewer.zoomStep(1);
+                visited.add(viewer.zoomPercent());
+            }
+        });
+        assertTrue(visited.contains(100) && visited.contains(200)
+                        && visited.contains(300) && visited.contains(400),
+                "整百的常用档都该滚得到，实际经过：" + visited);
+        for (int i = 1; i < visited.size(); i++) {
+            // 到顶（800%）之后停在原地，所以允许相等，但不许变小
+            assertTrue(visited.get(i) >= visited.get(i - 1), "一路往上滚不该回头：" + visited);
+        }
 
-        // 从"适应窗口"算出来的零碎比例滚下去，也要先落到最近的那个整百档
+        // 一路往下滚，最后停在默认那一档
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 20; i++) {
+                viewer.zoomStep(-1);
+            }
+        });
+        assertEquals(14, viewer.zoomPercent(), "到底了就停在默认档，不再动");
+
+        // 从"适应窗口"算出来的零碎比例起步，按方向落到相邻档
         viewer.fitToWindow();
         int fitted = viewer.zoomPercent();
-        assertTrue(fitted != 100, "900 宽的图塞进 400 宽的窗口，适应出来的不是整百档");
         viewer.zoomStep(1);
-        assertEquals(100, viewer.zoomPercent(), "不管从哪儿来，往上第一格都该是 100%");
+        assertTrue(viewer.zoomPercent() > fitted, "往上滚应当比适应出来的比例大");
+        loader.shutdown();
+    }
+
+    @Test
+    void 滚轮缩放以鼠标所指的那一点为基准() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 1200, 800);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        // 先放到 100%，这时图片（1200×800）已经盖满窗口，光标才落在图上
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 5; i++) {
+                viewer.zoomStep(1);
+            }
+        });
+        assertEquals(100, viewer.zoomPercent());
+
+        // 光标放在视图中间偏一点的位置：连滚两格，它下面那个图片像素应当基本不动
+        java.awt.Point cursor = new java.awt.Point(200, 160);
+        java.awt.Point before = viewer.imagePointAt(cursor);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.zoomStep(1, cursor);
+            viewer.zoomStep(1, cursor);
+        });
+        java.awt.Point after = viewer.imagePointAt(cursor);
+
+        assertTrue(viewer.zoomPercent() > 100, "应当真的放大了");
+        assertEquals(before.x, after.x, 2, "光标下面的图片像素应当基本没挪动（横）");
+        assertEquals(before.y, after.y, 2, "光标下面的图片像素应当基本没挪动（纵）");
         loader.shutdown();
     }
 
