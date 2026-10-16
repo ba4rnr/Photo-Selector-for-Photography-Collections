@@ -154,7 +154,8 @@ class ViewerPanelTest {
                 viewer.zoomStep(-1);
             }
         });
-        assertEquals(14, viewer.zoomPercent(), "到底了就停在默认档，不再动");
+        assertEquals(5, viewer.zoomPercent(),
+                "到底了就停在最低档（5%），不再动——14% 下面还有几档可以看整卷构图");
 
         // 从"适应窗口"算出来的零碎比例起步，按方向落到相邻档
         viewer.fitToWindow();
@@ -177,12 +178,8 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        // 先放到 100%，这时图片（1200×800）已经盖满窗口，光标才落在图上
-        SwingUtilities.invokeAndWait(() -> {
-            for (int i = 0; i < 5; i++) {
-                viewer.zoomStep(1);
-            }
-        });
+        // 先摆到 100% 这个确定的起点（档位表变密之后，滚到 100% 要几格是会变的）
+        SwingUtilities.invokeAndWait(viewer::actualSize);
         assertEquals(100, viewer.zoomPercent());
 
         // 光标放在视图中间偏一点的位置：连滚两格，它下面那个图片像素应当基本不动
