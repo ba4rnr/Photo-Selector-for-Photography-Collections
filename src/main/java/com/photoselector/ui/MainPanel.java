@@ -4,6 +4,9 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -13,15 +16,19 @@ import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import javax.swing.AbstractAction;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.core.NumberingRule;
+import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
 import com.photoselector.ui.theme.Theme;
 
@@ -46,6 +53,7 @@ public final class MainPanel extends JPanel {
 
     private final ThumbnailLoader thumbnailLoader;
     private final FilmstripPanel filmstrip;
+    private final TargetPanel targetPanel;
     private final SourceTreePanel sourceTree = new SourceTreePanel();
 
     /**
@@ -78,9 +86,6 @@ public final class MainPanel extends JPanel {
     private final CardLayout rightCards = new CardLayout();
     private final JPanel rightArea = new JPanel(rightCards);
 
-    /** 浏览模式右栏那个面板：选了目标文件夹之后，在这里显示它的路径。 */
-    private final PlaceholderPanel targetPanel = placeholder("目标文件夹（还没选）", 360, 400, Theme.PANEL);
-
     private final CardLayout bottomCards = new CardLayout();
     private final JPanel bottomArea = new JPanel(bottomCards);
 
@@ -100,8 +105,12 @@ public final class MainPanel extends JPanel {
         super(new BorderLayout());
         setBackground(Theme.PANEL);
 
-        thumbnailLoader = new ThumbnailLoader(new ThumbnailService(thumbnailCacheDir));
+        ThumbnailService thumbnailService = new ThumbnailService(thumbnailCacheDir);
+        thumbnailLoader = new ThumbnailLoader(thumbnailService);
         filmstrip = new FilmstripPanel(thumbnailLoader);
+        // 目标文件夹面板单独用一只取图器：素材条换文件夹时会重启自己那一轮取图，
+        // 共用一只的话会把这边正在路上的请求一起作废。缩略图缓存还是共用同一份。
+        targetPanel = new TargetPanel(new ThumbnailLoader(thumbnailService));
 
         buildAreas();
 
@@ -114,6 +123,7 @@ public final class MainPanel extends JPanel {
         // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组
         sourceTree.setOnFolderChosen(filmstrip::scrollToGroup);
         sourceTree.setOnInclusionChanged(this::inclusionChanged);
+        bindKeys();
 
         add(toolBar, BorderLayout.NORTH);
         add(outerSplit, BorderLayout.CENTER);
@@ -240,13 +250,76 @@ public final class MainPanel extends JPanel {
         this.workspace = newWorkspace;
         sourceTree.setRoot(newWorkspace.sourceRoot());
         sourceTree.setExcluded(newWorkspace.excludedFolders());
-        updateTargetPanel(newWorkspace.targetFolder());
+        openTargetFolder(newWorkspace.targetFolder());
         reloadGroups(newWorkspace.sourceRoot());
         onWorkspaceChanged.accept(newWorkspace);
     }
 
-    private void updateTargetPanel(Path target) {
-        targetPanel.setTitle(target == null ? "目标文件夹（还没选）" : "目标文件夹：" + target);
+    /**
+     * 打开目标文件夹：把它现有的照片读出来当"底色"铺进中间商。
+     *
+     * <p>读目录同样是文件系统操作，所以丢给后台线程池；读完再回到界面线程建中间商。
+     */
+    private void openTargetFolder(Path target) {
+        if (target == null) {
+            targetPanel.setSession(null);
+            return;
+        }
+        scanPool.submit(() -> {
+            List<Path> existing = List.of();
+            try {
+                existing = PhotoFiles.imagesIn(target);
+            } catch (IOException ignored) {
+                // 读不了就当空的：中间商照常建起来，挑进去的照片不受影响
+            }
+            List<Path> files = existing;
+            SwingUtilities.invokeLater(() -> {
+                Session session = new Session(target, NumberingRule.DEFAULT);
+                session.seedExisting(files);
+                targetPanel.setSession(session);
+            });
+        });
+    }
+
+    /** 空格：把素材条里点中的那张照片加入目标序列。 */
+    private void addCurrentPhotoToTarget() {
+        Path photo = filmstrip.currentPhoto();
+        Session session = targetPanel.session();
+        if (photo == null || session == null) {
+            return;
+        }
+        if (session.add(photo)) {
+            targetPanel.refresh();
+        }
+    }
+
+    /** Ctrl+Z：撤销上一步（挑入、挪位、丢垃圾桶都算）。 */
+    private void undo() {
+        Session session = targetPanel.session();
+        if (session != null && session.undo()) {
+            targetPanel.refresh();
+        }
+    }
+
+    /**
+     * 键盘快捷键。
+     *
+     * <p>挂在 {@code WHEN_IN_FOCUSED_WINDOW} 上，所以不管焦点在素材条还是目录树上都管用。
+     * 工具栏上那几个按钮的接线等界面那一侧定下来再接。
+     */
+    private void bindKeys() {
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "addToTarget", this::addCurrentPhotoToTarget);
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK), "undo", this::undo);
+    }
+
+    private void bind(KeyStroke key, String actionName, Runnable action) {
+        getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(key, actionName);
+        getActionMap().put(actionName, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                action.run();
+            }
+        });
     }
 
 
@@ -258,6 +331,16 @@ public final class MainPanel extends JPanel {
     /** 素材条上现在有几组。给测试和排查用。 */
     int filmstripGroupCount() {
         return filmstrip.groupCount();
+    }
+
+    /** 素材条，给测试用。 */
+    FilmstripPanel filmstripForTest() {
+        return filmstrip;
+    }
+
+    /** 目标文件夹面板，给测试用。 */
+    TargetPanel targetPanelForTest() {
+        return targetPanel;
     }
 
     /** 目录树，给测试用。 */

@@ -164,4 +164,35 @@ class SessionTest {
                 "绝对路径也不该绕过重复检查");
         assertEquals(1, session.size());
     }
+
+    @Test
+    void 用已有文件铺底之后新挑的照片排在后面() {
+        Session session = newSession();
+        Path existingA = Path.of("target", "L1000001.JPG");
+        Path existingB = Path.of("target", "L1000002.JPG");
+
+        session.seedExisting(List.of(existingA, existingB));
+
+        assertEquals(2, session.size());
+        assertEquals(Origin.EXISTING, session.entryAt(0).origin(), "铺底的条目是真实文件");
+        assertEquals(List.of("0010", "0020"), session.names());
+
+        assertTrue(session.add(PHOTO_A));
+        assertEquals(3, session.size());
+        assertEquals(Origin.PENDING, session.entryAt(2).origin(), "新挑的还没复制过去");
+        assertEquals(List.of("0010", "0020", "0030"), session.names());
+    }
+
+    @Test
+    void 铺底会清掉之前的撤销记录和垃圾桶() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.trash(0);
+
+        session.seedExisting(List.of(Path.of("target", "x.jpg")));
+
+        assertEquals(1, session.size());
+        assertTrue(session.trash().isEmpty());
+        assertFalse(session.canUndo(), "换了目标文件夹，旧步骤不该还能撤销");
+    }
 }

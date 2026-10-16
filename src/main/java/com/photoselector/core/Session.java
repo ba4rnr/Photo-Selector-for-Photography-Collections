@@ -115,6 +115,23 @@ public final class Session {
     }
 
     /**
+     * 用目标文件夹里已有的文件铺底（打开工作区时调用一次）。
+     *
+     * <p>这些条目是 {@link Origin#EXISTING}：保存时对它们的改动（重命名、删除）
+     * 会真的落到磁盘上那些文件上。之后挑进来的照片排在它们后面。
+     *
+     * <p>会清空垃圾桶和撤销栈——换了目标文件夹，之前那些指针和步骤都没意义了。
+     */
+    public void seedExisting(List<Path> existingFiles) {
+        sequence.clear();
+        trash.clear();
+        undoStack.clear();
+        for (Path file : existingFiles) {
+            sequence.add(new TargetEntry(file, Origin.EXISTING));
+        }
+    }
+
+    /**
      * 把第 {@code from} 项挪到新位置 {@code to}——即移动结束后，
      * 原来在 {@code from} 的条目恰好位于索引 {@code to}（越界则落到末尾）。
      *

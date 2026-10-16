@@ -92,6 +92,9 @@ final class FilmstripPanel extends JPanel {
     private int cellWidth = 188;
     private int thumbnailHeight = 120;
 
+    /** 当前点中的那张照片。加入目标文件夹时用的就是它。 */
+    private Path currentPhoto;
+
     FilmstripPanel(ThumbnailLoader loader) {
         this.loader = loader;
         setBackground(Theme.PANEL);
@@ -121,6 +124,7 @@ final class FilmstripPanel extends JPanel {
         thumbnails.clear();
         collapsed.clear();
         loaded.set(0);
+        currentPhoto = null; // 换了一批照片，之前点中的那张就不算数了
         loader.restart();
 
         updatePreferredSize();
@@ -158,6 +162,17 @@ final class FilmstripPanel extends JPanel {
 
     boolean isCollapsed(Path folder) {
         return collapsed.contains(folder);
+    }
+
+    /** 当前点中的照片；还没点过时是 null。 */
+    Path currentPhoto() {
+        return currentPhoto;
+    }
+
+    /** 直接指定当前照片（测试用，等价于在那张照片上点一下）。 */
+    void setCurrentPhoto(Path photo) {
+        this.currentPhoto = photo;
+        repaint();
     }
 
     /** 只留给测试用：每一组当前占的矩形（外圈边框的范围）。 */
@@ -268,6 +283,15 @@ final class FilmstripPanel extends JPanel {
                 updatePreferredSize();
                 repaint();
                 SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+                return;
+            }
+            if (box.containsX(x) && !box.collapsed()) {
+                // 落在照片格里：算出是这一组的第几张，把它记为"当前"
+                PhotoGroup group = groups.get(box.index());
+                int index = (x - box.x()) / cellWidth;
+                if (index >= 0 && index < group.size()) {
+                    setCurrentPhoto(group.photos().get(index));
+                }
                 return;
             }
         }
@@ -416,6 +440,14 @@ final class FilmstripPanel extends JPanel {
         Path photo = group.photos().get(index);
         int boxWidth = cellWidth - GAP;
         BufferedImage image = thumbnails.get(photo);
+        boolean current = photo.equals(currentPhoto);
+
+        // 当前选中用一块更亮的底色标出来。
+        // 特意不用细边框：一像素的线在缩放显示下左右宽度会不一样。
+        if (current) {
+            g.setColor(Theme.HIGHLIGHT);
+            g.fillRect(x - 2, y - 2, boxWidth + 4, thumbnailHeight + 4);
+        }
 
         if (image == null) {
             // 还没解出来：先占个位，图到了再重画
@@ -432,7 +464,7 @@ final class FilmstripPanel extends JPanel {
                     width, height, null);
         }
 
-        g.setColor(Theme.TEXT_MUTED);
+        g.setColor(current ? Theme.TEXT : Theme.TEXT_MUTED);
         g.setFont(Theme.FONT_SMALL);
         FontMetrics metrics = g.getFontMetrics();
         g.drawString(shorten(photo.getFileName().toString(), metrics, boxWidth),
