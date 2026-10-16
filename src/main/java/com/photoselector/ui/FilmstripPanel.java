@@ -11,6 +11,7 @@ import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
@@ -373,19 +374,17 @@ final class FilmstripPanel extends JPanel {
         int tabWidth = Math.max(30, width / 3);
         int tabHeight = 12;
 
-        // 耳朵先画、身体后画还把耳朵的下半截盖掉，接缝就自然消失了
         RoundRectangle2D tab = new RoundRectangle2D.Double(x, y, tabWidth, tabHeight * 2.0, 6, 6);
         RoundRectangle2D body = new RoundRectangle2D.Double(x, y + tabHeight, width, height - tabHeight, 6, 6);
 
+        // 耳朵和身体先并成一个形状，再整体填一次、描一次。
+        // 分别画两个矩形的话，身体的顶边会横在耳朵底下——那条灰线就是这么来的。
+        Area folder = new Area(tab);
+        folder.add(new Area(body));
         g.setColor(Theme.CANVAS);
-        g.fill(tab);
+        g.fill(folder);
         g.setColor(Theme.GROUP_BORDER);
-        g.draw(tab);
-
-        g.setColor(Theme.CANVAS);
-        g.fill(body);
-        g.setColor(Theme.GROUP_BORDER);
-        g.draw(body);
+        g.draw(folder);
 
         if (group.photos().isEmpty()) {
             return;

@@ -319,6 +319,13 @@ class FilmstripPanelTest {
         assertTrue(countColors(preview) > 3, "收起后的缩略图里应当能看到第一张照片，而不是空文件夹");
         assertTrue(hasColorNear(preview, 0xFF8B16, 60), "预览里应当有照片的颜色（测试图片是橙色底）");
 
+        // 凸起（耳朵）和下面的大矩形之间不该有一条灰线：
+        // 那一行（身体顶边所在的 y=40）在耳朵底下应当只剩文件夹的填充色
+        for (int x = first.x + 8; x <= first.x + 40; x++) {
+            assertEquals(Theme.CANVAS.getRGB() & 0xFFFFFF, rendered.getRGB(x, 40) & 0xFFFFFF,
+                    "耳朵底下不该留下身体顶边的灰线，x=" + x);
+        }
+
         Path output = Path.of("target", "ui-filmstrip-collapsed.png");
         Files.createDirectories(output.getParent());
         ImageIO.write(rendered, "png", output.toFile());
