@@ -2,6 +2,7 @@ package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Component;
@@ -16,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import javax.imageio.ImageIO;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
@@ -160,6 +162,60 @@ class SourceTreePanelTest {
         Path output = Path.of("target", "ui-tree.png");
         Files.createDirectories(output.getParent());
         ImageIO.write(image, "png", output.toFile());
+    }
+
+    @Test
+    void 缩窄之后横向滚动条也是深色的() throws Exception {
+        Theme.install();
+
+        // 名字取得足够长，保证在窄面板里放不下、横向滚动条必然出现
+        Path root = Files.createDirectories(tempDir.resolve("照片_Leica_M10_档案夹"));
+        Path child = Files.createDirectories(root.resolve("095_2026_0929_秋季外拍_摄影集归档"));
+        TestImages.writeJpeg(child.resolve("L1000001.JPG"), 100, 100);
+
+        SourceTreePanel panel = new SourceTreePanel();
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setRoot(root);
+            panel.setSize(180, 300);
+            layoutTree(panel);
+        });
+
+        JScrollPane scroll = null;
+        for (Component component : panel.getComponents()) {
+            if (component instanceof JScrollPane pane) {
+                scroll = pane;
+            }
+        }
+        assertNotNull(scroll, "左栏里应当有一个滚动面板");
+        assertTrue(scroll.getHorizontalScrollBar().isVisible(), "这么窄的面板，横向滚动条应当出现");
+
+        BufferedImage image = new BufferedImage(180, 300, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        panel.paint(g);
+        g.dispose();
+
+        Path output = Path.of("target", "ui-tree-narrow.png");
+        Files.createDirectories(output.getParent());
+        ImageIO.write(image, "png", output.toFile());
+
+        // 系统外观会在滚动条上画浅灰的轨道和两个箭头按钮；深色主题里不该出现
+        // 这么亮的成片颜色（树里最亮的文字是 #C3C3C3，阈值取 0xD8 很安全）
+        assertEquals(0, countPixelsBrighterThan(image, 0xD8), "横向滚动条不该还是系统外观的亮色");
+    }
+
+    /** 比给定亮度（取 R/G/B 里最大的那个分量）还亮的像素有多少个。 */
+    private static int countPixelsBrighterThan(BufferedImage image, int limit) {
+        int count = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y);
+                int brightest = Math.max(Math.max((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF), rgb & 0xFF);
+                if (brightest > limit) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     /** 离屏布局。 */

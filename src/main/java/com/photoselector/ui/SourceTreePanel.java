@@ -121,6 +121,9 @@ final class SourceTreePanel extends JPanel {
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Theme.PANEL);
         Theme.themeScrollBar(scroll.getVerticalScrollBar());
+        // 面板被拖窄、树的文字放不下时，底下会冒出一条水平滚动条；
+        // 它也得是深色基础外观，否则就是一条系统样式的亮色带，在深色界面里很跳
+        Theme.themeScrollBar(scroll.getHorizontalScrollBar());
         add(scroll, BorderLayout.CENTER);
     }
 
