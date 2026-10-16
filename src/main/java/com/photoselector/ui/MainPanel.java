@@ -135,6 +135,14 @@ public final class MainPanel extends JPanel {
         targetPanel.setOnToggleExpanded(this::toggleMode);
         arrangePanel.setOnToggleExpanded(this::toggleMode);
         viewer = new ViewerPanel(thumbnailLoader);
+        // 点目标文件夹里的某张，大图就换成它
+        targetPanel.setOnPhotoChosen(viewer::showPhoto);
+        arrangePanel.setOnPhotoChosen(viewer::showPhoto);
+
+        // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里
+        DragOut.install(filmstrip, filmstrip::currentPhoto, this::addToTarget);
+        // 大图能平移时，拖动是在平移而不是在往外拖——加一道开关，两者不会同时触发
+        DragOut.install(viewer, viewer::photo, () -> !viewer.canPan(), this::addToTarget);
 
         buildAreas();
 
@@ -346,7 +354,15 @@ public final class MainPanel extends JPanel {
 
     /** 空格：把素材条里点中的那张照片加入目标序列。 */
     private void addCurrentPhotoToTarget() {
-        Path photo = filmstrip.currentPhoto();
+        addToTarget(filmstrip.currentPhoto());
+    }
+
+    /**
+     * 把一张素材照片加入目标序列。
+     *
+     * <p>空格键和"拖到目标面板上"走的是同一条路——同一个动作不该有两份实现。
+     */
+    public void addToTarget(Path photo) {
         Session session = targetPanel.session();
         if (photo == null || session == null) {
             return;
@@ -460,6 +476,11 @@ public final class MainPanel extends JPanel {
     /** 展开排序模式中间那块面板，给测试用。 */
     TargetPanel arrangePanelForTest() {
         return arrangePanel;
+    }
+
+    /** 大图面板，给测试用。 */
+    ViewerPanel viewerForTest() {
+        return viewer;
     }
 
     /** 目录树，给测试用。 */

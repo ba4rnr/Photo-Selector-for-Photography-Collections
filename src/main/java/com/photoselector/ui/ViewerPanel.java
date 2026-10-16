@@ -372,7 +372,7 @@ final class ViewerPanel extends JPanel {
     }
 
     /** 现在能不能拖：图片在某个方向上比窗口大就行。 */
-    private boolean canPan() {
+    boolean canPan() {
         if (image == null) {
             return false;
         }

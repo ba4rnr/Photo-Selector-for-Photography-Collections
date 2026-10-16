@@ -4,6 +4,7 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
@@ -78,6 +79,12 @@ final class TargetPanel extends JPanel {
     /** 点「展开 / 收起」时通知外部去切换模式。 */
     private Runnable onToggleExpanded = () -> { };
 
+    /** 点中某一格时通知外部（大图视图据此显示它）。 */
+    private java.util.function.Consumer<Path> onPhotoChosen = photo -> { };
+
+    /** 当前点中的那一格；用来画个底色，不然点下去看不出发生了什么。 */
+    private int chosenIndex = -1;
+
     // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
     private int extraSpace;
@@ -99,13 +106,48 @@ final class TargetPanel extends JPanel {
         addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e)
-                        && expandButtonBounds != null
-                        && expandButtonBounds.contains(e.getPoint())) {
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    return;
+                }
+                if (expandButtonBounds != null && expandButtonBounds.contains(e.getPoint())) {
                     onToggleExpanded.run();
+                    return;
+                }
+                int index = indexAt(e.getPoint());
+                if (index >= 0) {
+                    chosenIndex = index;
+                    repaint();
+                    onPhotoChosen.accept(session.entryAt(index).source());
                 }
             }
         });
+    }
+
+    /** 点中某一格时通知外部。 */
+    void setOnPhotoChosen(java.util.function.Consumer<Path> listener) {
+        this.onPhotoChosen = listener == null ? photo -> { } : listener;
+    }
+
+    /** 某一格对应的条目下标；点在空白处返回 -1。 */
+    int indexAt(Point point) {
+        if (session == null || session.isEmpty() || point.y < HEADER_HEIGHT) {
+            return -1;
+        }
+        updateMetrics();
+        int row = (point.y - HEADER_HEIGHT) / rowHeight();
+        int column = -1;
+        for (int c = 0; c < columns; c++) {
+            int left = cellX(c);
+            if (point.x >= left && point.x < left + boxWidth) {
+                column = c;
+                break;
+            }
+        }
+        if (column < 0) {
+            return -1;
+        }
+        int index = row * columns + column;
+        return index < session.size() ? index : -1;
     }
 
     /** 点表头那个按钮时通知外部。 */
@@ -370,6 +412,11 @@ final class TargetPanel extends JPanel {
         Path source = entry.source();
         BufferedImage image = thumbnails.get(source);
 
+        // 点中的那一格给一块更亮的底色——不然点下去除了大图换图，看不出发生了什么
+        if (index == chosenIndex) {
+            g.setColor(Theme.HIGHLIGHT);
+            g.fillRect(x - 2, y - 2, boxWidth + 4, thumbnailHeight + 4);
+        }
         g.setColor(Theme.CANVAS);
         g.fillRect(x, y, boxWidth, thumbnailHeight);
 
