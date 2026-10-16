@@ -526,8 +526,9 @@ final class FilmstripPanel extends JPanel {
         }
 
         if (image == null) {
-            // 还没解出来：先占个位，图到了再重画
-            g.setColor(Theme.CANVAS);
+            // 还没解出来：先占个位，图到了再重画。
+            // 底色用面板自己的深灰，别用 CANVAS——那是一格近黑的框，和周围对不上
+            g.setColor(Theme.PANEL);
             g.fillRect(x, y, boxWidth, thumbnailHeight);
             g.setColor(Theme.BORDER);
             g.drawRect(x, y, boxWidth - 1, thumbnailHeight - 1);

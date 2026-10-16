@@ -285,6 +285,48 @@ class TargetPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 照片没占满格子时_空出来的地方是面板的深灰_不是黑框() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("成片"));
+        // 这张照片的缩略图会是 180×120，放进 150×150 的方格子后上下各空一条
+        Path photo = TestImages.writeJpeg(folder.resolve("横.jpg"), 900, 600);
+        Session session = new Session(folder, NumberingRule.DEFAULT);
+        session.seedExisting(java.util.List.of(photo));
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(360, 500);
+            panel.setSession(session);
+            layoutTree(panel);
+        });
+        waitUntil(() -> panel.isLoaded(photo), "照片的缩略图");
+
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(360, 500,
+                java.awt.image.BufferedImage.TYPE_INT_RGB);
+        SwingUtilities.invokeAndWait(() -> {
+            java.awt.Graphics2D gx = image.createGraphics();
+            panel.paint(gx);
+            gx.dispose();
+        });
+
+        // 怎么比：拿"照片上方空出来的那一条"和"面板自己的底色"比。
+        // 面板底色从名字那一行取（那里不会被照片盖住），这样不写死颜色值。
+        int cellLeft = panel.cellXForTest(0);
+        int boxWidth = panel.thumbnailWidthForTest();
+        int boxHeight = panel.rowHeightForTest() - 26; // 一行去掉名字那一行，剩下的就是格子
+        int emptyBand = averageLuma(image, cellLeft + 4, 40 + 3, boxWidth - 8, 12);
+        int panelColor = averageLuma(image, cellLeft + 4,
+                40 + boxHeight + 6, boxWidth - 8, 8);
+
+        assertTrue(Math.abs(emptyBand - panelColor) < 8,
+                "照片没占满的那一条应当是面板的深灰，不该比面板底色深一截"
+                        + "（空处亮度 " + emptyBand + "，面板底色 " + panelColor + "）");
+
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;
@@ -292,6 +334,21 @@ class TargetPanelTest {
             Thread.sleep(30);
         }
         assertTrue(condition.getAsBoolean(), "等不到：" + what);
+    }
+
+    /** 一块平均亮度，用来比"这儿的底色是不是那一带的灰"。 */
+    private static int averageLuma(java.awt.image.BufferedImage image,
+                                   int x, int y, int width, int height) {
+        long sum = 0;
+        int count = 0;
+        for (int py = y; py < Math.min(y + height, image.getHeight()); py++) {
+            for (int px = x; px < Math.min(x + width, image.getWidth()); px++) {
+                int rgb = image.getRGB(px, py);
+                sum += (((rgb >> 16) & 0xFF) + ((rgb >> 8) & 0xFF) + (rgb & 0xFF)) / 3;
+                count++;
+            }
+        }
+        return count == 0 ? -1 : (int) (sum / count);
     }
 
     private static void render(javax.swing.JComponent component, Path output) throws Exception {

@@ -541,8 +541,9 @@ final class TargetPanel extends JPanel {
             g.setColor(Theme.HIGHLIGHT);
             g.fillRect(x - 2, y - 2, boxWidth + 4, thumbnailHeight + 4);
         }
-        g.setColor(Theme.CANVAS);
-        g.fillRect(x, y, boxWidth, thumbnailHeight);
+        // 这里不铺底色：照片区就用面板自己的深灰。
+        // 原来铺的是 CANVAS（近黑）——横照片上下、竖照片左右空出来的那一条
+        // 就会变成一格黑框，看着像画错了（用户原话：应当是深灰，不是黑）。
 
         if (image == null) {
             g.setColor(Theme.BORDER);
