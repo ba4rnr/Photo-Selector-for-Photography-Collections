@@ -35,7 +35,7 @@ public final class Theme {
     /** 分隔线，比面板再深一点。 */
     public static final Color BORDER = new Color(0x1A1A1A);
 
-    /** 鼠标靠近分隔条时的提示色：一条细白线。 */
+    /** 指针压到分隔条上时的提示色：一条细白线，等于"这里可以拖"。 */
     public static final Color DIVIDER_HINT = new Color(0xFFFFFF);
 
     /** 界面主字体。微软雅黑在中文环境下显示最端正。 */
