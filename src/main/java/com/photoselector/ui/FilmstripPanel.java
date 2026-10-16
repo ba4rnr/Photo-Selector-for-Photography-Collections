@@ -95,6 +95,9 @@ final class FilmstripPanel extends JPanel {
     /** 当前点中的那张照片。加入目标文件夹时用的就是它。 */
     private Path currentPhoto;
 
+    /** 当前照片变了的时候通知外部（大图视图据此换图）。 */
+    private java.util.function.Consumer<Path> onCurrentPhotoChanged = photo -> { };
+
     FilmstripPanel(ThumbnailLoader loader) {
         this.loader = loader;
         setBackground(Theme.PANEL);
@@ -173,6 +176,48 @@ final class FilmstripPanel extends JPanel {
     void setCurrentPhoto(Path photo) {
         this.currentPhoto = photo;
         repaint();
+        onCurrentPhotoChanged.accept(photo);
+    }
+
+    /** 点中或换片时通知外部。 */
+    void setOnCurrentPhotoChanged(java.util.function.Consumer<Path> listener) {
+        this.onCurrentPhotoChanged = listener == null ? photo -> { } : listener;
+    }
+
+    /**
+     * 前后挪一张，并把那一格滚进视野——左右方向键过片用的就是它。
+     *
+     * <p>跨组连续：走到一组的最后一张，再往右就进下一组的第一张。
+     */
+    void moveCurrent(int delta) {
+        List<Path> flat = new ArrayList<>();
+        for (PhotoGroup group : groups) {
+            flat.addAll(group.photos());
+        }
+        if (flat.isEmpty()) {
+            return;
+        }
+        int index = currentPhoto == null ? -1 : flat.indexOf(currentPhoto);
+        int next = index < 0 ? (delta >= 0 ? 0 : flat.size() - 1) : index + delta;
+        if (next < 0 || next >= flat.size()) {
+            return; // 到头了就不动，不绕回去
+        }
+        setCurrentPhoto(flat.get(next));
+        scrollToPhoto(flat.get(next));
+    }
+
+    /** 把某张照片所在的那一格滚进视野。 */
+    private void scrollToPhoto(Path photo) {
+        for (GroupBox box : computeLayout()) {
+            if (box.collapsed()) {
+                continue;
+            }
+            int index = groups.get(box.index()).photos().indexOf(photo);
+            if (index >= 0) {
+                scrollRectToVisible(new Rectangle(box.x() + index * cellWidth, 0, cellWidth, 1));
+                return;
+            }
+        }
     }
 
     /** 只留给测试用：每一组当前占的矩形（外圈边框的范围）。 */

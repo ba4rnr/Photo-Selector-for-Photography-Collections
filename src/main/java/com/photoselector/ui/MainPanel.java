@@ -59,6 +59,7 @@ public final class MainPanel extends JPanel {
     private final FilmstripPanel filmstrip;
     private final TargetPanel targetPanel;
     private final TargetPanel arrangePanel;
+    private final ViewerPanel viewer;
     private final SourceTreePanel sourceTree = new SourceTreePanel();
 
     /**
@@ -133,6 +134,7 @@ public final class MainPanel extends JPanel {
         arrangePanel.setThumbnailWidth(ARRANGE_THUMBNAIL_WIDTH);
         targetPanel.setOnToggleExpanded(this::toggleMode);
         arrangePanel.setOnToggleExpanded(this::toggleMode);
+        viewer = new ViewerPanel(thumbnailLoader);
 
         buildAreas();
 
@@ -145,6 +147,8 @@ public final class MainPanel extends JPanel {
         // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组
         sourceTree.setOnFolderChosen(filmstrip::scrollToGroup);
         sourceTree.setOnInclusionChanged(this::inclusionChanged);
+        // 素材条里点中一张，中间的大图就换成它
+        filmstrip.setOnCurrentPhotoChanged(viewer::showPhoto);
         bindKeys();
 
         add(toolBar, BorderLayout.NORTH);
@@ -191,7 +195,7 @@ public final class MainPanel extends JPanel {
     }
 
     private void buildAreas() {
-        centerArea.add(placeholder("素材大图", 700, 400, Theme.CANVAS), ViewMode.BROWSE.name());
+        centerArea.add(viewer, ViewMode.BROWSE.name());
         centerArea.add(arrangePanel.wrapInScrollPane(), ViewMode.ARRANGE.name());
 
         rightArea.add(targetPanel.wrapInScrollPane(), ViewMode.BROWSE.name());
@@ -388,6 +392,8 @@ public final class MainPanel extends JPanel {
     private void bindKeys() {
         bind(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "addToTarget", this::addCurrentPhotoToTarget);
         bind(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK), "undo", this::undo);
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "previousPhoto", () -> filmstrip.moveCurrent(-1));
+        bind(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "nextPhoto", () -> filmstrip.moveCurrent(1));
     }
 
     private void bind(KeyStroke key, String actionName, Runnable action) {

@@ -11,6 +11,7 @@ import java.util.function.Consumer;
 
 import javax.swing.SwingUtilities;
 
+import com.photoselector.io.ImageSource;
 import com.photoselector.io.ThumbnailService;
 
 /**
@@ -70,15 +71,45 @@ final class ThumbnailLoader {
         pool.submit(() -> {
             try {
                 BufferedImage image = service.thumbnail(photo, maxHeight);
-                SwingUtilities.invokeLater(() -> {
-                    if (mySession == session.get()) { // 期间没换过文件夹，这张还有用
-                        onReady.accept(image);
-                    }
-                });
+                deliver(mySession, () -> onReady.accept(image));
             } catch (RuntimeException e) {
                 // 单张出意外不该影响别的图，丢掉即可
             } finally {
                 inFlight.remove(key);
+            }
+        });
+    }
+
+    /**
+     * 请求一张照片的<b>原尺寸</b>图像，供大图视图使用。
+     *
+     * <p>比缩略图慢得多（24MP 的 JPEG 要几百毫秒），所以同样丢给线程池。
+     * 读不出来时回调收到 {@code null}——大图视图据此显示"读不出来"，而不是一直转圈。
+     */
+    void loadFull(Path photo, Consumer<BufferedImage> onReady) {
+        long mySession = session.get();
+        String key = photo.toAbsolutePath() + "|full";
+        if (!inFlight.add(key)) {
+            return;
+        }
+
+        pool.submit(() -> {
+            try {
+                BufferedImage image = ImageSource.open(photo).loadFull();
+                deliver(mySession, () -> onReady.accept(image));
+            } catch (RuntimeException e) {
+                deliver(mySession, () -> onReady.accept(null));
+            } finally {
+                inFlight.remove(key);
+            }
+        });
+    }
+
+    /** 把结果送回界面线程；期间换过文件夹的话直接作废。 */
+    private void deliver(long mySession, Runnable callback) {
+        SwingUtilities.invokeLater(() -> {
+            if (mySession == session.get()) {
+                callback.run();
             }
         });
     }
