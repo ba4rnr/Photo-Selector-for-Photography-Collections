@@ -12,13 +12,14 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
+import com.photoselector.core.Origin;
 import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
 import com.photoselector.ui.theme.Theme;
@@ -30,23 +31,45 @@ import com.photoselector.ui.theme.Theme;
  * 每一格下面写的是它<b>将来</b>在磁盘上的名字，由编号规则按当前位置现算；
  * 挪动位置，名字跟着变，不需要谁去手工同步。
  *
- * <p>取图和素材条同一个套路：只画看得见的格子，只为它们请求缩略图。
+ * <p>两个几何上的决定：
+ * <ul>
+ *   <li><b>格子撑满可用宽度</b>，而不是写死尺寸。右栏宽度是可以拖的，
+ *       写死的话窄了会挤、宽了右侧留一大片空白。</li>
+ *   <li><b>只画看得见的格子</b>，目标文件夹里可能有上千张。</li>
+ * </ul>
  */
 @SuppressWarnings("serial")
 final class TargetPanel extends JPanel {
 
-    private static final int PADDING = 8;
-    private static final int GAP = 6;
+    /** 四周留白。 */
+    private static final int PADDING = 12;
+
+    /** 格子之间、行之间的间隔。 */
+    private static final int GAP = 10;
+
+    /** 表头（目标文件夹路径 + 张数）占的高度。 */
     private static final int HEADER_HEIGHT = 26;
-    private static final int CAPTION_HEIGHT = 16;
+
+    /** 名字那一行占的高度。 */
+    private static final int CAPTION_HEIGHT = 18;
+
+    /**
+     * 排几列时参考的理想格子宽度；实际宽度按可用空间均分。
+     *
+     * <p>这个数只影响"分成几列"：右栏默认 360 宽，可用 336，
+     * 取 150 正好两列、每格 163 —— 比原来写死 132 大了一圈，右侧也不留空。
+     */
+    private static final int WANTED_BOX_WIDTH = 150;
 
     private final ThumbnailLoader loader;
     private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
 
     private Session session;
-    private int thumbnailHeight = 88;
-    private int cellWidth = 132;
+
+    // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
+    private int boxWidth = WANTED_BOX_WIDTH;
+    private int thumbnailHeight = Math.round(WANTED_BOX_WIDTH / 1.5f);
 
     TargetPanel(ThumbnailLoader loader) {
         this.loader = loader;
@@ -56,6 +79,8 @@ final class TargetPanel extends JPanel {
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
+                updateMetrics();
+                updatePreferredSize();
                 requestVisibleThumbnails();
             }
         });
@@ -65,6 +90,8 @@ final class TargetPanel extends JPanel {
     void setSession(Session newSession) {
         this.session = newSession;
         thumbnails.clear();
+        updateMetrics();
+        updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
     }
@@ -75,6 +102,7 @@ final class TargetPanel extends JPanel {
 
     /** 序列变了（挑入、撤销、挪动）之后调用：重新取图并重画。 */
     void refresh() {
+        updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
     }
@@ -93,11 +121,63 @@ final class TargetPanel extends JPanel {
         return session == null ? null : session.nameAt(index);
     }
 
-    /** 一格里缩略图的高度。 */
-    void setThumbnailHeight(int height) {
-        this.thumbnailHeight = height;
-        this.cellWidth = Math.round(height * 1.5f) + GAP;
-        repaint();
+    /**
+     * 装进滚动面板。
+     *
+     * <p>两个监听缺一不可，和素材条是同一个道理：视口滚动、以及视口大小变化，
+     * 都要重新算"哪些格子看得见"。
+     */
+    JScrollPane wrapInScrollPane() {
+        JScrollPane scroll = new JScrollPane(this,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(Theme.PANEL);
+        scroll.getVerticalScrollBar().setUnitIncrement(24);
+        Theme.themeScrollBar(scroll.getVerticalScrollBar());
+
+        scroll.getViewport().addChangeListener(e -> requestVisibleThumbnails());
+        scroll.getViewport().addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                requestVisibleThumbnails();
+            }
+        });
+        return scroll;
+    }
+
+    // ─────────────────────────── 尺寸计算 ───────────────────────────
+
+    /**
+     * 按当前宽度决定排几列、每格多宽。
+     *
+     * <p>先定列数，再把可用宽度<b>均分</b>给这些列——这样右边不会剩一条空白，
+     * 也不会因为写死了格子宽度而在窄栏里挤成一团。
+     */
+    private void updateMetrics() {
+        int available = Math.max(40, getWidth() - PADDING * 2);
+        columns = Math.max(1, (available + GAP) / (WANTED_BOX_WIDTH + GAP));
+        boxWidth = Math.max(24, (available - (columns - 1) * GAP) / columns);
+        thumbnailHeight = Math.max(16, Math.round(boxWidth / 1.5f));
+    }
+
+    private int rowHeight() {
+        return thumbnailHeight + CAPTION_HEIGHT + GAP;
+    }
+
+    private int contentHeight() {
+        if (session == null || session.isEmpty()) {
+            return HEADER_HEIGHT + 40;
+        }
+        int rows = (session.size() + columns - 1) / columns;
+        return HEADER_HEIGHT + rows * rowHeight() + PADDING;
+    }
+
+    private void updatePreferredSize() {
+        // 宽度交给滚动面板去撑（ViewportLayout 会把视图拉到至少和视口一样宽），
+        // 高度按内容算，这样内容多了垂直滚动条才会出现
+        setPreferredSize(new Dimension(120, contentHeight()));
+        revalidate();
     }
 
     // ─────────────────────────── 绘制 ───────────────────────────
@@ -132,13 +212,12 @@ final class TargetPanel extends JPanel {
         g.fillRect(PADDING, HEADER_HEIGHT - 6, Math.max(0, getWidth() - PADDING * 2), 1);
     }
 
-    /** 只画看得见的那几行——目标文件夹里可能有上千张。 */
+    /** 只画看得见的那几行。 */
     private void paintCells(Graphics2D g) {
-        columns = Math.max(1, (getWidth() - PADDING * 2 + GAP) / (cellWidth + GAP));
+        updateMetrics(); // 宽度可能刚被拖动过，画之前先按当前宽度算一遍
         Rectangle clip = g.getClipBounds();
-        int rowHeight = thumbnailHeight + CAPTION_HEIGHT + GAP;
-        int firstRow = Math.max(0, (clip.y - HEADER_HEIGHT) / rowHeight);
-        int lastRow = (clip.y + clip.height - HEADER_HEIGHT) / rowHeight;
+        int firstRow = Math.max(0, (clip.y - HEADER_HEIGHT) / rowHeight());
+        int lastRow = (clip.y + clip.height - HEADER_HEIGHT) / rowHeight();
 
         for (int row = firstRow; row <= lastRow; row++) {
             for (int column = 0; column < columns; column++) {
@@ -146,8 +225,8 @@ final class TargetPanel extends JPanel {
                 if (index >= session.size()) {
                     return;
                 }
-                paintCell(g, index, PADDING + column * (cellWidth + GAP),
-                        HEADER_HEIGHT + row * rowHeight);
+                paintCell(g, index, PADDING + column * (boxWidth + GAP),
+                        HEADER_HEIGHT + row * rowHeight());
             }
         }
     }
@@ -155,10 +234,8 @@ final class TargetPanel extends JPanel {
     private void paintCell(Graphics2D g, int index, int x, int y) {
         TargetEntry entry = session.entryAt(index);
         Path source = entry.source();
-        int boxWidth = cellWidth - GAP;
         BufferedImage image = thumbnails.get(source);
 
-        // 底色比面板稍亮一点，把每一格的范围划出来
         g.setColor(Theme.CANVAS);
         g.fillRect(x, y, boxWidth, thumbnailHeight);
 
@@ -174,12 +251,11 @@ final class TargetPanel extends JPanel {
                     width, height, null);
         }
 
-        // 名字用编号规则按位置现算，而不是文件现在叫什么
+        // 名字用编号规则按位置现算，而不是文件现在叫什么。
+        // 已有的用普通色、新挑进来的用暖橙——一眼看出哪些还没落到磁盘上。
         g.setFont(Theme.FONT_SMALL);
-        g.setColor(entry.origin() == com.photoselector.core.Origin.EXISTING
-                ? Theme.TEXT
-                : Theme.ACCENT);
-        g.drawString(session.nameAt(index), x, y + thumbnailHeight + 13);
+        g.setColor(entry.origin() == Origin.EXISTING ? Theme.TEXT : Theme.ACCENT);
+        g.drawString(session.nameAt(index), x, y + thumbnailHeight + 14);
     }
 
     private void paintEmptyHint(Graphics2D g) {
@@ -189,9 +265,10 @@ final class TargetPanel extends JPanel {
                 ? "先在「文件 → 选择工作区…」里指定一个目标文件夹"
                 : "在下方素材条里点中一张照片，按空格键加入这里";
         FontMetrics metrics = g.getFontMetrics();
-        int y = HEADER_HEIGHT + Math.max(metrics.getAscent(),
-                (getHeight() - HEADER_HEIGHT - metrics.getHeight()) / 2);
-        g.drawString(shorten(hint, metrics, getWidth() - PADDING * 2), PADDING, y);
+        for (String line : hint.split("\n")) {
+            g.drawString(shorten(line, metrics, getWidth() - PADDING * 2), PADDING,
+                    HEADER_HEIGHT + metrics.getAscent() + 6);
+        }
     }
 
     // ─────────────────────────── 取图 ───────────────────────────
@@ -200,20 +277,20 @@ final class TargetPanel extends JPanel {
         if (session == null || session.isEmpty()) {
             return;
         }
-        columns = Math.max(1, (getWidth() - PADDING * 2 + GAP) / (cellWidth + GAP));
+        updateMetrics(); // 同上：算可见范围要依赖列数和行高
         Rectangle visible = getVisibleRect();
         if (visible.height <= 0) {
             visible = new Rectangle(0, 0, getWidth(), getHeight());
         }
 
-        int rowHeight = thumbnailHeight + CAPTION_HEIGHT + GAP;
-        int firstRow = Math.max(1, (visible.y - HEADER_HEIGHT) / rowHeight - 1);
-        int lastRow = (visible.y + visible.height - HEADER_HEIGHT) / rowHeight + 1;
+        // 可见范围上下各多取一行，滚动时不至于先看到空白
+        int firstRow = Math.max(0, (visible.y - HEADER_HEIGHT) / rowHeight() - 1);
+        int lastRow = (visible.y + visible.height - HEADER_HEIGHT) / rowHeight() + 1;
+        int first = firstRow * columns;
+        int last = Math.min(session.size() - 1, (lastRow + 1) * columns - 1);
 
         Set<Path> keep = new HashSet<>();
-        int first = (firstRow - 1) * columns;
-        int last = Math.min(session.size() - 1, lastRow * columns + columns - 1);
-        for (int index = Math.max(0, first); index <= last; index++) {
+        for (int index = first; index <= last; index++) {
             Path source = session.entryAt(index).source();
             keep.add(source);
             if (!thumbnails.containsKey(source)) {

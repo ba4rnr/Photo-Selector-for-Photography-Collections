@@ -167,7 +167,7 @@ public final class MainPanel extends JPanel {
         centerArea.add(placeholder("素材大图", 700, 400, Theme.CANVAS), ViewMode.BROWSE.name());
         centerArea.add(placeholder("目标文件夹的缩略图（可拖动排序）", 700, 400, Theme.CANVAS), ViewMode.ARRANGE.name());
 
-        rightArea.add(targetPanel, ViewMode.BROWSE.name());
+        rightArea.add(targetPanel.wrapInScrollPane(), ViewMode.BROWSE.name());
         rightArea.add(placeholder("垃圾桶", 360, 400, Theme.PANEL), ViewMode.ARRANGE.name());
 
         JScrollPane filmstripScroll = filmstrip.wrapInScrollPane();

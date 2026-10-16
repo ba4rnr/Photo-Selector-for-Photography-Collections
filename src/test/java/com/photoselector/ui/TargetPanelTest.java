@@ -4,17 +4,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.Origin;
+import com.photoselector.core.NumberingRule;
+import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.testing.TestImages;
 import com.photoselector.ui.theme.Theme;
 
@@ -95,6 +100,45 @@ class TargetPanelTest {
 
         assertEquals(0, panel.targetPanelForTest().entryCount());
         panel.shutdown();
+    }
+
+    @Test
+    void 目标文件夹里的照片多了之后可以上下滚动() throws Exception {
+        Theme.install();
+
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        java.util.List<Path> existing = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            existing.add(TestImages.writeJpeg(target.resolve("p" + i + ".jpg"), 300, 200));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel targetPanel = new TargetPanel(loader);
+        Session session = new Session(target, NumberingRule.DEFAULT);
+        session.seedExisting(existing);
+
+        JScrollPane scroll = targetPanel.wrapInScrollPane();
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(360, 300);
+            targetPanel.setSession(session);
+            layoutTree(scroll);
+            // 离屏布局不会自己派发 resize 事件，手动补一个让面板按新宽度重算
+            targetPanel.dispatchEvent(new ComponentEvent(targetPanel, ComponentEvent.COMPONENT_RESIZED));
+        });
+
+        assertTrue(targetPanel.getPreferredSize().height > 300,
+                "内容比视口高，应当出现垂直滚动条");
+
+        // 先只看得见前几行，把它们取到手
+        waitUntil(() -> targetPanel.loadedCount() >= 2, "首屏缩略图");
+        int before = targetPanel.loadedCount();
+
+        // 滚到底部，新露出来的格子也要去取图
+        SwingUtilities.invokeAndWait(() -> scroll.getViewport().setViewPosition(
+                new java.awt.Point(0, Math.max(0, targetPanel.getPreferredSize().height))));
+        waitUntil(() -> targetPanel.loadedCount() > before, "滚动之后新露出来的格子");
+
+        loader.shutdown();
     }
 
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
