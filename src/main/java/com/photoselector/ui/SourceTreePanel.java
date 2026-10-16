@@ -91,6 +91,9 @@ final class SourceTreePanel extends JPanel {
         tree.setShowsRootHandles(true);
         tree.setRootVisible(true);
         tree.setBorder(null);
+        // 不画连接节点的那些线。左边的图形只保留两种：
+        // 文件夹是三角加勾选框，文件是一个文件图标——不再有别的装饰。
+        tree.putClientProperty("JTree.lineStyle", "None");
         tree.setCellRenderer(new Renderer());
 
         tree.addTreeWillExpandListener(new TreeWillExpandListener() {
