@@ -34,6 +34,9 @@ public final class JpegImageSource implements ImageSource {
     private int width = -1;
     private int height = -1;
 
+    /** EXIF 方向只读一次；1 = 正放。 */
+    private int orientation;
+
     JpegImageSource(Path file) {
         this.file = Objects.requireNonNull(file, "file 不能为空");
     }
@@ -46,11 +49,23 @@ public final class JpegImageSource implements ImageSource {
     @Override
     public int width() {
         readSizeIfNeeded();
-        return width;
+        return ExifOrientation.swapsSides(orientation) ? height : width;
     }
 
     @Override
     public int height() {
+        readSizeIfNeeded();
+        return ExifOrientation.swapsSides(orientation) ? width : height;
+    }
+
+    /** 文件里存的像素宽度（没按 EXIF 转过的那一套）。 */
+    private int storedWidth() {
+        readSizeIfNeeded();
+        return width;
+    }
+
+    /** 文件里存的像素高度。 */
+    private int storedHeight() {
         readSizeIfNeeded();
         return height;
     }
@@ -62,7 +77,9 @@ public final class JpegImageSource implements ImageSource {
             if (image == null) {
                 throw new IOException("这不是能识别的图像格式");
             }
-            return image;
+            // 相机竖拍的照片像素是横着存的，靠 EXIF 那句"显示时转 90 度"。
+            // 在这儿摆正，界面拿到的就永远是"看着是对的"那一版。
+            return ExifOrientation.apply(image, orientation());
         } catch (IOException e) {
             throw new UncheckedIOException("解码失败：" + file, e);
         }
@@ -76,7 +93,7 @@ public final class JpegImageSource implements ImageSource {
         readSizeIfNeeded();
 
         // 采样倍数：让粗解出来的图仍然比目标大一些，缩放才有余量
-        int step = Math.max(1, Math.min(width, height) / (maxHeight * 2));
+        int step = Math.max(1, Math.min(storedWidth(), storedHeight()) / (maxHeight * 2));
 
         try (ImageInputStream stream = ImageIO.createImageInputStream(file.toFile())) {
             ImageReader reader = firstReader(stream);
@@ -89,7 +106,8 @@ public final class JpegImageSource implements ImageSource {
                 if (sampled == null) {
                     throw new IOException("解码器没有返回图像");
                 }
-                return scaleToHeight(sampled, maxHeight);
+                // 先摆正再缩放：转过的图宽高变了，"按高度缩"要按摆正之后的来算
+                return scaleToHeight(ExifOrientation.apply(sampled, orientation()), maxHeight);
             } finally {
                 reader.dispose();
             }
@@ -113,6 +131,13 @@ public final class JpegImageSource implements ImageSource {
         } catch (IOException e) {
             throw new UncheckedIOException("读不出图像尺寸：" + file, e);
         }
+        orientation = ExifOrientation.read(file);
+    }
+
+    /** 方向值；没读出来按正放算。 */
+    private int orientation() {
+        readSizeIfNeeded();
+        return orientation == 0 ? 1 : orientation;
     }
 
     /** 让 ImageIO 挑一个能读这个文件的解码器，并把输入接上去。 */
