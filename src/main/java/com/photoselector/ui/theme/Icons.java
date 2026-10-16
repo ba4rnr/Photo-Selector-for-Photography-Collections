@@ -6,6 +6,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.Arc2D;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
@@ -248,6 +249,86 @@ public final class Icons {
         return stroke(g -> {
             g.draw(new Rectangle2D.Double(2.5, 3.5, 13, 11));
             g.draw(new Line2D.Double(2.5, 11, 15.5, 11));
+        });
+    }
+
+    // ─────────────────── 选文件夹对话框 ───────────────────
+
+    /** 后退：向左的箭头。 */
+    public static Icon back() {
+        return stroke(g -> {
+            g.draw(new Line2D.Double(15, 9, 4.5, 9));
+            arrowHead(g, 4.5, 9, -1, 0);
+        });
+    }
+
+    /** 前进：向右的箭头。 */
+    public static Icon forward() {
+        return stroke(g -> {
+            g.draw(new Line2D.Double(3, 9, 13.5, 9));
+            arrowHead(g, 13.5, 9, 1, 0);
+        });
+    }
+
+    /** 向上一级：向上箭头，顶上一条横线代表"上一层"。 */
+    public static Icon up() {
+        return stroke(g -> {
+            g.draw(new Line2D.Double(9, 15.5, 9, 6));
+            arrowHead(g, 9, 6, 0, -1);
+            g.draw(new Line2D.Double(4, 3, 14, 3));
+        });
+    }
+
+    /** 刷新：带缺口的一圈箭头。 */
+    public static Icon refresh() {
+        return stroke(g -> arcArrow(g, 9, 9, 5.5, 55, 250));
+    }
+
+    /** 硬盘：一个小盒子加指示灯。 */
+    public static Icon drive() {
+        return stroke(g -> {
+            g.draw(new RoundRectangle2D.Double(2.5, 6, 13, 6.8, 2.2, 2.2));
+            g.draw(new Line2D.Double(2.5, 9.6, 15.5, 9.6));
+            g.fill(new Ellipse2D.Double(4.9, 10.6, 1.7, 1.7));
+        });
+    }
+
+    /** 桌面：一台显示器。 */
+    public static Icon desktop() {
+        return stroke(g -> {
+            g.draw(new Rectangle2D.Double(2.5, 4, 13, 8.4));
+            g.draw(new Line2D.Double(9, 12.4, 9, 15));
+            g.draw(new Line2D.Double(6.5, 15, 11.5, 15));
+        });
+    }
+
+    /** 图片：相框里一座山和一颗太阳。 */
+    public static Icon pictures() {
+        return stroke(g -> {
+            g.draw(new Rectangle2D.Double(2.5, 3.5, 13, 11));
+            Path2D hill = new Path2D.Double();
+            hill.moveTo(4.6, 12.8);
+            hill.lineTo(8.2, 7.4);
+            hill.lineTo(11.8, 12.8);
+            g.draw(hill);
+            g.draw(new Ellipse2D.Double(10.3, 5.5, 2.1, 2.1));
+        });
+    }
+
+    /** 主文件夹：屋顶与房身。 */
+    public static Icon home() {
+        return stroke(g -> {
+            Path2D roof = new Path2D.Double();
+            roof.moveTo(2.5, 9);
+            roof.lineTo(9, 3.6);
+            roof.lineTo(15.5, 9);
+            g.draw(roof);
+            Path2D body = new Path2D.Double();
+            body.moveTo(4.7, 8.2);
+            body.lineTo(4.7, 15);
+            body.lineTo(13.3, 15);
+            body.lineTo(13.3, 8.2);
+            g.draw(body);
         });
     }
 

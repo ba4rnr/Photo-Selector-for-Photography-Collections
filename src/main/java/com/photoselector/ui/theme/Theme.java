@@ -40,6 +40,9 @@ public final class Theme {
     /** 次要文字：文件名、说明标签。 */
     public static final Color TEXT_MUTED = new Color(0xA0A0A0);
 
+    /** 不可用的文字与图标：导航按钮到头时的样子。 */
+    public static final Color TEXT_DISABLED = new Color(0x5A5A5A);
+
     /** 分隔线，比面板再深一点。 */
     public static final Color BORDER = new Color(0x1A1A1A);
 

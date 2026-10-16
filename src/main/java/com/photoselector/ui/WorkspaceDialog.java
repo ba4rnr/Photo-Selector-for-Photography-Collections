@@ -13,7 +13,6 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -27,6 +26,9 @@ import com.photoselector.ui.theme.Theme;
  *
  * <p>中间那棵目录树和主界面左栏是同一个组件——设计里就说了这两处要共用，
  * 免得同一套"选中 / 剔除"的交互写两遍、还越走越偏。
+ *
+ * <p>选文件夹交给自制的 {@link FolderPickerDialog}：JDK 自带的 {@code JFileChooser}
+ * 是浅色系统外观，在这套深色界面里很跳，而且风格不受我们控制。
  *
  * <p>用模态对话框：工作区没定下来之前，主界面上的操作没有意义。
  */
@@ -150,15 +152,7 @@ final class WorkspaceDialog extends JDialog {
     }
 
     private Path chooseDirectory(String title, Path initial) {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle(title);
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        if (initial != null && Files.isDirectory(initial)) {
-            chooser.setCurrentDirectory(initial.toFile());
-        }
-        return chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION
-                ? chooser.getSelectedFile().toPath()
-                : null;
+        return FolderPickerDialog.show(this, title, initial).orElse(null);
     }
 
     private JPanel pathRow(String label, JTextField field, Runnable onBrowse) {
@@ -205,11 +199,6 @@ final class WorkspaceDialog extends JDialog {
     }
 
     private static JButton button(String text) {
-        JButton button = new JButton(text);
-        button.setBackground(Theme.PANEL);
-        button.setForeground(Theme.TEXT);
-        button.setFont(Theme.FONT);
-        button.setFocusPainted(false);
-        return button;
+        return new FlatButton(text, true);
     }
 }
