@@ -350,6 +350,88 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 撤销丢垃圾桶_垃圾桶面板也跟着更新() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            SwingUtilities.invokeAndWait(() -> {
+                window.panel.setMode(ViewMode.ARRANGE);
+                window.frame.validate();
+            });
+            TargetPanel arrange = window.panel.arrangePanelForTest();
+            TrashPanel trash = window.panel.trashPanelForTest();
+
+            // 拖一张进垃圾桶
+            Point onFirst = new Point(arrange.cellXForTest(0) + 20, arrange.rowHeightForTest() / 2);
+            Point onTrash = new Point(trash.cellXForTest(0) + 20, trash.rowHeightForTest() / 2);
+            Point overTrash = convertLocal(trash, onTrash, arrange);
+            SwingUtilities.invokeAndWait(() -> {
+                press(arrange, onFirst);
+                drag(arrange, new Point(onFirst.x + 12, onFirst.y));
+                drag(arrange, overTrash);
+            });
+            SwingUtilities.invokeAndWait(() -> release(arrange, overTrash));
+            assertEquals(1, trash.entryCount(), "垃圾桶里有一条");
+            assertEquals(1, arrange.entryCount());
+
+            // 撤销：照片该回到目标序列，垃圾桶该空
+            SwingUtilities.invokeAndWait(() -> window.panel.getActionMap().get("undo")
+                    .actionPerformed(new java.awt.event.ActionEvent(window.panel, 0, "undo")));
+
+            assertEquals(0, trash.entryCount(), "撤销之后垃圾桶面板也该显示空了");
+            assertEquals(2, arrange.entryCount(), "照片回到了目标序列");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
+    void 扔进垃圾桶再保存_磁盘上那张才真的没了() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            TargetPanel target = window.panel.targetPanelForTest();
+            ViewerPanel viewer = window.panel.viewerForTest();
+            Path thrown = target.session().entryAt(0).source();
+            Path kept = target.session().entryAt(1).source();
+            assertTrue(Files.isRegularFile(thrown), "动手之前两张都在磁盘上");
+
+            // 从目标栏拖到中间的大图区
+            Point onFirstCell = new Point(target.cellXForTest(0) + 20,
+                    target.rowHeightForTest() / 2);
+            Point onViewer = new Point(viewer.getWidth() / 2, viewer.getHeight() / 2);
+            Point overViewer = convertLocal(viewer, onViewer, target);
+            SwingUtilities.invokeAndWait(() -> {
+                press(target, onFirstCell);
+                drag(target, new Point(onFirstCell.x + 12, onFirstCell.y));
+                drag(target, overViewer);
+            });
+            SwingUtilities.invokeAndWait(() -> release(target, overViewer));
+            assertTrue(Files.isRegularFile(thrown), "还没保存，磁盘上那张不能动");
+            assertEquals(1, target.session().trash().size());
+            String keptName = kept.getFileName().toString();
+
+            // 保存：到这一步垃圾桶里的真实文件才真删
+            AtomicInteger saved = new AtomicInteger();
+            window.panel.setOnSaveFinished(result -> saved.incrementAndGet());
+            SwingUtilities.invokeAndWait(() -> window.panel.save());
+            waitUntil(() -> saved.get() == 1, "保存跑完");
+            waitUntil(() -> !Files.exists(thrown), "被扔的那张从磁盘上消失");
+
+            // 没扔的那张会被按新顺序重新编号：它的老名字不再存在，内容挪到 010.jpg
+            assertTrue(Files.isRegularFile(kept.getParent().resolve("010.jpg")),
+                    "没扔的那张还在，并且按新顺序重新编号成 010");
+            assertFalse(Files.exists(kept.getParent().resolve(keptName)),
+                    "老名字（" + keptName + "）已经被新编号替代");
+            assertTrue(target.session().trash().isEmpty(), "保存之后垃圾桶清空");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 垃圾桶面板_能拖进去也能拖回来() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();

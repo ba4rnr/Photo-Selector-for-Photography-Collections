@@ -248,11 +248,13 @@ public final class Session {
         trash.removeAt(at);
         sequence.add(to, picked.entry());
         dirty = true;
-        // 反向动作：把刚插进去的这条再丢回垃圾桶
+        // 反向动作：把刚插进去的这条再丢回垃圾桶，而且要插回它<b>原来那一格</b>——
+        // 用 add 追加到末尾的话，垃圾桶的排序会悄悄变（界面按顺序渲染，看得出差别）
+        int backTo = at;
         TrashedItem back = picked;
         pushUndo(() -> {
             TargetEntry entry = sequence.remove(to);
-            trash.add(entry, back.originalIndex());
+            trash.insert(backTo, new TrashedItem(entry, back.originalIndex()));
         });
         return true;
     }

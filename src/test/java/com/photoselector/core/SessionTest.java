@@ -215,6 +215,53 @@ class SessionTest {
     }
 
     @Test
+    void 连续丢两张再分别捡回来_顺序都对() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.add(PHOTO_C);
+        session.trash(0); // 丢 A（原位置 0）
+        session.trash(0); // 丢 B（现在排在 0）
+
+        assertEquals(1, session.size(), "只剩 C");
+        assertEquals(2, session.trash().size());
+        // items() 是按"丢进去的先后"排的：A 在前、B 在后
+        assertEquals("L1000001.JPG", session.trash().items().get(0).entry().fileName());
+        assertEquals("L1000002.JPG", session.trash().items().get(1).entry().fileName());
+
+        assertTrue(session.untrash(PHOTO_B, 1), "把后丢的那张捡回来，插在 C 后面");
+
+        assertEquals(List.of("L1000003.JPG", "L1000002.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+        assertEquals(1, session.trash().size(), "垃圾桶里还剩 A");
+        assertEquals("L1000001.JPG", session.trash().items().get(0).entry().fileName());
+
+        assertTrue(session.untrash(PHOTO_A, 0), "再把 A 捡回来");
+        assertEquals(List.of("L1000001.JPG", "L1000003.JPG", "L1000002.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+        assertTrue(session.trash().isEmpty());
+    }
+
+    @Test
+    void 撤销捡回来_照片放回垃圾桶里原来那一格() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.add(PHOTO_C);
+        session.trash(0); // A 先进
+        session.trash(0); // B 后进 → 垃圾桶顺序 [A, B]
+        session.untrash(PHOTO_B, 1);
+
+        session.undo();
+
+        assertEquals(2, session.trash().size());
+        assertEquals("L1000001.JPG", session.trash().items().get(0).entry().fileName(),
+                "A 还在原来那一格");
+        assertEquals("L1000002.JPG", session.trash().items().get(1).entry().fileName(),
+                "B 回到它原来那一格，而不是被追加到末尾");
+    }
+
+    @Test
     void 不在垃圾桶里的照片捡不回来() {
         Session session = newSession();
         session.add(PHOTO_A);

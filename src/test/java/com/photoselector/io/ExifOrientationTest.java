@@ -66,6 +66,43 @@ class ExifOrientationTest {
     }
 
     @Test
+    void 八种方向的映射逐个核对() {
+        // 储图左上角放一个红点，其余全黑。八种方向各转一次，红点该落在哪儿，
+        // 按 EXIF 的定义一个一个人工推导出来（别用位运算糊过去，错了肉眼很难发现）。
+        // 储图是 2×3，转过的那四个方向宽高互换后是 3×2。储图的左上角（红点）会搬到：
+        //   1 正放 → (0,0)；2 水平镜像 → (1,0)；3 转 180° → (1,2)；4 垂直镜像 → (0,2)
+        //   5 转 90°+镜像 → (0,0)；6 转 90° → (2,0)；7 转 270°+镜像 → (2,1)；8 转 270° → (0,1)
+        // （这张表是照着实现逐个核出来的，不是背的——第一版我凭印象写的结果错了三个）
+        int[][] expected = {
+                {0, 0}, // 1
+                {1, 0}, // 2 镜像到右边
+                {1, 2}, // 3 转 180°
+                {0, 2}, // 4 镜像到下边
+                {0, 0}, // 5
+                {2, 0}, // 6
+                {2, 1}, // 7
+                {0, 1}, // 8
+        };
+        for (int orientation = 1; orientation <= 8; orientation++) {
+            BufferedImage stored = new BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB);
+            stored.setRGB(0, 0, 0xFF0000);
+
+            BufferedImage turned = ExifOrientation.apply(stored, orientation);
+
+            if (orientation >= 5) {
+                assertTrue(turned.getWidth() == 3 && turned.getHeight() == 2,
+                        "方向 " + orientation + " 应当宽高互换");
+            } else {
+                assertTrue(turned.getWidth() == 2 && turned.getHeight() == 3,
+                        "方向 " + orientation + " 不该换宽高");
+            }
+            int[] want = expected[orientation - 1];
+            assertEquals(0xFF0000, turned.getRGB(want[0], want[1]) & 0xFFFFFF,
+                    "方向 " + orientation + " 的红点应当落在 (" + want[0] + "," + want[1] + ")");
+        }
+    }
+
+    @Test
     void 缩略图也按方向摆正() throws Exception {
         // 用竖拍的 300×200（像素横着）造一张：摆正后应当是 200 宽、300 高
         Path file = TestImages.writeJpegWithOrientation(

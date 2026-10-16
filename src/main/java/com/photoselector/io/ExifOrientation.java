@@ -74,13 +74,16 @@ public final class ExifOrientation {
                 int dx;
                 int dy;
                 switch (orientation) {
+                    // 1 = 正放（不动）；2..4 是三种不换宽高的镜像 / 旋转；
+                    // 5..8 会把宽高换过来：6 / 8 是纯转 90°（顺时针 / 逆时针），
+                    // 5 / 7 是另外两种镜像（沿对角线），相机里很少见，但规范里有
                     case 2 -> { dx = w - 1 - x; dy = y; }          // 水平镜像
                     case 3 -> { dx = w - 1 - x; dy = h - 1 - y; }  // 转 180°
                     case 4 -> { dx = x; dy = h - 1 - y; }          // 垂直镜像
-                    case 5 -> { dx = y; dy = x; }                  // 转 90° + 镜像
+                    case 5 -> { dx = y; dy = x; }                  // 沿主对角线镜像（转置）
                     case 6 -> { dx = h - 1 - y; dy = x; }          // 转 90°（顺时针）
-                    case 7 -> { dx = h - 1 - y; dy = w - 1 - x; }  // 转 270° + 镜像
-                    case 8 -> { dx = y; dy = w - 1 - x; }          // 转 270°（逆时针）
+                    case 7 -> { dx = h - 1 - y; dy = w - 1 - x; }  // 沿副对角线镜像
+                    case 8 -> { dx = y; dy = w - 1 - x; }          // 转 90°（逆时针）
                     default -> { dx = x; dy = y; }
                 }
                 out.setRGB(dx, dy, stored.getRGB(x, y));

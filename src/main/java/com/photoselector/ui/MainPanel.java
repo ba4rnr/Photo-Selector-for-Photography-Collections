@@ -497,6 +497,9 @@ public final class MainPanel extends JPanel {
         if (!saving && session != null && session.undo()) {
             targetPanel.refresh();
             arrangePanel.refresh();
+            // 撤销的可能是"丢进垃圾桶"或者"从垃圾桶捡回来"，
+            // 两种都会改变垃圾桶的内容——不刷新的话那块面板会停在旧画面上
+            trashPanel.refresh();
         }
     }
 
