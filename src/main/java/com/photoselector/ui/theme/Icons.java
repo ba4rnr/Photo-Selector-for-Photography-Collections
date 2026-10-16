@@ -105,19 +105,41 @@ public final class Icons {
         });
     }
 
-    /** 重置：绕一圈回到起点。 */
+    /** 重置：一圈带缺口的箭头——把这张照片的修改"转回去"。 */
     public static Icon reset() {
-        return stroke(g -> arcArrow(g, 9, 9, 6, 60, 280));
+        return stroke(g -> {
+            // 缺口留在右上方，箭头停在缺口的下端、顺着圆周指进去。
+            // 原来弧的两端都窝在右侧、箭头和起点顶在一起，看起来像个字母 G。
+            g.draw(new Arc2D.Double(3.6, 4.2, 10.4, 10.4, 120, 280, Arc2D.OPEN));
+            double endRad = Math.toRadians(40);
+            double x = 8.8 + 5.2 * Math.cos(endRad);
+            double y = 9.4 - 5.2 * Math.sin(endRad);
+            arrowHead(g, x, y, -Math.sin(endRad), -Math.cos(endRad), 2.9);
+        });
     }
 
-    /** 撤销：向左回卷的箭头。 */
+    /** 撤销：向左的箭头，尾巴向右伸出去再拐个弯向下——把上一步"绕回来"。 */
     public static Icon undo() {
-        return stroke(g -> arcArrow(g, 9, 10, 5.5, 20, 140));
+        return stroke(g -> {
+            Path2D shaft = new Path2D.Double();
+            shaft.moveTo(4.0, 7.6);
+            shaft.lineTo(10.2, 7.6);
+            shaft.append(new Arc2D.Double(5.2, 7.6, 10, 10, 90, -90, Arc2D.OPEN), false);
+            g.draw(shaft);
+            arrowHead(g, 4.0, 7.6, -1, 0);
+        });
     }
 
     /** 重做：撤销的镜像。 */
     public static Icon redo() {
-        return stroke(g -> arcArrow(g, 9, 10, 5.5, 160, -140));
+        return stroke(g -> {
+            Path2D shaft = new Path2D.Double();
+            shaft.moveTo(14.0, 7.6);
+            shaft.lineTo(7.8, 7.6);
+            shaft.append(new Arc2D.Double(2.8, 7.6, 10, 10, 90, 90, Arc2D.OPEN), false);
+            g.draw(shaft);
+            arrowHead(g, 14.0, 7.6, 1, 0);
+        });
     }
 
     // ─────────────────────────── 中组：光标工具 ───────────────────────────
