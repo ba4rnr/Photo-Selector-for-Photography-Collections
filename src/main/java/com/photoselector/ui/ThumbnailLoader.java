@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -119,8 +120,18 @@ final class ThumbnailLoader {
         return inFlight.size();
     }
 
-    /** 关窗口时调用，让线程池收工。 */
+    /**
+     * 关窗口时调用，让线程池收工。
+     *
+     * <p>会等正在解的那几张结束——不然它们还攥着文件句柄，
+     * 外面的程序（比如测试要删临时目录）就会删失败。
+     */
     void shutdown() {
         pool.shutdownNow();
+        try {
+            pool.awaitTermination(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

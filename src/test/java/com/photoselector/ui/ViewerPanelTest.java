@@ -90,6 +90,95 @@ class ViewerPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 适应窗口与一比一的切换() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 900, 600);
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        assertTrue(viewer.isFitToWindow(), "默认是适应窗口");
+        assertTrue(viewer.zoomPercent() < 100, "900 宽的图塞进 400 宽的窗口，比例必然小于 100%");
+
+        SwingUtilities.invokeAndWait(viewer::actualSize);
+        assertTrue(!viewer.isFitToWindow());
+        assertEquals(100, viewer.zoomPercent());
+
+        SwingUtilities.invokeAndWait(viewer::fitToWindow);
+        assertTrue(viewer.isFitToWindow());
+        loader.shutdown();
+    }
+
+    @Test
+    void 滚轮缩放有上下限() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 900, 600);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 40; i++) {
+                viewer.zoomBy(2.0);
+            }
+        });
+        assertTrue(viewer.zoomPercent() <= 800, "放大到 800% 就该停住");
+
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 80; i++) {
+                viewer.zoomBy(0.5);
+            }
+        });
+        assertTrue(viewer.zoomPercent() >= 5, "缩小到 5% 就该停住");
+        loader.shutdown();
+    }
+
+    @Test
+    void 图比窗口大时能平移_但拖不出视野() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 1200, 800);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+        SwingUtilities.invokeAndWait(viewer::actualSize);
+
+        SwingUtilities.invokeAndWait(() -> viewer.panBy(10000, 10000));
+        int limitX = viewer.offsetXForTest();
+        int limitY = viewer.offsetYForTest();
+        assertTrue(limitX > 0 && limitY > 0, "图比窗口大，应当能平移");
+
+        SwingUtilities.invokeAndWait(() -> viewer.panBy(10000, 10000));
+        assertEquals(limitX, viewer.offsetXForTest(), "再往外拖也拖不动了");
+        assertEquals(limitY, viewer.offsetYForTest());
+
+        SwingUtilities.invokeAndWait(() -> viewer.panBy(-100000, -100000));
+        assertEquals(-limitX, viewer.offsetXForTest(), "反方向是同一个界限");
+        assertEquals(-limitY, viewer.offsetYForTest());
+
+        // 换回适应窗口：图变小了，偏移归零居中
+        SwingUtilities.invokeAndWait(viewer::fitToWindow);
+        assertEquals(0, viewer.offsetXForTest());
+        assertEquals(0, viewer.offsetYForTest());
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;

@@ -45,6 +45,7 @@ public final class MainFrame extends JFrame {
         // 工具栏左组那两个按钮：和菜单里对应的项走同一条路
         mainPanel.toolBar().chooseWorkspaceButton().addActionListener(e -> chooseWorkspace());
         mainPanel.toolBar().saveButton().addActionListener(e -> mainPanel.save());
+        mainPanel.toolBar().fitButton().addActionListener(e -> mainPanel.fitViewerToWindow());
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
@@ -101,6 +102,8 @@ public final class MainFrame extends JFrame {
         arrange.addActionListener(e -> mainPanel.setMode(ViewMode.ARRANGE));
         view.add(browse);
         view.add(arrange);
+        view.addSeparator();
+        view.add(zoomMenu(mainPanel));
         view.addSeparator();
         view.add(thumbnailSizeMenu(mainPanel));
 
@@ -168,6 +171,41 @@ public final class MainFrame extends JFrame {
         sizeMenu.add(sizeItem(group, mainPanel, "中", 150, true));
         sizeMenu.add(sizeItem(group, mainPanel, "大", 210, false));
         return sizeMenu;
+    }
+
+    /**
+     * 「查看 → 缩放」：大图是适应窗口还是 1:1。
+     *
+     * <p>菜单里的勾选跟着大图的真实状态走——滚轮缩放之后会自己跳到"自定义"，
+     * 这样菜单不会跟眼前的画面对不上。
+     */
+    private static JMenu zoomMenu(MainPanel mainPanel) {
+        JMenu menu = menu("缩放");
+        JRadioButtonMenuItem fit = new JRadioButtonMenuItem("适应窗口", true);
+        JRadioButtonMenuItem actual = new JRadioButtonMenuItem("1:1", false);
+        for (JRadioButtonMenuItem item : new JRadioButtonMenuItem[] {fit, actual}) {
+            item.setForeground(Theme.TEXT);
+            item.setBackground(Theme.PANEL);
+            menu.add(item);
+        }
+        ButtonGroup group = new ButtonGroup();
+        group.add(fit);
+        group.add(actual);
+
+        fit.addActionListener(e -> mainPanel.fitViewerToWindow());
+        actual.addActionListener(e -> mainPanel.viewerActualSize());
+        mainPanel.setOnViewerZoomChanged(() -> {
+            if (mainPanel.viewerIsFitToWindow()) {
+                fit.setSelected(true);
+            } else if (mainPanel.viewerZoomPercent() == 100) {
+                actual.setSelected(true);
+            } else {
+                // 滚轮缩放到别的比例时两个都不是，那就都不勾——
+                // 硬勾一个会让菜单和眼前的画面对不上
+                group.clearSelection();
+            }
+        });
+        return menu;
     }
 
     private static JRadioButtonMenuItem sizeItem(ButtonGroup group, MainPanel mainPanel,

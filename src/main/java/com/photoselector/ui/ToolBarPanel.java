@@ -31,6 +31,7 @@ final class ToolBarPanel extends JPanel {
     /** 左组那两个要接实际功能的按钮。 */
     private final ToolButton chooseWorkspaceButton = new ToolButton("重新选择工作区", Icons.folder());
     private final ToolButton saveButton = new ToolButton("保存", Icons.save());
+    private final ToolButton fitButton = new ToolButton("适应窗口", Icons.fitToWindow());
 
     ToolBarPanel() {
         super(new FlowLayout(FlowLayout.LEFT, 4, 5));
@@ -61,7 +62,7 @@ final class ToolBarPanel extends JPanel {
 
         // 右组 · 视图辅助
         add(new ToolButton("网格", Icons.grid()));
-        add(new ToolButton("适应窗口", Icons.fitToWindow()));
+        add(fitButton);
         add(modeButton);
     }
 
@@ -78,6 +79,11 @@ final class ToolBarPanel extends JPanel {
     /** 供外部挂监听：保存。 */
     ToolButton saveButton() {
         return saveButton;
+    }
+
+    /** 供外部挂监听：大图适应窗口。 */
+    ToolButton fitButton() {
+        return fitButton;
     }
 
     /** 切换模式后，更新按钮上的文字，让它显示"点了会去哪"。 */

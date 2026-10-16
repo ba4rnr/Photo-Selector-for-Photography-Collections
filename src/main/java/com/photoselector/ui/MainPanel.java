@@ -266,6 +266,31 @@ public final class MainPanel extends JPanel {
         targetPanel.setThumbnailWidth(width);
     }
 
+    /** 大图：适应窗口（「查看」菜单与工具栏上的"适应窗口"按钮用）。 */
+    public void fitViewerToWindow() {
+        viewer.fitToWindow();
+    }
+
+    /** 大图：1:1（「查看」菜单用）。 */
+    public void viewerActualSize() {
+        viewer.actualSize();
+    }
+
+    /** 大图的当前比例（百分比），菜单里显示用。 */
+    public int viewerZoomPercent() {
+        return viewer.zoomPercent();
+    }
+
+    /** 大图现在是不是"适应窗口"（菜单里的勾选状态跟着它走）。 */
+    public boolean viewerIsFitToWindow() {
+        return viewer.isFitToWindow();
+    }
+
+    /** 大图比例变化时通知外部（菜单里的勾选状态跟着更新）。 */
+    public void setOnViewerZoomChanged(Runnable listener) {
+        viewer.setOnZoomChanged(listener);
+    }
+
     /** 工作区变化时通知外部（外部负责写回配置文件）。 */
     public void setOnWorkspaceChanged(Consumer<Workspace> listener) {
         this.onWorkspaceChanged = listener == null ? updated -> { } : listener;
