@@ -253,6 +253,9 @@ final class TargetPanel extends JPanel {
     /** 换一个中间商；传 null 表示还没选目标文件夹。 */
     void setSession(Session newSession) {
         this.session = newSession;
+        // 换了中间商，之前点中的位置就不作数了——照片可能已经换了一批、
+        // 数量也可能短了。不清的话"选中"会指到一张不相干的照片上。
+        chosenIndex = -1;
         thumbnails.clear();
         updateMetrics();
         updatePreferredSize();
@@ -275,6 +278,19 @@ final class TargetPanel extends JPanel {
             return null;
         }
         return session.entryAt(chosenIndex).source();
+    }
+
+    /**
+     * 让"点中的那张"改指向新的位置。
+     *
+     * <p>拖动重排之后要调：照片挪了位置，而"选中"是按位置记的——
+     * 不跟着挪，高亮就会留在原地，指着另一张照片，编号也跟着对不上。
+     */
+    void moveSelectionTo(int index) {
+        if (session != null && index >= 0 && index < session.size()) {
+            chosenIndex = index;
+            repaint();
+        }
     }
 
     /** 序列变了（挑入、撤销、挪动）之后调用：重新取图并重画。 */

@@ -13,6 +13,7 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import javax.swing.JComponent;
@@ -51,11 +52,15 @@ final class DragOut {
      *
      * @param source    从哪个组件拖
      * @param photo     拖的是哪一张（松手时才问，避免拖动过程中照片已经换了）
-     * @param ghost     跟着鼠标走的那张图（拿不到就给 null，退化成一个小方块）
+     * @param ghost     跟着鼠标走的那张图：**按正在拖的那张照片**现取，
+     *                  拿不到就返回 null（退化成一个小方块）。
+     *                  参数是照片而不是"当前选中的那张"——从展开排序模式拖时，
+     *                  两块面板的"选中"可能不是同一张，按参数取才不会张冠李戴。
      * @param enabled   现在允不允许往外拖（大图那边由"选择 / 平移"工具决定）
      * @param onDropped 落在目标面板上时回调，第二个参数是"插在第几项之前"
      */
-    static void install(JComponent source, Supplier<Path> photo, Supplier<BufferedImage> ghost,
+    static void install(JComponent source, Supplier<Path> photo,
+                        Function<Path, BufferedImage> ghost,
                         BooleanSupplier enabled, BiConsumer<Path, Integer> onDropped) {
         MouseAdapter handler = new MouseAdapter() {
 
@@ -72,9 +77,13 @@ final class DragOut {
                 if (pressedAt == null || e.getPoint().distance(pressedAt) <= THRESHOLD) {
                     return;
                 }
+                Path dragging = photo.get();
+                if (dragging == null) {
+                    return;
+                }
                 TargetPanel target = targetPanelAt(source, e.getPoint());
                 showHint(target, e.getPoint());
-                showGhost(source, e.getPoint(), ghost.get());
+                showGhost(source, e.getPoint(), ghost.apply(dragging));
             }
 
             @Override

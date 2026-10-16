@@ -184,6 +184,49 @@ class TargetPanelTest {
     }
 
     @Test
+    void 换了目标文件夹之后_旧的点选作废() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+
+        Path first = Files.createDirectories(tempDir.resolve("成片A"));
+        java.util.List<Path> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            many.add(TestImages.writeJpeg(first.resolve("a" + i + ".jpg"), 300, 200));
+        }
+        Session sessionA = new Session(first, NumberingRule.DEFAULT);
+        sessionA.seedExisting(many);
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(360, 480);
+            panel.setSession(sessionA);
+            layoutTree(panel);
+        });
+
+        // 点中第 1 张（坐标按面板自己的格位算，别手写——格子有留白和间距）
+        int clickX = panel.cellXForTest(0) + 20;
+        int clickY = 34 + panel.rowHeightForTest() / 2;
+        SwingUtilities.invokeAndWait(() -> panel.dispatchEvent(new java.awt.event.MouseEvent(
+                panel, java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                java.awt.event.MouseEvent.BUTTON1_DOWN_MASK, clickX, clickY, 1, false,
+                java.awt.event.MouseEvent.BUTTON1)));
+        assertTrue(panel.selectedPhoto() != null, "点过之后应当有选中的照片");
+
+        // 换成一个只有两张的目标文件夹
+        Path second = Files.createDirectories(tempDir.resolve("成片B"));
+        Session sessionB = new Session(second, NumberingRule.DEFAULT);
+        sessionB.seedExisting(java.util.List.of(
+                TestImages.writeJpeg(second.resolve("b0.jpg"), 300, 200),
+                TestImages.writeJpeg(second.resolve("b1.jpg"), 300, 200)));
+        SwingUtilities.invokeAndWait(() -> panel.setSession(sessionB));
+
+        // 旧的点选必须作废：不然它会指到新序列里一张不相干的照片上
+        assertEquals(null, panel.selectedPhoto(),
+                "换了目标文件夹，旧的点选不该还挂着");
+
+        loader.shutdown();
+    }
+
+    @Test
     void 落点落在换行处_要算在上一行的末尾() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));

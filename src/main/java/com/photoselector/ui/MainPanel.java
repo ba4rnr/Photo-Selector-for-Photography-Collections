@@ -197,7 +197,7 @@ public final class MainPanel extends JPanel {
 
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
-        DragOut.install(filmstrip, filmstrip::currentPhoto, filmstrip::currentThumbnail,
+        DragOut.install(filmstrip, filmstrip::currentPhoto, filmstrip::thumbnailOf,
                 () -> true, this::addToTargetAt);
         // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
         DragOut.install(viewer, viewer::photo, viewer::ghostThumbnail,
@@ -206,9 +206,9 @@ public final class MainPanel extends JPanel {
         // 目标文件夹里的照片也能拖：往旁边一放就是重排顺序（白线照旧标落点）。
         // 这两块是"同一个序列的两个视图"（选图模式的窄栏、展开排序模式的大网格），
         // 拖哪一块都是改同一个中间商的顺序。
-        DragOut.install(targetPanel, targetPanel::selectedPhoto, this::selectedThumbnailOf,
+        DragOut.install(targetPanel, targetPanel::selectedPhoto, this::thumbnailOfTargetPhoto,
                 () -> true, this::reorder);
-        DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::selectedThumbnailOf,
+        DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::thumbnailOfTargetPhoto,
                 () -> true, this::reorder);
         toolBar.setOnToolChanged(viewer::setCursorTool);
 
@@ -482,10 +482,9 @@ public final class MainPanel extends JPanel {
         }
     }
 
-    /** 目标面板里那张"正在被拖的"照片的缩略图，给跟着鼠标的提示图用。 */
-    private java.awt.image.BufferedImage selectedThumbnailOf() {
-        Path photo = targetPanel.selectedPhoto();
-        return photo == null ? null : targetPanel.thumbnailOf(photo);
+    /** 目标序列里某张照片的缩略图，给跟着鼠标的提示图用。 */
+    private java.awt.image.BufferedImage thumbnailOfTargetPhoto(Path photo) {
+        return targetPanel.thumbnailOf(photo);
     }
 
     /**
@@ -511,6 +510,9 @@ public final class MainPanel extends JPanel {
             return; // 落回原地或越界：不产生无意义的历史
         }
         session.move(from, to);
+        // 照片挪了位置，"选中"要跟着挪，否则高亮会指着另一张（编号也跟着对不上）
+        targetPanel.moveSelectionTo(to);
+        arrangePanel.moveSelectionTo(to);
         targetPanel.refresh();
         arrangePanel.refresh();
     }

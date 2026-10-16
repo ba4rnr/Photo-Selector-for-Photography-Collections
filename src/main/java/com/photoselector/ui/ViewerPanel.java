@@ -437,8 +437,13 @@ final class ViewerPanel extends JPanel {
         return tool == CursorTool.SELECT;
     }
 
-    /** 拖出去时跟着鼠标走的那张小图；现缩一张，不去动缩略图缓存。 */
-    BufferedImage ghostThumbnail() {
+    /**
+     * 拖出去时跟着鼠标走的那张小图；现缩一张，不去动缩略图缓存。
+     *
+     * <p>参数是正在拖的那张照片——大图面板一次只显示一张，所以它和
+     * "当前照片"总是同一个，参数只是为了让调用处的写法统一。
+     */
+    BufferedImage ghostThumbnail(Path dragging) {
         if (image == null) {
             return null;
         }

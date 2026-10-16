@@ -381,6 +381,10 @@ class DragAndCloseTest {
             assertEquals("旧A.jpg", session.entryAt(1).source().getFileName().toString(),
                     "被拖的那张落在它后面");
             assertEquals("020", session.nameAt(1), "编号跟着位置现算");
+            // 选中要跟着照片走：高亮和"拖动的那张"必须还是同一张，
+            // 否则高亮会留在原地指着别人，编号也对不上
+            assertEquals(session.entryAt(1).source(), target.selectedPhoto(),
+                    "拖过之后，点中的那张还应当是它");
         } finally {
             window.dispose();
         }
