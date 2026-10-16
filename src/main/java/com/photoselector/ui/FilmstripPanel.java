@@ -290,6 +290,23 @@ final class FilmstripPanel extends JPanel {
     }
 
     /**
+     * 某张照片那一格的左边缘在素材条里的横坐标；找不到（比如组被收起了）返回 -1。
+     * 给测试判断"过片之后它到底看没看得见"。
+     */
+    int photoLeftInViewForTest(Path photo) {
+        for (GroupBox box : computeLayout()) {
+            if (box.collapsed()) {
+                continue;
+            }
+            int index = groups.get(box.index()).photos().indexOf(photo);
+            if (index >= 0) {
+                return box.x() + index * cellWidth;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * 把素材条装进一个配好滚动条的滚动面板。
      *
      * <p>这里挂了两个监听，缺一不可：

@@ -188,6 +188,62 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 方向键是过片_过到的照片要看得见() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow(1, 8); // 一组 8 张，素材条比窗口宽
+        try {
+            window.show();
+            FilmstripPanel strip = window.panel.filmstripForTest();
+            SwingUtilities.invokeAndWait(() -> {
+                window.frame.setSize(700, 640);
+                window.frame.validate();
+            });
+            waitUntil(() -> strip.getWidth() > strip.getVisibleRect().width,
+                    "素材条比视口宽");
+
+            // 点第一张照片，焦点应当跟过来。
+            // 注意顺序：先改窗口大小、再点照片——改大小会把焦点打回工具栏那个按钮上，
+            // 点照片这一步才把焦点接回素材条
+            // 先把焦点放到"不是素材条"的地方（工具栏按钮），复现用户遇到的起点
+            SwingUtilities.invokeAndWait(() -> {
+                window.frame.toFront();
+                window.panel.toolBar().chooseWorkspaceButton().requestFocusInWindow();
+            });
+            Point first = new Point(strip.groupBoundsForTest().get(0).x + 20, 60);
+            SwingUtilities.invokeAndWait(() -> strip.dispatchEvent(new MouseEvent(strip,
+                    MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                    MouseEvent.BUTTON1_DOWN_MASK, first.x, first.y, 1, false, MouseEvent.BUTTON1)));
+            Path clicked = strip.currentPhoto();
+            assertNotNull(clicked, "点过之后应当有一张是当前照片");
+
+            // 方向键要真的"过片"：每一次当前照片都换一张。
+            // 测试机上窗口不一定拿得到系统焦点，那就手工把焦点摆到素材条上——
+            // 真窗口里这一步由点击时 handleClick 里的 requestFocus() 完成。
+            KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+            SwingUtilities.invokeAndWait(() -> strip.requestFocusInWindow());
+            Path previous = strip.currentPhoto();
+            for (int i = 0; i < 2; i++) {
+                SwingUtilities.invokeAndWait(() -> manager.dispatchEvent(new KeyEvent(window.frame,
+                        KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0,
+                        KeyEvent.VK_RIGHT, KeyEvent.CHAR_UNDEFINED)));
+                Path now = strip.currentPhoto();
+                assertTrue(!java.util.Objects.equals(previous, now),
+                        "第 " + (i + 1) + " 次按右键，当前照片应当换成下一张"
+                                + "（焦点=" + manager.getFocusOwner() + "）");
+                previous = now;
+            }
+            // 过到的这张必须还看得见：过片时素材条自己会滚，不是让用户手动去找
+            Rectangle visible = strip.getVisibleRect();
+            int cell = strip.photoLeftInViewForTest(strip.currentPhoto());
+            assertTrue(cell >= visible.x - 1 && cell < visible.x + visible.width,
+                    "过到的照片应当已经被滚进视野（照片在 " + cell
+                            + "，视野 " + visible.x + "…" + (visible.x + visible.width) + "）");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 选完文件夹之后_素材条跳到那一组的最左边() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         // 组数要够多、但也要让目标组落在"滚得到"的范围内：
@@ -299,15 +355,23 @@ class DragAndCloseTest {
         final AtomicInteger exits = new AtomicInteger();
 
         TestWindow() throws Exception {
-            this(1);
+            this(1, 3);
         }
 
-        /** @param sourceSubfolders 素材根目录下放几个子文件夹（几个组），测试布局才用得到多组 */
+        /** @param sourceSubfolders 素材根目录下放几个子文件夹（几个组） */
         TestWindow(int sourceSubfolders) throws Exception {
+            this(sourceSubfolders, 3);
+        }
+
+        /**
+         * @param sourceSubfolders 素材根目录下放几个子文件夹（几个组），测试布局才用得到多组
+         * @param photosPerFolder 每个子文件夹里放几张
+         */
+        TestWindow(int sourceSubfolders, int photosPerFolder) throws Exception {
             Path source = Files.createDirectories(tempDir.resolve("素材"));
             for (int s = 0; s < sourceSubfolders; s++) {
                 Path shots = Files.createDirectories(source.resolve(String.format("%03d_拍摄", s + 1)));
-                for (int i = 0; i < 3; i++) {
+                for (int i = 0; i < photosPerFolder; i++) {
                     TestImages.writeJpeg(shots.resolve("p" + i + ".jpg"), 300, 200);
                 }
             }
