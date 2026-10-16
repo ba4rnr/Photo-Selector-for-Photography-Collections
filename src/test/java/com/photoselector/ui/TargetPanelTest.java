@@ -183,6 +183,59 @@ class TargetPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 落点落在换行处_要算在上一行的末尾() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("成片"));
+        java.util.List<Path> files = new java.util.ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            files.add(TestImages.writeJpeg(folder.resolve("p" + i + ".jpg"), 300, 200));
+        }
+        Session session = new Session(folder, NumberingRule.DEFAULT);
+        session.seedExisting(files);
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(360, 480);
+            panel.setSession(session);
+            layoutTree(panel);
+        });
+        assertEquals(2, panel.columnsForTest(), "这个宽度下应当排两列");
+
+        int rowHeight = panel.rowHeightForTest();
+        int lastCellRight = panel.cellRightForTest(1);
+        int firstCellLeft = panel.cellXForTest(0) + 2;
+        int firstRowMid = 34 + rowHeight / 2; // 34 = 表头高度，第一行从它下面开始
+        int secondRowMid = 34 + rowHeight + rowHeight / 2;
+
+        // 第一行最后一个格子的右半边：插在它后面，也就是这一行的末尾 → 下标 2
+        assertEquals(2, panel.dropIndexAt(new java.awt.Point(lastCellRight - 2, firstRowMid)));
+        // 第二行第一格的左半边：光标按视觉是在第二行开头，但照片应当接在第一行末尾
+        //（下标 2 = 排在第一行那两张之后），而不是插到中间某处
+        assertEquals(2, panel.dropIndexAt(new java.awt.Point(firstCellLeft, secondRowMid)));
+        // 第二行第一格的右半边：插在它后面 → 下标 3
+        assertEquals(3, panel.dropIndexAt(new java.awt.Point(firstCellLeft
+                + panel.thumbnailWidthForTest() - 2, secondRowMid)));
+        // 最后一行下面那片空白：夹到末尾
+        assertEquals(4, panel.dropIndexAt(new java.awt.Point(20, 34 + 4 * rowHeight)));
+
+        // 白线要画在上一行的末尾，而不是下一行的开头
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setDropHint(2); // 排在第二行第一张之前 = 第一行最后一张之后
+        });
+        java.awt.Rectangle line = panel.dropHintRectForTest();
+        assertTrue(line.x >= panel.cellRightForTest(1),
+                "白线应当画在第一行最后一个格子的右边，而不是绕到下一行开头");
+        assertTrue(line.y < panel.rowHeightForTest(), "白线应当还在第一行那一带");
+        // 开头那个落点（下标 0）不受影响，仍然留在第一行最左边
+        SwingUtilities.invokeAndWait(() -> panel.setDropHint(0));
+        assertTrue(panel.dropHintRectForTest().x < panel.cellXForTest(0) + 10,
+                "下标 0 是整排的开头，白线画在最左边");
+
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;

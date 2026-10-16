@@ -143,12 +143,22 @@ final class TargetPanel extends JPanel {
         }
         updateMetrics();
         int row = Math.max(0, (point.y - HEADER_HEIGHT) / rowHeight());
-        int column = columns; // 默认：落在这一行最后一个格子之后
+        int column = -1; // -1 表示"落在这一行最后一个格子之后"
         for (int c = 0; c < columns; c++) {
             if (point.x < cellX(c) + boxWidth / 2) {
                 column = c;
                 break;
             }
+        }
+        if (column == 0 && row > 0) {
+            // 换行处：光标在"本行开头"这一块时，照片该接在<b>上一行的末尾</b>，
+            // 而不是插到本行第一张的前面——那会让它在视觉上凭空跳到下一行去。
+            // 所以整体往回挪一格：上一行的最后一格之后。
+            row--;
+            column = -1;
+        }
+        if (column < 0) {
+            column = columns; // 落在这一行最后一个格子之后
         }
         return Math.max(0, Math.min(session.size(), row * columns + column));
     }
@@ -168,6 +178,29 @@ final class TargetPanel extends JPanel {
     /** 当前标出的落点（没标就是 -1）。给测试和排查用。 */
     int dropHintIndex() {
         return dropHint;
+    }
+
+    /** 一行有多高。给测试算落点用。 */
+    int rowHeightForTest() {
+        updateMetrics();
+        return rowHeight();
+    }
+
+    /** 第 column 格左边缘的 x。给测试算落点用。 */
+    int cellXForTest(int column) {
+        updateMetrics();
+        return cellX(column);
+    }
+
+    /** 第 column 格右边缘的 x。给测试算落点用。 */
+    int cellRightForTest(int column) {
+        updateMetrics();
+        return cellX(column) + boxWidth;
+    }
+
+    /** 一格缩略图多宽。给测试算落点用。 */
+    int thumbnailWidthForTest() {
+        return boxWidth;
     }
 
     /** 某一格对应的条目下标；点在空白处返回 -1。 */
@@ -375,13 +408,34 @@ final class TargetPanel extends JPanel {
         if (dropHint < 0) {
             return;
         }
+        Rectangle line = dropHintRect();
+        g.setColor(Theme.DIVIDER_HINT);
+        g.fillRect(line.x, line.y, line.width, line.height);
+    }
+
+    /** 那条落点白线占的位置；没有落点时返回 null。 */
+    private Rectangle dropHintRect() {
+        if (dropHint < 0) {
+            return null;
+        }
         updateMetrics();
         int row = dropHint / columns;
         int column = dropHint % columns;
+        if (dropHint > 0 && column == 0) {
+            // 换行处：这个落点是"下一行的第一张之前"，等价于"上一行的最后一张之后"。
+            // 白线要画在上一行的末尾——画在下一行开头的话，它会跑到光标左边老远，
+            // 看起来就像"要插到下一行去"，和实际插入的位置也对不上。
+            row--;
+            column = columns;
+        }
         int x = column < columns ? cellX(column) : cellX(columns - 1) + boxWidth + GAP / 2;
         int y = HEADER_HEIGHT + row * rowHeight();
-        g.setColor(Theme.DIVIDER_HINT);
-        g.fillRect(x - 4, y, 3, thumbnailHeight);
+        return new Rectangle(x - 4, y, 3, thumbnailHeight);
+    }
+
+    /** 那条白线现在画在哪。给测试用。 */
+    Rectangle dropHintRectForTest() {
+        return dropHintRect();
     }
 
     private void paintHeader(Graphics2D g) {
