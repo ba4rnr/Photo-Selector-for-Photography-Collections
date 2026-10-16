@@ -210,18 +210,16 @@ class DragAndCloseTest {
                 window.panel.toolBar().chooseWorkspaceButton().requestFocusInWindow();
             });
             Point first = new Point(strip.groupBoundsForTest().get(0).x + 20, 60);
-            SwingUtilities.invokeAndWait(() -> strip.dispatchEvent(new MouseEvent(strip,
-                    MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
-                    MouseEvent.BUTTON1_DOWN_MASK, first.x, first.y, 1, false, MouseEvent.BUTTON1)));
+            realClick(strip, first);
             Path clicked = strip.currentPhoto();
             assertNotNull(clicked, "点过之后应当有一张是当前照片");
 
             // 方向键要真的"过片"：每一次当前照片都换一张。
-            // 测试机上窗口不一定拿得到系统焦点，那就手工把焦点摆到素材条上——
-            // 真窗口里这一步由点击时 handleClick 里的 requestFocus() 完成。
+            // 不手工挪焦点——就按用户实际会遇到的来：点完照片直接按方向键，
+            // 焦点该由点击时 handleClick 里的 requestFocus() 接过来
             KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
-            SwingUtilities.invokeAndWait(() -> strip.requestFocusInWindow());
             Path previous = strip.currentPhoto();
+            Path viewerPhoto = window.panel.viewerForTest().photo();
             for (int i = 0; i < 2; i++) {
                 SwingUtilities.invokeAndWait(() -> manager.dispatchEvent(new KeyEvent(window.frame,
                         KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0,
@@ -230,6 +228,9 @@ class DragAndCloseTest {
                 assertTrue(!java.util.Objects.equals(previous, now),
                         "第 " + (i + 1) + " 次按右键，当前照片应当换成下一张"
                                 + "（焦点=" + manager.getFocusOwner() + "）");
+                assertTrue(!java.util.Objects.equals(now, viewerPhoto),
+                        "大图也要跟着换成新过到的那张");
+                viewerPhoto = now;
                 previous = now;
             }
             // 过到的这张必须还看得见：过片时素材条自己会滚，不是让用户手动去找
@@ -297,6 +298,25 @@ class DragAndCloseTest {
     private static MouseEvent mouse(Component source, int id, int x, int y) {
         return new MouseEvent(source, id, System.currentTimeMillis(),
                 MouseEvent.BUTTON1_DOWN_MASK, x, y, 1, false, MouseEvent.BUTTON1);
+    }
+
+    /**
+     * 真的点一下：按下、松开都发全，而且走 {@code dispatchEvent} 之外的正规入口
+     * （{@code Component.dispatchEvent} 会转投，等于真实鼠标走的那条路）。
+     * 卡在"鼠标位置"上的命中判断也能拿到位置——这就是和手工拼事件的区别。
+     */
+    private static void realClick(Component component, Point local) {
+        SwingUtilities.invokeLater(() -> {
+            MouseEvent press = new MouseEvent(component, MouseEvent.MOUSE_PRESSED,
+                    System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                    local.x, local.y, 1, false, MouseEvent.BUTTON1);
+            component.dispatchEvent(press);
+        });
+        try {
+            Thread.sleep(120);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** 测试用素材根目录下第 index 个子文件夹的路径。 */

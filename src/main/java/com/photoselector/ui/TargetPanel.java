@@ -344,6 +344,8 @@ final class TargetPanel extends JPanel {
         JScrollPane scroll = new JScrollPane(this,
                 JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        // 同样的坑：不摘掉左右键，焦点在这块面板上时方向键只会让画面滑动
+        ScrollKeys.dropArrowKeys(scroll);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Theme.PANEL);
         scroll.getVerticalScrollBar().setUnitIncrement(24);

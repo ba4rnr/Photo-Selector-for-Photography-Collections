@@ -1,6 +1,7 @@
 package com.photoselector.ui;
 
 import java.awt.Dimension;
+import java.awt.Component;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -10,6 +11,7 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Area;
@@ -27,6 +29,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JComponent;
+import javax.swing.InputMap;
+import javax.swing.JRootPane;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.JViewport;
 
@@ -172,6 +178,27 @@ final class FilmstripPanel extends JPanel {
             return viewport.getViewPosition().x;
         }
         return -1;
+    }
+
+    /**
+     * 这个键会不会在落到窗口级快捷键之前，被"祖先链"里的某个组件先吃掉。
+     *
+     * <p>Swing 查按键的顺序是：组件自己 → 焦点组件的祖先链 → 整个窗口。
+     * 所以祖先链上只要有绑定，窗口级那份就永远轮不到——"左右键被滚动面板截走"
+     * 就是这么发生的。给测试用来钉住这件事。
+     */
+    boolean arrowKeySwallowedByAncestor(KeyStroke key) {
+        for (Component c = this; c != null; c = c.getParent()) {
+            if (c instanceof JComponent component
+                    && component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT)
+                            .get(key) != null) {
+                return true;
+            }
+            if (c instanceof JRootPane) {
+                break;
+            }
+        }
+        return false;
     }
 
     int groupCount() {
@@ -321,6 +348,7 @@ final class FilmstripPanel extends JPanel {
         JScrollPane scroll = new JScrollPane(this,
                 JScrollPane.VERTICAL_SCROLLBAR_NEVER,
                 JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        ScrollKeys.dropArrowKeys(scroll);
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Theme.PANEL);
         scroll.getHorizontalScrollBar().setUnitIncrement(40); // 滚一格别只挪几个像素

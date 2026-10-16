@@ -244,6 +244,33 @@ class FilmstripPanelTest {
     }
 
     @Test
+    void 素材条上左右方向键不会被滚动面板吃掉() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        JScrollPane scroll = filmstrip.wrapInScrollPane();
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(400, 190);
+            layoutTree(scroll);
+        });
+
+        // JScrollPane 默认把 ← / → 绑在"焦点组件之祖先"这一层（unitScrollLeft/Right），
+        // 而这一层检查在窗口级快捷键之前——不摘掉它，按方向键只会让条滑一格，
+        // 轮不到"换上一张/下一张"。这条测试就是钉住那件事：这两个键必须能落到全局。
+        assertFalse(filmstrip.arrowKeySwallowedByAncestor(
+                        javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT, 0)),
+                "左方向键不该被祖先链上的组件截走");
+        assertFalse(filmstrip.arrowKeySwallowedByAncestor(
+                        javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT, 0)),
+                "右方向键不该被祖先链上的组件截走");
+        // 翻页键还留在滚动面板上：键盘滚动并没有被一刀切掉
+        assertTrue(filmstrip.arrowKeySwallowedByAncestor(
+                        javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_PAGE_DOWN, 0)),
+                "PageDown 仍然由滚动面板负责翻页");
+        loader.shutdown();
+    }
+
+    @Test
     void 每组都有一圈灰色细边框() throws Exception {
         Theme.install();
 
