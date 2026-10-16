@@ -408,7 +408,9 @@ final class TargetPanel extends JPanel {
     // ─────────────────────────── 取图 ───────────────────────────
 
     private void requestVisibleThumbnails() {
-        if (session == null || session.isEmpty()) {
+        // 不可见时直接返回：浏览模式右栏和整理模式中间各有一块目标面板，
+        // 同一时刻只有一块可见；不挡的话隐藏的那块会按整块尺寸白取一批图
+        if (!isVisible() || session == null || session.isEmpty()) {
             return;
         }
         updateMetrics(); // 同上：算可见范围要依赖列数和行高

@@ -51,7 +51,7 @@ class SaverTest {
         session.trash(0);      // 把"旧A"丢进垃圾桶
         session.add(fresh);    // 再把新照片挑进来
 
-        Saver.Result result = new Saver().save(session);
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
 
         assertEquals(1, result.copied(), "复制了一张");
         assertEquals(1, result.renamed(), "旧B 改了名");
@@ -79,7 +79,7 @@ class SaverTest {
         Session session = sessionFor(target);
         session.seedExisting(List.of(first, second));
 
-        Saver.Result result = new Saver().save(session);
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
 
         assertEquals(2, result.renamed());
         assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
@@ -102,10 +102,12 @@ class SaverTest {
         Session session = sessionFor(target);
         session.add(fresh);
 
-        Saver.Result result = new Saver().save(session);
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
 
         assertEquals(0, result.copied());
         assertTrue(result.hasProblems(), "占用名字这件事应当被报出来");
+        assertEquals(List.of(fresh), result.failedSources(),
+                "没复制成功的条目要报回去，好让调用方放回中间商");
         assertArrayEquals(occupiedBytes, Files.readAllBytes(occupied), "原来那个文件一个字都没动");
     }
 
@@ -119,7 +121,7 @@ class SaverTest {
         session.add(fresh);
         session.trash(0); // 只是把"指针"丢进垃圾桶，磁盘上从来没有过这个东西
 
-        Saver.Result result = new Saver().save(session);
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
 
         assertEquals(0, result.deleted());
         assertTrue(Files.exists(fresh), "素材文件绝对不能被碰");
@@ -134,7 +136,7 @@ class SaverTest {
         Session session = sessionFor(target);
         session.seedExisting(new ArrayList<>(List.of(already)));
 
-        Saver.Result result = new Saver().save(session);
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
 
         assertEquals(0, result.renamed(), "名字本来就对，不该动它");
         assertEquals(Set.of("010.jpg"), fileNamesIn(target));

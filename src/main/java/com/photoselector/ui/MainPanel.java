@@ -73,6 +73,13 @@ public final class MainPanel extends JPanel {
         return thread;
     });
 
+    /** 保存用的线程池。和目录扫描分开，免得保存几十张的时候点目录树要排队。 */
+    private final ExecutorService savePool = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "saver");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     /** 某个文件夹被打开时通知外部（参数是文件夹和张数，张数为 -1 表示读失败）。 */
     private BiConsumer<Path, Integer> onFolderOpened = (folder, count) -> { };
 
@@ -341,22 +348,27 @@ public final class MainPanel extends JPanel {
         Session session = targetPanel.session();
         if (session == null) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
-                    List.of("还没有选目标文件夹，没有可以保存的改动。")));
+                    List.of(), List.of("还没有选目标文件夹，没有可以保存的改动。")));
             return;
         }
         if (session.isEmpty()) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
-                    List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
+                    List.of(), List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
             return;
         }
 
-        scanPool.submit(() -> {
-            Saver.Result result = new Saver().save(session);
+        // 在界面线程上先拍一份快照：保存跑在后台，而中间商是活的，
+        // 不拍的话你在保存期间再挑一张，后台就会读到一半的数据
+        Saver.Plan plan = Saver.Plan.from(session);
+        savePool.submit(() -> {
+            Saver.Result result = new Saver().save(plan);
             SwingUtilities.invokeLater(() -> {
                 // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
                 session.seedExisting(result.finalOrder());
+                // 没复制成功的那几条放回末尾，别让用户再去素材条里挑一遍
+                result.failedSources().forEach(session::add);
                 targetPanel.refresh();
-            arrangePanel.refresh();
+                arrangePanel.refresh();
                 onSaveFinished.accept(result);
             });
         });
@@ -428,6 +440,7 @@ public final class MainPanel extends JPanel {
     public void shutdown() {
         thumbnailLoader.shutdown();
         scanPool.shutdownNow();
+        savePool.shutdownNow();
     }
 
     private JComponent leftColumn() {
