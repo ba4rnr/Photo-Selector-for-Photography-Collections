@@ -37,6 +37,9 @@ final class ToolBarPanel extends JPanel {
     /** 左组那两个要接实际功能的按钮。 */
     private final ToolButton chooseWorkspaceButton = new ToolButton("重新选择工作区", Icons.folder());
     private final ToolButton saveButton = new ToolButton("保存", Icons.save());
+    private final ToolButton resetButton = new ToolButton("重置", Icons.reset());
+    private final ToolButton undoButton = new ToolButton("撤销", Icons.undo());
+    private final ToolButton redoButton = new ToolButton("重做", Icons.redo());
     private final ToolButton fitButton = new ToolButton("适应窗口", Icons.fitToWindow());
 
     ToolBarPanel() {
@@ -47,9 +50,9 @@ final class ToolBarPanel extends JPanel {
         // 左组 · 文件与历史
         add(chooseWorkspaceButton);
         add(saveButton);
-        add(new ToolButton("重置", Icons.reset()));
-        add(new ToolButton("撤销", Icons.undo()));
-        add(new ToolButton("重做", Icons.redo()));
+        add(resetButton);
+        add(undoButton);
+        add(redoButton);
 
         add(Box.createHorizontalStrut(28)); // 用留白分组，不画竖线，跟 Capture One 一致
 
@@ -83,6 +86,21 @@ final class ToolBarPanel extends JPanel {
     /** 供外部挂监听：保存。 */
     ToolButton saveButton() {
         return saveButton;
+    }
+
+    /** 供外部挂监听：重置（清空当前照片的全部图像编辑）。 */
+    ToolButton resetButton() {
+        return resetButton;
+    }
+
+    /** 供外部挂监听：撤销。 */
+    ToolButton undoButton() {
+        return undoButton;
+    }
+
+    /** 供外部挂监听：重做。 */
+    ToolButton redoButton() {
+        return redoButton;
     }
 
     /** 供外部挂监听：大图适应窗口。 */

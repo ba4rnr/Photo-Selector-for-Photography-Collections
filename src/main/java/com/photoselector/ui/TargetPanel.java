@@ -261,6 +261,8 @@ final class TargetPanel extends JPanel {
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+        // 换中间商也是"历史换了"：撤销 / 重做的灰亮要跟着新中间商走
+        onChanged.run();
     }
 
     Session session() {
@@ -298,7 +300,18 @@ final class TargetPanel extends JPanel {
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+        // 顺手通知一声外部：撤销 / 重做按钮的灰亮状态跟着历史走。
+        // 挂在这儿是因为"序列变过"的地方都会走到这里（挑入、挪位、丢垃圾桶、
+        // 撤销、重做、保存之后重建），不必在每个动作里再重复一次
+        onChanged.run();
     }
+
+    /** 面板内容变过之后通知外部。 */
+    void setOnChanged(Runnable listener) {
+        this.onChanged = listener == null ? () -> { } : listener;
+    }
+
+    private Runnable onChanged = () -> { };
 
     int entryCount() {
         return session == null ? 0 : session.size();

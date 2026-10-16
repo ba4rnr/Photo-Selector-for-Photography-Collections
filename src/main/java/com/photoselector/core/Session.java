@@ -33,11 +33,27 @@ public final class Session {
     private final TrashBin trash = new TrashBin();
 
     /**
-     * 撤销栈：每次修改操作都压入一个"反向动作"（Runnable），
-     * 撤销时按后进先出弹出来执行。因为所有操作都只改内存，
-     * 反向动作可以简单地写成 lambda，不必为每个操作建一个类。
+     * 撤销栈：每次修改操作都压入"正反两支"（见 {@link Action}），
+     * 撤销时按后进先出弹出来执行它的反向动作。因为所有操作都只改内存，
+     * 两支都能简单地写成 lambda，不必为每个操作建一个类。
      */
-    private final Deque<Runnable> undoStack = new ArrayDeque<>();
+    private final Deque<Action> undoStack = new ArrayDeque<>();
+
+    /**
+     * 重做栈：撤销过的动作原样扣在这儿，重做时再执行一遍它的"正向动作"。
+     *
+     * <p>为什么存同一份动作：撤销只是"把 A 做完的事反过来做一遍"，
+     * 重做就是"再做一遍 A"。所以一次操作记下正反两支就够了，
+     * 撤销时把整条从撤销栈搬到重做栈，重做时再搬回来。
+     *
+     * <p>新做任何一步操作都会把重做栈清空——这是撤销/重做的通例：
+     * 从中间岔出去以后，原来那条"未来"就不作数了。
+     */
+    private final Deque<Action> redoStack = new ArrayDeque<>();
+
+    /** 一次操作的正反两支：undo 把它退回去，redo 再把它做一遍。 */
+    private record Action(Runnable undo, Runnable redo) {
+    }
 
     /**
      * 有没有还没落盘的改动。
@@ -149,9 +165,10 @@ public final class Session {
         TargetEntry entry = new TargetEntry(normalized, Origin.PENDING);
         sequence.add(at, entry);
         dirty = true; // 已经多出一条，和磁盘不一样了
-        // 反向动作：把刚加入的这条拿掉。
-        // 唯一性约束保证此刻序列里恰好只有这一条来自该 source。
-        pushUndo(() -> sequence.remove(entry));
+        // 反向动作：把刚加入的这条拿掉（唯一性约束保证序列里恰好只有它这一条）。
+        // 正向动作：再插回原来的位置——撤销之后又重做时用的就是它。
+        pushAction(() -> sequence.remove(entry),
+                () -> sequence.add(Math.min(at, sequence.size()), entry));
         return true;
     }
 
@@ -167,6 +184,7 @@ public final class Session {
         sequence.clear();
         trash.clear();
         undoStack.clear();
+        redoStack.clear();
         // 铺底之后，中间商和磁盘是同一份东西——保存也刚走过这一步，
         // 所以"干净"要在最后统一置位，不能跟着前面的 clear 走
         dirty = false;
@@ -191,14 +209,18 @@ public final class Session {
         if (from == target) {
             return; // 原地没动，不产生无意义的历史
         }
-        TargetEntry entry = sequence.remove(from);
-        sequence.add(target, entry);
+        doMoveEntry(from, target);
         dirty = true; // 位置变了，编号也就变了
-        // 反向动作：把它从新位置搬回原位置
-        pushUndo(() -> {
-            TargetEntry e = sequence.remove(target);
-            sequence.add(Math.min(from, sequence.size()), e);
-        });
+        // 撤销 = 从新位置搬回原位置；重做 = 再搬一遍。
+        // 都走 doMoveEntry（只动序列、不记历史），免得重做时又把重做栈清掉。
+        pushAction(() -> doMoveEntry(target, from), () -> doMoveEntry(from, target));
+    }
+
+    /** 真正搬一格：把 {@code from} 处的条目挪到 {@code to} 处。两边都按当前长度夹住。 */
+    private void doMoveEntry(int from, int to) {
+        int at = Math.max(0, Math.min(from, sequence.size() - 1));
+        TargetEntry entry = sequence.remove(at);
+        sequence.add(Math.max(0, Math.min(to, sequence.size())), entry);
     }
 
     /**
@@ -207,14 +229,19 @@ public final class Session {
      */
     public void trash(int index) {
         checkIndex(index);
+        doTrashEntry(index);
+        dirty = true; // 它离开了序列，保存时得真的从文件夹里消失
+        // 撤销 = 从垃圾桶里把它捡出来放回原位；重做 = 再丢进去
+        pushAction(() -> {
+            TrashedItem last = trash.removeLast();
+            sequence.add(Math.min(last.originalIndex(), sequence.size()), last.entry());
+        }, () -> doTrashEntry(index));
+    }
+
+    /** 真正丢一次：从序列里拿走，在垃圾桶末尾记一条。 */
+    private void doTrashEntry(int index) {
         TargetEntry entry = sequence.remove(index);
         trash.add(entry, index);
-        dirty = true; // 它离开了序列，保存时得真的从文件夹里消失
-        // 反向动作：从垃圾桶里把它捡出来，放回原位
-        pushUndo(() -> {
-            TrashedItem item = trash.removeLast();
-            sequence.add(Math.min(item.originalIndex(), sequence.size()), item.entry());
-        });
     }
 
     /**
@@ -248,29 +275,49 @@ public final class Session {
         trash.removeAt(at);
         sequence.add(to, picked.entry());
         dirty = true;
-        // 反向动作：把刚插进去的这条再丢回垃圾桶，而且要插回它<b>原来那一格</b>——
-        // 用 add 追加到末尾的话，垃圾桶的排序会悄悄变（界面按顺序渲染，看得出差别）
+        // 撤销 = 把刚插进去的这条再丢回垃圾桶，而且要插回它原来那一格——
+        // 用 add 追加到末尾的话，垃圾桶的排序会悄悄变（界面按顺序渲染，看得出差别）。
+        // 重做 = 再捡回来一次，位置照旧。
         int backTo = at;
         TrashedItem back = picked;
-        pushUndo(() -> {
+        pushAction(() -> {
             TargetEntry entry = sequence.remove(to);
             trash.insert(backTo, new TrashedItem(entry, back.originalIndex()));
+        }, () -> {
+            trash.removeAt(backTo);
+            sequence.add(Math.min(to, sequence.size()), back.entry());
         });
         return true;
     }
 
-    /** 撤销最近一步操作。 */
+    /** 撤销最近一步操作；没得撤销就返回 false。 */
     public boolean undo() {
-        Runnable reversal = undoStack.pollLast();
-        if (reversal == null) {
+        Action action = undoStack.pollLast();
+        if (action == null) {
             return false;
         }
-        reversal.run();
+        action.undo().run();
+        redoStack.addLast(action); // 撤掉的这一步随时可以重做
+        return true;
+    }
+
+    /** 重做最近撤销掉的那一步；没得重做就返回 false。 */
+    public boolean redo() {
+        Action action = redoStack.pollLast();
+        if (action == null) {
+            return false;
+        }
+        action.redo().run();
+        undoStack.addLast(action); // 重做过的这一步又可以撤销了
         return true;
     }
 
     public boolean canUndo() {
         return !undoStack.isEmpty();
+    }
+
+    public boolean canRedo() {
+        return !redoStack.isEmpty();
     }
 
     /** 有没有还没保存的改动（关窗口时用来决定要不要问"是否保存"）。 */
@@ -283,11 +330,19 @@ public final class Session {
         sequence.clear();
         trash.clear();
         undoStack.clear();
+        redoStack.clear();
         dirty = false;
     }
 
-    private void pushUndo(Runnable reversal) {
-        undoStack.addLast(reversal);
+    /**
+     * 记下一次操作的正反两支，并清空重做栈。
+     *
+     * <p>"新动作清空重做栈"是撤销/重做的通例：从中间岔出去以后，
+     * 原来那条"未来"就不作数了（不然重做会做出一个世界上从没出现过的状态）。
+     */
+    private void pushAction(Runnable undo, Runnable redo) {
+        undoStack.addLast(new Action(undo, redo));
+        redoStack.clear();
     }
 
     private boolean contains(Path source) {

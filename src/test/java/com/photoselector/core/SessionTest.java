@@ -262,6 +262,95 @@ class SessionTest {
     }
 
     @Test
+    void 重做_把撤销掉的挑入再捡回来_位置不丢() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.add(PHOTO_C);
+        session.move(0, 2); // A B C → B C A
+
+        assertTrue(session.undo());
+        assertEquals(List.of("L1000001.JPG", "L1000002.JPG", "L1000003.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+
+        assertTrue(session.redo(), "撤销过的挪位应当能重做");
+        assertEquals(List.of("L1000002.JPG", "L1000003.JPG", "L1000001.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList(),
+                "重做要搬回撤销之前的样子");
+        assertTrue(session.canUndo(), "重做过的这一步又可以撤销了");
+        assertFalse(session.canRedo());
+    }
+
+    @Test
+    void 重做_丢进垃圾桶也能重做() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.trash(0);
+        assertEquals(1, session.trash().size());
+
+        session.undo();
+        assertTrue(session.trash().isEmpty(), "撤销之后垃圾桶是空的");
+        assertEquals(2, session.size());
+
+        assertTrue(session.redo());
+        assertEquals(1, session.size());
+        assertEquals(1, session.trash().size(), "重做又把它丢了进去");
+        assertEquals("L1000001.JPG", session.trash().items().get(0).entry().fileName());
+    }
+
+    @Test
+    void 重做_从垃圾桶捡回来也能重做() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.trash(1);
+        session.untrash(PHOTO_B, 0);
+
+        session.undo(); // 又回到垃圾桶
+        assertEquals(1, session.trash().size());
+
+        assertTrue(session.redo(), "捡回来这一步也该能重做");
+        assertEquals(0, session.trash().size());
+        assertEquals(List.of("L1000002.JPG", "L1000001.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList(),
+                "重做捡回来，位置照旧插在第 0 位之前");
+    }
+
+    @Test
+    void 撤销之后又做了新操作_重做就作废了() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.undo(); // 撤掉 B
+        assertTrue(session.canRedo());
+
+        session.add(PHOTO_C); // 从中间岔出去
+
+        assertFalse(session.canRedo(), "新操作之后，原来那条'未来'不作数了");
+        assertFalse(session.redo());
+        assertEquals(List.of("L1000001.JPG", "L1000003.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList());
+    }
+
+    @Test
+    void 重做栈也会被打扫干净_换文件夹与铺底() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.undo();
+        assertTrue(session.canRedo());
+
+        session.seedExisting(List.of(Path.of("target", "x.jpg")));
+        assertFalse(session.canRedo(), "铺底之后不该还能重做到上一批照片上");
+
+        session.add(PHOTO_B);
+        session.undo();
+        assertTrue(session.canRedo());
+        session.clear();
+        assertFalse(session.canRedo());
+    }
+
+    @Test
     void 不在垃圾桶里的照片捡不回来() {
         Session session = newSession();
         session.add(PHOTO_A);

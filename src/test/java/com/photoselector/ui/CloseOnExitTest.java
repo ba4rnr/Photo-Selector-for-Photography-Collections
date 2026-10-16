@@ -107,6 +107,34 @@ class CloseOnExitTest {
     }
 
     @Test
+    void 撤销重做按钮_跟着历史灰亮_点了真管用() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(false); // 目标文件夹里原来有一张
+        ToolBarPanel bar = panel.main.toolBar();
+
+        assertFalse(bar.undoButton().isEnabled(), "开局没有可撤销的步骤，按钮该灰着");
+        assertFalse(bar.redoButton().isEnabled(), "更没有可重做的");
+
+        panel.main.addToTarget(panel.photoToAdd);
+        assertEquals(2, panel.main.targetPanelForTest().entryCount());
+        assertTrue(bar.undoButton().isEnabled(), "挑了一张，撤销该亮起来");
+        assertFalse(bar.redoButton().isEnabled(), "还没撤销过，重做还是灰的");
+
+        // doClick(0)：默认那版有 68ms 的按压动画，动画没跑完动作就不会触发，
+        // 测试会读到"点了还没生效"的中间态
+        SwingUtilities.invokeAndWait(() -> bar.undoButton().doClick(0));
+        assertEquals(1, panel.main.targetPanelForTest().entryCount(), "撤销把刚挑的拿掉");
+        assertFalse(bar.undoButton().isEnabled(), "没得撤了，按钮又灰回去");
+        assertTrue(bar.redoButton().isEnabled(), "这时候有得重做");
+
+        SwingUtilities.invokeAndWait(() -> bar.redoButton().doClick(0));
+        assertEquals(2, panel.main.targetPanelForTest().entryCount(), "重做又把它加回来");
+        assertTrue(bar.undoButton().isEnabled(), "重做过的步骤又能撤销");
+        assertFalse(bar.redoButton().isEnabled(), "没得重做了");
+        panel.main.shutdown();
+    }
+
+    @Test
     void 换工作区时_有没保存的改动也问同一套话() throws Exception {
         Theme.install();
         Panel panel = new Panel(true);

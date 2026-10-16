@@ -57,10 +57,19 @@ public final class MainPanel extends JPanel {
      * <p>"追加到末尾"给了两个键：空格是挑片时最顺手的那颗，回车是很多工具里
      * "确认加上去"的习惯。它们走的是同一个动作。
      */
+    /** 撤销键。菜单里要显示同一个提示，所以单独留个名字给它。 */
+    private static final KeyStroke UNDO_KEY =
+            KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK);
+
+    /** 重做键。 */
+    private static final KeyStroke REDO_KEY =
+            KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK);
+
     private static final List<Shortcut> SHORTCUTS = List.of(
             new Shortcut("addToTarget", KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0)),
             new Shortcut("addToTargetAlt", KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)),
-            new Shortcut("undo", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK)),
+            new Shortcut("undo", UNDO_KEY),
+            new Shortcut("redo", REDO_KEY),
             new Shortcut("previousPhoto", KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0)),
             new Shortcut("nextPhoto", KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0)));
 
@@ -224,7 +233,16 @@ public final class MainPanel extends JPanel {
         // · 拖到大图区、素材条这些地方什么都不做——照片留在垃圾桶里
         DragOut.installTrashBack(trashPanel, trashPanel::selectedPhoto, trashPanel::thumbnailOf,
                 this::untrashFromTrash);
+        // 两块目标面板内容一变，撤销 / 重做按钮的灰亮跟着走
+        targetPanel.setOnChanged(this::historyChanged);
+        arrangePanel.setOnChanged(this::historyChanged);
+        // 开局同步一次：没有历史时那两颗按钮该是灰的
+        historyChanged();
         toolBar.setOnToolChanged(viewer::setCursorTool);
+        // 撤销 / 重做是这块面板自己的逻辑，接线也放在这儿：谁拿到面板，
+        // 这两颗按钮都是活的（只接到主窗口去的话，单独用面板的地方就没人管了）
+        toolBar.undoButton().addActionListener(e -> undo());
+        toolBar.redoButton().addActionListener(e -> redo());
 
         buildAreas();
 
@@ -492,7 +510,7 @@ public final class MainPanel extends JPanel {
     }
 
     /** Ctrl+Z：撤销上一步（挑入、挪位、丢垃圾桶都算）。 */
-    private void undo() {
+    public void undo() {
         Session session = targetPanel.session();
         if (!saving && session != null && session.undo()) {
             targetPanel.refresh();
@@ -501,6 +519,60 @@ public final class MainPanel extends JPanel {
             // 两种都会改变垃圾桶的内容——不刷新的话那块面板会停在旧画面上
             trashPanel.refresh();
         }
+    }
+
+    /** Ctrl+Y：把刚撤销掉的那一步再做一遍。 */
+    public void redo() {
+        Session session = targetPanel.session();
+        if (!saving && session != null && session.redo()) {
+            targetPanel.refresh();
+            arrangePanel.refresh();
+            trashPanel.refresh();
+        }
+    }
+
+    /**
+     * 撤销 / 重做按钮的灰亮状态：没得撤销就灰着。
+     *
+     * <p>按钮的灰亮在这儿同步（挪到主窗口去的話，光用 {@code MainPanel} 的地方
+     * 就没人管这两颗按钮了）；菜单项那两份由外部的回调去同步。
+     *
+     * <p>调用点集中在"序列变过"的地方（{@code TargetPanel.refresh} 和这一对动作），
+     * 不挂在每次重绘上——那样每帧都要问一遍历史栈，白费功夫。
+     */
+    private void historyChanged() {
+        toolBar.undoButton().setEnabled(canUndo());
+        toolBar.redoButton().setEnabled(canRedo());
+        onHistoryChanged.run();
+    }
+
+    /** 撤销 / 重做的灰亮状态变了（主窗口拿它同步菜单项）。 */
+    public void setOnHistoryChanged(Runnable listener) {
+        this.onHistoryChanged = listener == null ? () -> { } : listener;
+    }
+
+    private Runnable onHistoryChanged = () -> { };
+
+    /** 现在有没有可以撤销的步骤。 */
+    public boolean canUndo() {
+        Session session = targetPanel.session();
+        return session != null && session.canUndo();
+    }
+
+    /** 现在有没有可以重做的步骤。 */
+    public boolean canRedo() {
+        Session session = targetPanel.session();
+        return session != null && session.canRedo();
+    }
+
+    /** 撤销键；菜单里显示提示用，和快捷键表里是同一个键。 */
+    static KeyStroke undoKeyStroke() {
+        return UNDO_KEY;
+    }
+
+    /** 重做键；同上。 */
+    static KeyStroke redoKeyStroke() {
+        return REDO_KEY;
     }
 
     /** 目标序列里某张照片的缩略图，给跟着鼠标的提示图用。 */
@@ -663,6 +735,7 @@ public final class MainPanel extends JPanel {
         return switch (actionName) {
             case "addToTarget", "addToTargetAlt" -> this::addCurrentPhotoToTarget;
             case "undo" -> this::undo;
+            case "redo" -> this::redo;
             case "previousPhoto" -> () -> filmstrip.moveCurrent(-1);
             case "nextPhoto" -> () -> filmstrip.moveCurrent(1);
             default -> throw new IllegalArgumentException("快捷键表里有没接上动作的名字：" + actionName);

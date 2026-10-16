@@ -38,6 +38,7 @@ public final class MainFrame extends JFrame {
     private final WorkspaceStore workspaceStore;
     private final AppSettings settings;
 
+    /** 菜单里那两项：灰亮状态跟着撤销 / 重做的历史走。 */
     public MainFrame(WorkspaceStore workspaceStore, AppSettings settings) {
         super("摄影集照片筛选器");
         this.workspaceStore = workspaceStore;
@@ -56,7 +57,7 @@ public final class MainFrame extends JFrame {
         mainPanel.setOnExit(this::exit);
         setContentPane(mainPanel);
         setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, mainPanel::requestClose,
-                this::changeDefaultZoom));
+                this::changeDefaultZoom, this::refreshHistoryStates));
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
         mainPanel.setOnSaveFinished(this::saveFinished);
@@ -65,10 +66,38 @@ public final class MainFrame extends JFrame {
         mainPanel.toolBar().chooseWorkspaceButton().addActionListener(e -> chooseWorkspace());
         mainPanel.toolBar().saveButton().addActionListener(e -> mainPanel.save());
         mainPanel.toolBar().fitButton().addActionListener(e -> mainPanel.fitViewerToWindow());
+        // 撤销 / 重做的接线在 MainPanel 自己那儿（见 MainPanel 构造器），
+        // 这里只负责开局把菜单项的灰亮对一次
+        // 菜单里的两项和工具栏按钮共用同一份状态：谁换了历史，两边一起更新
+        mainPanel.setOnHistoryChanged(this::refreshHistoryStates);
+        refreshHistoryStates(); // 开局同步一次：没有历史时那两颗按钮该是灰的
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
         setLocationRelativeTo(null); // 居中打开
+    }
+
+    /** 撤销 / 重做的灰亮：工具栏按钮和菜单项一起跟着历史走。 */
+    private void refreshHistoryStates() {
+        boolean canUndo = mainPanel.canUndo();
+        boolean canRedo = mainPanel.canRedo();
+        mainPanel.toolBar().undoButton().setEnabled(canUndo);
+        mainPanel.toolBar().redoButton().setEnabled(canRedo);
+        // 菜单里那两项不单独记引用：直接按名字在菜单树上找。
+        // 只存两份引用的话，将来菜单结构一挪就悄悄失效；按名字找想挪都挪不坏。
+        for (java.awt.Component menuComponent : getJMenuBar().getComponents()) {
+            if (menuComponent instanceof JMenu menu) {
+                for (java.awt.Component item : menu.getMenuComponents()) {
+                    if (item instanceof JMenuItem menuItem) {
+                        if ("撤销".equals(menuItem.getText())) {
+                            menuItem.setEnabled(canUndo);
+                        } else if ("重做".equals(menuItem.getText())) {
+                            menuItem.setEnabled(canRedo);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -80,11 +109,12 @@ public final class MainFrame extends JFrame {
      * <p>写成 static 是方便测试把菜单栏单独拿去渲染，不必真的开一个窗口。
      */
     static JMenuBar createMenuBar(MainPanel mainPanel, Runnable openFolderAction, Runnable quitAction) {
-        return createMenuBar(mainPanel, openFolderAction, quitAction, percent -> { });
+        return createMenuBar(mainPanel, openFolderAction, quitAction, percent -> { }, () -> { });
     }
 
     static JMenuBar createMenuBar(MainPanel mainPanel, Runnable openFolderAction, Runnable quitAction,
-                                  java.util.function.IntConsumer changeDefaultZoom) {
+                                  java.util.function.IntConsumer changeDefaultZoom,
+                                  Runnable historyChanged) {
         JMenuBar bar = new JMenuBar();
         // Metal 的菜单栏默认会画一道渐变，换成基础实现后它就老老实实只填背景色
         bar.setUI(new BasicMenuBarUI());
@@ -115,13 +145,23 @@ public final class MainFrame extends JFrame {
         addToTarget.addActionListener(e -> mainPanel.addCurrentPhotoToTarget());
         edit.add(addToTarget);
         edit.addSeparator();
-        // 只改文字、不挂动作：在菜单栏上点一下会先取得焦点，而 MainPanel 的
-        // WHEN_IN_FOCUSED_WINDOW 映射只在没有组件吃掉按键时生效——
-        // 菜单栏开着的时候按 Ctrl+Z 恰好会被它吃掉。挂个动作反而制造"从菜单点没反应"的怪现象。
-        JMenuItem undoItem = pending("撤销（用 Ctrl+Z）");
-        undoItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK));
+        // 这两个和工具栏按钮、快捷键共用同一个动作（MainPanel.undo / redo）：
+        // 从哪儿触发都是同一条路。加速键和 MainPanel 的表里是同一个键，
+        // 菜单开着时由菜单接管、平时由输入映射接管，落到的是同一段代码。
+        JMenuItem undoItem = new JMenuItem("撤销");
+        undoItem.setAccelerator(MainPanel.undoKeyStroke());
+        undoItem.addActionListener(e -> {
+            mainPanel.undo();
+            historyChanged.run();
+        });
         edit.add(undoItem);
-        edit.add(pending("重做", KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK)));
+        JMenuItem redoItem = new JMenuItem("重做");
+        redoItem.setAccelerator(MainPanel.redoKeyStroke());
+        redoItem.addActionListener(e -> {
+            mainPanel.redo();
+            historyChanged.run();
+        });
+        edit.add(redoItem);
 
         JMenu image = menu("图像");
         image.add(pending("旋转"));
