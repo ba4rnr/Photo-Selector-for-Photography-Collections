@@ -56,6 +56,7 @@ public final class MainPanel extends JPanel {
     private final ToolBarPanel toolBar = new ToolBarPanel();
 
     private final ThumbnailLoader thumbnailLoader;
+    private final ThumbnailLoader targetLoader;
     private final FilmstripPanel filmstrip;
     private final TargetPanel targetPanel;
     private final TargetPanel arrangePanel;
@@ -128,7 +129,7 @@ public final class MainPanel extends JPanel {
         // 共用一只的话会把这边正在路上的请求一起作废。缩略图缓存还是共用同一份。
         // 两块面板显示的是同一批照片，共用一只取图器：缓存命中率高，也省一个线程池。
         // （只有素材条会调 restart()，所以共用是安全的。）
-        ThumbnailLoader targetLoader = new ThumbnailLoader(thumbnailService);
+        targetLoader = new ThumbnailLoader(thumbnailService);
         targetPanel = new TargetPanel(targetLoader);
         arrangePanel = new TargetPanel(targetLoader);
         arrangePanel.setThumbnailWidth(ARRANGE_THUMBNAIL_WIDTH);
@@ -139,10 +140,13 @@ public final class MainPanel extends JPanel {
         targetPanel.setOnPhotoChosen(viewer::showPhoto);
         arrangePanel.setOnPhotoChosen(viewer::showPhoto);
 
-        // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里
-        DragOut.install(filmstrip, filmstrip::currentPhoto, this::addToTarget);
+        // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
+        // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
+        DragOut.install(filmstrip, filmstrip::currentPhoto, filmstrip::currentThumbnail,
+                () -> true, this::addToTargetAt);
         // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
-        DragOut.install(viewer, viewer::photo, viewer::isDragOutEnabled, this::addToTarget);
+        DragOut.install(viewer, viewer::photo, viewer::ghostThumbnail,
+                viewer::isDragOutEnabled, this::addToTargetAt);
         toolBar.setOnToolChanged(viewer::setCursorTool);
 
         buildAreas();
@@ -364,11 +368,21 @@ public final class MainPanel extends JPanel {
      * <p>空格键和"拖到目标面板上"走的是同一条路——同一个动作不该有两份实现。
      */
     public void addToTarget(Path photo) {
+        addToTargetAt(photo, -1);
+    }
+
+    /**
+     * 把一张素材照片插进目标序列的指定位置。
+     *
+     * <p>空格键（追加到末尾）和拖到两张之间（插在指定位置）走的是同一条路。
+     */
+    public void addToTargetAt(Path photo, int index) {
         Session session = targetPanel.session();
         if (photo == null || session == null) {
             return;
         }
-        if (session.add(photo)) {
+        boolean added = index < 0 ? session.add(photo) : session.insert(index, photo);
+        if (added) {
             targetPanel.refresh();
             arrangePanel.refresh();
         }
@@ -492,6 +506,7 @@ public final class MainPanel extends JPanel {
     /** 关窗口时收掉后台取图的线程池。 */
     public void shutdown() {
         thumbnailLoader.shutdown();
+        targetLoader.shutdown(); // 之前漏了这只，关窗口后它的线程还活着、还攥着文件
         scanPool.shutdownNow();
         savePool.shutdownNow();
     }

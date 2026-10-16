@@ -137,6 +137,69 @@ class DragToTargetTest {
         panel.shutdown();
     }
 
+    @Test
+    void 拖到两张之间时落点是插在它们中间() throws Exception {
+        MainPanel panel = panelWithPhotos();
+        TargetPanel target = panel.targetPanelForTest();
+        SwingUtilities.invokeAndWait(() -> {
+            target.setSize(360, 480);
+            layoutTree(target);
+        });
+        paint(target); // 画一遍才会算出格子位置
+
+        // 第一格中点偏右 → 插到它后面；偏左 → 插到它前面
+        assertEquals(1, target.dropIndexAt(new Point(120, 60)), "第一格右半边：插在它后面");
+        assertEquals(0, target.dropIndexAt(new Point(20, 60)), "第一格左半边：插在它前面");
+
+        Path dropped = Files.walk(tempDir.resolve("素材"))
+                .filter(path -> path.getFileName().toString().equals("p2.jpg"))
+                .findFirst().orElseThrow();
+        panel.addToTargetAt(dropped, 1);
+        assertEquals("020", target.nameAt(1), "插在第 1 位，就该是这个位置的编号");
+        assertEquals(3, target.entryCount());
+        panel.shutdown();
+    }
+
+    @Test
+    void 拖动过程中会画白线标出落点_松手后擦掉() throws Exception {
+        MainPanel panel = panelWithPhotos();
+        TargetPanel target = panel.targetPanelForTest();
+        SwingUtilities.invokeAndWait(() -> {
+            target.setSize(360, 480);
+            layoutTree(target);
+        });
+
+        target.setDropHint(1);
+        BufferedImage withLine = render(target);
+        assertTrue(hasWhiteLine(withLine), "拖动时该有一条白线标出落点");
+
+        target.clearDropHint();
+        assertTrue(!hasWhiteLine(render(target)), "松手之后白线要擦掉");
+        panel.shutdown();
+    }
+
+    /** 面板里有没有那条纯白的竖线（DIVIDER_HINT 那个色）。 */
+    private static boolean hasWhiteLine(BufferedImage image) {
+        int wanted = Theme.DIVIDER_HINT.getRGB() & 0xFFFFFF;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if ((image.getRGB(x, y) & 0xFFFFFF) == wanted) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static BufferedImage render(javax.swing.JComponent component) {
+        BufferedImage image = new BufferedImage(Math.max(1, component.getWidth()),
+                Math.max(1, component.getHeight()), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        component.paint(g);
+        g.dispose();
+        return image;
+    }
+
     private static void paint(javax.swing.JComponent component) {
         BufferedImage image = new BufferedImage(Math.max(1, component.getWidth()),
                 Math.max(1, component.getHeight()), BufferedImage.TYPE_INT_RGB);

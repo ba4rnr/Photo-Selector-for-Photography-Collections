@@ -405,6 +405,22 @@ final class ViewerPanel extends JPanel {
         return tool == CursorTool.SELECT;
     }
 
+    /** 拖出去时跟着鼠标走的那张小图；现缩一张，不去动缩略图缓存。 */
+    BufferedImage ghostThumbnail() {
+        if (image == null) {
+            return null;
+        }
+        int width = 140;
+        int height = Math.max(1, Math.round(image.getHeight() * (float) width / image.getWidth()));
+        BufferedImage small = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = small.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.drawImage(image, 0, 0, width, height, null);
+        g.dispose();
+        return small;
+    }
+
     private static boolean hit(Point point, Rectangle bounds) {
         return bounds != null && bounds.contains(point);
     }

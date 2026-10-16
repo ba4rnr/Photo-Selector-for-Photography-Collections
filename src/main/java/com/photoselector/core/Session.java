@@ -98,6 +98,19 @@ public final class Session {
      * @return 是否真的加入了（重复时返回 false）
      */
     public boolean add(Path source) {
+        return insert(sequence.size(), source);
+    }
+
+    /**
+     * 在指定位置插入一张照片。
+     *
+     * <p>和 {@link #add} 是同一件事，只是位置不同——拖到某两张之间落下的就是它。
+     * 位置会夹到合法范围；同一张照片仍然只允许出现一次。
+     *
+     * @param index 插在第几项<b>之前</b>；等于当前长度就是追加到末尾
+     * @return 是否真的插进去了（重复时返回 false）
+     */
+    public boolean insert(int index, Path source) {
         Objects.requireNonNull(source, "source 不能为空");
         // 先按同一套规则规范化，再去重。
         // 条目里存的永远是规范化后的路径，这里不跟着规范化的话，
@@ -106,8 +119,9 @@ public final class Session {
         if (contains(normalized)) {
             return false;
         }
+        int at = Math.max(0, Math.min(index, sequence.size()));
         TargetEntry entry = new TargetEntry(normalized, Origin.PENDING);
-        sequence.add(entry);
+        sequence.add(at, entry);
         // 反向动作：把刚加入的这条拿掉。
         // 唯一性约束保证此刻序列里恰好只有这一条来自该 source。
         pushUndo(() -> sequence.remove(entry));

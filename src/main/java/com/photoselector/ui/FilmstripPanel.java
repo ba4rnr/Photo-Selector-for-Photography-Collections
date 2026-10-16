@@ -172,6 +172,11 @@ final class FilmstripPanel extends JPanel {
         return currentPhoto;
     }
 
+    /** 当前照片的缩略图，给"跟着鼠标走的那张图"用；还没解好就是 null。 */
+    BufferedImage currentThumbnail() {
+        return currentPhoto == null ? null : thumbnails.get(currentPhoto);
+    }
+
     /** 直接指定当前照片（测试用，等价于在那张照片上点一下）。 */
     void setCurrentPhoto(Path photo) {
         this.currentPhoto = photo;

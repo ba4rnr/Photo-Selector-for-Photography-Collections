@@ -85,6 +85,9 @@ final class TargetPanel extends JPanel {
     /** 当前点中的那一格；用来画个底色，不然点下去看不出发生了什么。 */
     private int chosenIndex = -1;
 
+    /** 拖动中的落点：插在第几项之前；-1 表示现在没在拖。 */
+    private int dropHint = -1;
+
     // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
     private int extraSpace;
@@ -126,6 +129,40 @@ final class TargetPanel extends JPanel {
     /** 点中某一格时通知外部。 */
     void setOnPhotoChosen(java.util.function.Consumer<Path> listener) {
         this.onPhotoChosen = listener == null ? photo -> { } : listener;
+    }
+
+    /**
+     * 光标落在哪两个格子之间，返回"插在第几项之前"。
+     *
+     * <p>判据是每一格的<b>中点</b>：偏左就插在这一格前面，偏右就插到它后面。
+     * 这正是"拖到两张之间"的落点算法。
+     */
+    int dropIndexAt(Point point) {
+        if (session == null) {
+            return 0;
+        }
+        updateMetrics();
+        int row = Math.max(0, (point.y - HEADER_HEIGHT) / rowHeight());
+        int column = columns; // 默认：落在这一行最后一个格子之后
+        for (int c = 0; c < columns; c++) {
+            if (point.x < cellX(c) + boxWidth / 2) {
+                column = c;
+                break;
+            }
+        }
+        return Math.max(0, Math.min(session.size(), row * columns + column));
+    }
+
+    /** 拖动过程中告诉面板落点在哪，它会画一条白线标出来。 */
+    void setDropHint(int index) {
+        if (dropHint != index) {
+            dropHint = index;
+            repaint();
+        }
+    }
+
+    void clearDropHint() {
+        setDropHint(-1);
     }
 
     /** 某一格对应的条目下标；点在空白处返回 -1。 */
@@ -319,8 +356,27 @@ final class TargetPanel extends JPanel {
             paintEmptyHint(g2);
         } else {
             paintCells(g2);
+            paintDropHint(g2);
         }
         g2.dispose();
+    }
+
+    /**
+     * 拖动时标出落点的那条白线。
+     *
+     * <p>白线画在"将要插进去的那个缝"上，贯穿那一行——和底部素材条拖动排序用的是同一套视觉语言。
+     */
+    private void paintDropHint(Graphics2D g) {
+        if (dropHint < 0) {
+            return;
+        }
+        updateMetrics();
+        int row = dropHint / columns;
+        int column = dropHint % columns;
+        int x = column < columns ? cellX(column) : cellX(columns - 1) + boxWidth + GAP / 2;
+        int y = HEADER_HEIGHT + row * rowHeight();
+        g.setColor(Theme.DIVIDER_HINT);
+        g.fillRect(x - 4, y, 3, thumbnailHeight);
     }
 
     private void paintHeader(Graphics2D g) {
