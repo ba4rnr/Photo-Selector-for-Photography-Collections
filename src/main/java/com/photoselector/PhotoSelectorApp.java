@@ -6,6 +6,7 @@ import java.util.Optional;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Workspace;
+import com.photoselector.io.AppSettings;
 import com.photoselector.io.WorkspaceStore;
 import com.photoselector.ui.MainFrame;
 import com.photoselector.ui.theme.Theme;
@@ -38,7 +39,7 @@ public final class PhotoSelectorApp {
         SwingUtilities.invokeLater(() -> {
             Theme.install();
             WorkspaceStore store = new WorkspaceStore();
-            MainFrame frame = new MainFrame(store);
+            MainFrame frame = new MainFrame(store, new AppSettings());
             frame.setVisible(true);
             restoreOrChooseWorkspace(frame, store);
         });

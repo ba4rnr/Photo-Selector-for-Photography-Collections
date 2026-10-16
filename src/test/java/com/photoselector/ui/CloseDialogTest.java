@@ -40,13 +40,17 @@ class CloseDialogTest {
         });
         try {
             AtomicReference<Integer> answer = new AtomicReference<>();
-            // 模态对话框一旦弹出来就会占住调用线程，所以先排好"点按钮"这件事再弹
-            javax.swing.Timer clicker = new javax.swing.Timer(300, e -> {
-                AbstractButton button = findButton("不保存");
-                assertNotNull(button, "对话框里应当有「不保存」这个按钮");
+            // 模态对话框一旦弹出来就会占住调用线程，所以先排好"点按钮"这件事再弹。
+            // 反复试而不是只试一次：对话框弹出需要一点时间，一次没找到就没机会了
+            javax.swing.Timer clicker = new javax.swing.Timer(100, null);
+            clicker.addActionListener(e -> {
+                AbstractButton button = findButton(frame, "不保存");
+                if (button == null) {
+                    return; // 还没弹出来，下一拍再试
+                }
                 button.doClick();
+                clicker.stop();
             });
-            clicker.setRepeats(false);
             clicker.start();
             answer.set(MainPanel.askToSaveForTest(frame));
 
@@ -71,17 +75,20 @@ class CloseDialogTest {
         });
         try {
             AtomicReference<String> seen = new AtomicReference<>();
-            javax.swing.Timer clicker = new javax.swing.Timer(300, e -> {
-                AbstractButton save = findButton("保存");
-                AbstractButton discard = findButton("不保存");
-                assertNotNull(save, "应当有「保存」");
-                assertNotNull(discard, "应当有「不保存」");
-                assertTrue(save != discard, "两个按钮必须是两个东西");
-                seen.set(save.getText() + "|" + discard.getText());
+            // 反复试而不是只试一次：对话框弹出需要一点时间，一次没找到就没机会了
+            //（这个测试就因此翻过一次车）
+            javax.swing.Timer clicker = new javax.swing.Timer(100, null);
+            clicker.addActionListener(e -> {
+                AbstractButton discard = findButton(frame, "不保存");
+                if (discard == null) {
+                    return; // 还没弹出来，下一拍再试
+                }
+                AbstractButton save = findButton(frame, "保存");
+                seen.set((save == null ? "?" : save.getText()) + "|" + discard.getText());
                 // 点「不保存」：它必须返回 NO_OPTION；「保存」同理返回 YES_OPTION
                 discard.doClick();
+                clicker.stop();
             });
-            clicker.setRepeats(false);
             clicker.start();
             int answer = MainPanel.askToSaveForTest(frame);
 
@@ -92,9 +99,14 @@ class CloseDialogTest {
         }
     }
 
-    /** 在所有窗口里找那个按钮——对话框是独立窗口，不是主窗口的子组件。 */
-    private static AbstractButton findButton(String text) {
-        for (java.awt.Window window : java.awt.Window.getWindows()) {
+    /**
+     * 在"这个窗口自己弹出的对话框"里找按钮。
+     *
+     * <p>不能在全部窗口里瞎找：上一个测试留下的对话框可能还在，
+     * 会点到它的按钮上去（这个测试就因此吃过一次假失败）。
+     */
+    private static AbstractButton findButton(JFrame owner, String text) {
+        for (java.awt.Window window : owner.getOwnedWindows()) {
             AbstractButton found = findButton(window, text);
             if (found != null) {
                 return found;

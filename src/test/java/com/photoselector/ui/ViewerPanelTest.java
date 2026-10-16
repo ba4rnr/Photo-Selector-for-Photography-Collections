@@ -106,7 +106,7 @@ class ViewerPanelTest {
 
         // 默认不是"适应窗口"：照片按固定倍率显示，连着翻几张时比例一致，方便横向比较
         assertTrue(!viewer.isFitToWindow(), "默认不该是适应窗口");
-        assertEquals(14, viewer.zoomPercent(), "默认放大倍率是 14%");
+        assertEquals(18, viewer.zoomPercent(), "默认放大倍率是 18%");
 
         SwingUtilities.invokeAndWait(viewer::actualSize);
         assertTrue(!viewer.isFitToWindow());
@@ -114,6 +114,33 @@ class ViewerPanelTest {
 
         SwingUtilities.invokeAndWait(viewer::fitToWindow);
         assertTrue(viewer.isFitToWindow());
+        loader.shutdown();
+    }
+
+    @Test
+    void 改默认倍率之后_当前这张和以后每张都按新倍率显示() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("素材"));
+        Path first = TestImages.writeJpeg(folder.resolve("a.jpg"), 900, 600);
+        Path second = TestImages.writeJpeg(folder.resolve("b.jpg"), 900, 600);
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(first);
+        });
+        waitUntil(viewer::hasImage, "第一张");
+        assertEquals(18, viewer.zoomPercent(), "出厂默认是 18%");
+
+        // 改成 50%：眼前这张立刻跟着变，不用翻页
+        SwingUtilities.invokeAndWait(() -> viewer.setDefaultScale(0.5));
+        assertEquals(50, viewer.zoomPercent(), "改完立刻按新倍率显示当前这张");
+
+        // 翻到下一张：仍然是新倍率
+        SwingUtilities.invokeAndWait(() -> viewer.showPhoto(second));
+        waitUntil(viewer::hasImage, "第二张");
+        assertEquals(50, viewer.zoomPercent(), "之后翻到的每张都用新倍率");
         loader.shutdown();
     }
 
@@ -130,7 +157,7 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        assertEquals(14, viewer.zoomPercent(), "起点是默认那一档");
+        assertEquals(18, viewer.zoomPercent(), "起点是默认那一档");
 
         // 一路往上滚：档位要够密，但 100、200、300、400 这些整百档必须都恰好踩得到
         List<Integer> visited = new ArrayList<>();
@@ -155,7 +182,7 @@ class ViewerPanelTest {
             }
         });
         assertEquals(5, viewer.zoomPercent(),
-                "到底了就停在最低档（5%），不再动——14% 下面还有几档可以看整卷构图");
+                "到底了就停在最低档（5%），不再动——默认档下面还有几档可以看整卷构图");
 
         // 从"适应窗口"算出来的零碎比例起步，按方向落到相邻档
         viewer.fitToWindow();

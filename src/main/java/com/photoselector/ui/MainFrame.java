@@ -23,6 +23,7 @@ import javax.swing.KeyStroke;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
 import com.photoselector.core.Workspace;
+import com.photoselector.io.AppSettings;
 import com.photoselector.io.Saver;
 import com.photoselector.io.WorkspaceStore;
 import com.photoselector.ui.theme.Theme;
@@ -35,10 +36,13 @@ public final class MainFrame extends JFrame {
 
     private final MainPanel mainPanel = new MainPanel();
     private final WorkspaceStore workspaceStore;
+    private final AppSettings settings;
 
-    public MainFrame(WorkspaceStore workspaceStore) {
+    public MainFrame(WorkspaceStore workspaceStore, AppSettings settings) {
         super("摄影集照片筛选器");
         this.workspaceStore = workspaceStore;
+        this.settings = settings;
+        mainPanel.setDefaultZoomPercent(settings.defaultZoomPercent());
 
         // 不能再用 EXIT_ON_CLOSE：那样点 × 会绕过"有没有没保存的改动"这一问。
         // 关窗口现在只有一条路——MainPanel.requestClose()，菜单里的"退出"也走它。
@@ -51,7 +55,8 @@ public final class MainFrame extends JFrame {
         });
         mainPanel.setOnExit(this::exit);
         setContentPane(mainPanel);
-        setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, mainPanel::requestClose));
+        setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, mainPanel::requestClose,
+                this::changeDefaultZoom));
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
         mainPanel.setOnSaveFinished(this::saveFinished);
@@ -75,6 +80,11 @@ public final class MainFrame extends JFrame {
      * <p>写成 static 是方便测试把菜单栏单独拿去渲染，不必真的开一个窗口。
      */
     static JMenuBar createMenuBar(MainPanel mainPanel, Runnable openFolderAction, Runnable quitAction) {
+        return createMenuBar(mainPanel, openFolderAction, quitAction, percent -> { });
+    }
+
+    static JMenuBar createMenuBar(MainPanel mainPanel, Runnable openFolderAction, Runnable quitAction,
+                                  java.util.function.IntConsumer changeDefaultZoom) {
         JMenuBar bar = new JMenuBar();
         // Metal 的菜单栏默认会画一道渐变，换成基础实现后它就老老实实只填背景色
         bar.setUI(new BasicMenuBarUI());
@@ -129,6 +139,8 @@ public final class MainFrame extends JFrame {
         view.addSeparator();
         view.add(zoomMenu(mainPanel));
         view.addSeparator();
+        view.add(defaultZoomMenu(mainPanel, changeDefaultZoom));
+        view.addSeparator();
         view.add(thumbnailSizeMenu(mainPanel));
 
         bar.add(file);
@@ -146,6 +158,11 @@ public final class MainFrame extends JFrame {
     /** 应用一个工作区：界面切过去，配置写回文件。 */
     public void showWorkspace(Workspace workspace) {
         mainPanel.applyWorkspace(workspace); // 扫描在后台进行，结果通过回调通知
+    }
+
+    /** 用户改了默认放大倍率：记下来，下次打开还是它。 */
+    private void changeDefaultZoom(int percent) {
+        settings.setDefaultZoomPercent(percent);
     }
 
     /** 上次的素材文件夹不见了时的提示。 */
@@ -245,6 +262,32 @@ public final class MainFrame extends JFrame {
                 group.clearSelection();
             }
         });
+        return menu;
+    }
+
+    /**
+     * 「查看 → 默认放大倍率」：打开一张照片时用多大的比例。
+     *
+     * <p>和上面那个「缩放」是两回事：那个管"眼前这一张现在多大"，这个管"以后每张打开时多大"。
+     * 挑一个档位，当前这张立刻按新倍率显示，之后翻到的每一张也都用它。
+     */
+    private static JMenu defaultZoomMenu(MainPanel mainPanel,
+                                         java.util.function.IntConsumer onChange) {
+        JMenu menu = menu("默认放大倍率");
+        ButtonGroup group = new ButtonGroup();
+        // 档位都取自大图自己的档位表，保证菜单里选得出来的值滚轮也滚得到
+        for (int percent : ViewerPanel.defaultZoomChoices()) {
+            JRadioButtonMenuItem item =
+                    new JRadioButtonMenuItem(percent + "%", percent == mainPanel.defaultZoomPercent());
+            item.setForeground(Theme.TEXT);
+            item.setBackground(Theme.PANEL);
+            item.addActionListener(e -> {
+                mainPanel.setDefaultZoomPercent(percent);
+                onChange.accept(percent);
+            });
+            group.add(item);
+            menu.add(item);
+        }
         return menu;
     }
 

@@ -361,6 +361,16 @@ public final class MainPanel extends JPanel {
         viewer.setOnZoomChanged(listener);
     }
 
+    /** 改"打开一张照片时的默认放大倍率"（「查看 → 默认放大倍率」用），立刻生效。 */
+    public void setDefaultZoomPercent(int percent) {
+        viewer.setDefaultScale(percent / 100.0);
+    }
+
+    /** 当前的默认放大倍率（百分比）。 */
+    public int defaultZoomPercent() {
+        return (int) Math.round(viewer.defaultScale() * 100);
+    }
+
     /** 工作区变化时通知外部（外部负责写回配置文件）。 */
     public void setOnWorkspaceChanged(Consumer<Workspace> listener) {
         this.onWorkspaceChanged = listener == null ? updated -> { } : listener;

@@ -156,7 +156,8 @@ class DragAndCloseTest {
             SwingUtilities.invokeAndWait(() -> {
                 Theme.install();
                 // 配置写到临时目录：别碰用户真实的 %APPDATA%
-                created.set(new MainFrame(new WorkspaceStore(tempDir.resolve("workspace.properties"))));
+                created.set(new MainFrame(new WorkspaceStore(tempDir.resolve("workspace.properties")),
+                        new com.photoselector.io.AppSettings(tempDir.resolve("preferences.properties"))));
             });
             frame = created.get();
             panel = (MainPanel) frame.getContentPane();

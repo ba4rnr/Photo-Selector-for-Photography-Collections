@@ -64,26 +64,38 @@ final class ViewerPanel extends JPanel {
     };
 
     /**
+     * 「查看 → 默认放大倍率」里给用户挑的几个档（百分比）。
+     *
+     * <p>取值都在 {@link #ZOOM_STEPS} 上，这样"默认倍率"和滚轮档位是同一套刻度，
+     * 不会出现菜单里选了一个滚轮永远滚不出来的数。
+     */
+    static int[] defaultZoomChoices() {
+        return new int[] {14, 18, 25, 33, 50, 66, 100};
+    }
+
+    private final ThumbnailLoader loader;
+
+    /**
      * 打开一张照片时的默认放大倍率。
      *
      * <p>用一个固定比例而不是"适应窗口"，是为了让不同的照片都按同一个倍率显示——
-     * 你的照片多在 6000 像素上下，14% 大约是 840 像素，正好一屏宽。
+     * 你的照片多在 6000 像素上下，18% 大约是 1080 像素，正好一屏宽。
      * 连着翻几张时看到的比例一致，方便横向比较。
+     *
+     * <p>可在「查看 → 默认放大倍率」里改；改完立刻按新倍率显示当前这张，不必翻页。
      */
-    private static final double DEFAULT_SCALE = 0.14;
-
-    private final ThumbnailLoader loader;
+    private double defaultScale = 0.18;
 
     private Path photo;
     private BufferedImage image;
     private boolean loading;
     private boolean failed;
 
-    /** 是不是"适应窗口"。默认不是——默认按 {@link #DEFAULT_SCALE} 显示。 */
+    /** 是不是"适应窗口"。默认不是——默认按 {@link #defaultScale} 显示。 */
     private boolean fitToWindow;
 
     /** 非适应窗口时用的比例。 */
-    private double customScale = DEFAULT_SCALE;
+    private double customScale = defaultScale;
 
     /** 相对"居中"位置挪了多少。 */
     private int offsetX;
@@ -182,6 +194,26 @@ final class ViewerPanel extends JPanel {
         resetView();
         repaint();
         onZoomChanged.run();
+    }
+
+    /**
+     * 改"打开一张照片时的默认倍率"，并立刻按新倍率显示当前这张。
+     *
+     * <p>立刻生效是有意的：这个选项在菜单里，改完就能看见画面变大变小，
+     * 不用翻到下一张才知道自己选对了没有。
+     */
+    void setDefaultScale(double scale) {
+        this.defaultScale = Math.max(0.01, Math.min(MAX_SCALE, scale));
+        fitToWindow = false;
+        customScale = this.defaultScale;
+        resetView();
+        repaint();
+        onZoomChanged.run();
+    }
+
+    /** 当前设定的默认倍率（0.18 = 18%）。 */
+    double defaultScale() {
+        return defaultScale;
     }
 
     /** 滚轮缩放：在档位表上走一格。基准点取视图中心（不跟随鼠标）。 */

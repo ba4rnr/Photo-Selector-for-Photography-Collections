@@ -1,0 +1,44 @@
+package com.photoselector.io;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * 偏好设置的读写：改了要记得住，文件坏了也不能让程序起不来。
+ */
+class AppSettingsTest {
+
+    @TempDir
+    Path tempDir;
+
+    @Test
+    void 没存过的时候给出厂默认() {
+        AppSettings settings = new AppSettings(tempDir.resolve("preferences.properties"));
+        assertEquals(18, settings.defaultZoomPercent(), "出厂默认 18%");
+    }
+
+    @Test
+    void 改过之后记得住_下次打开还是它() {
+        Path file = tempDir.resolve("preferences.properties");
+        new AppSettings(file).setDefaultZoomPercent(33);
+
+        assertEquals(33, new AppSettings(file).defaultZoomPercent(),
+                "同一台机器上，重开程序应当还是上次选的倍率");
+    }
+
+    @Test
+    void 文件坏了就当没存过_回默认值而不是崩掉() throws Exception {
+        Path file = tempDir.resolve("preferences.properties");
+        Files.writeString(file, "viewer.defaultZoomPercent=这不是数字\n");
+
+        assertEquals(18, new AppSettings(file).defaultZoomPercent());
+
+        Files.writeString(file, "viewer.defaultZoomPercent=-5\n");
+        assertEquals(18, new AppSettings(file).defaultZoomPercent(), "负数的倍率没有意义");
+    }
+}
