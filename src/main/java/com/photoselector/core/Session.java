@@ -39,6 +39,16 @@ public final class Session {
      */
     private final Deque<Runnable> undoStack = new ArrayDeque<>();
 
+    /**
+     * 有没有还没落盘的改动。
+     *
+     * <p>它不是"历史"而是"和磁盘的差距"：只要有一步操作让序列或垃圾桶偏离了
+     * 磁盘现状，它就是 true。所以撤销也照样是 true——撤销改回来只是让差距变小，
+     * 并没有消失。它唯一的消费者是关窗口时的那一问：没有改动就别拿
+     * "是否保存"去烦用户。
+     */
+    private boolean dirty;
+
     public Session(Path targetFolder, NumberingRule numbering) {
         this.targetFolder = Objects.requireNonNull(targetFolder, "targetFolder 不能为空");
         this.numbering = Objects.requireNonNull(numbering, "numbering 不能为空");
@@ -122,6 +132,7 @@ public final class Session {
         int at = Math.max(0, Math.min(index, sequence.size()));
         TargetEntry entry = new TargetEntry(normalized, Origin.PENDING);
         sequence.add(at, entry);
+        dirty = true; // 已经多出一条，和磁盘不一样了
         // 反向动作：把刚加入的这条拿掉。
         // 唯一性约束保证此刻序列里恰好只有这一条来自该 source。
         pushUndo(() -> sequence.remove(entry));
@@ -140,6 +151,9 @@ public final class Session {
         sequence.clear();
         trash.clear();
         undoStack.clear();
+        // 铺底之后，中间商和磁盘是同一份东西——保存也刚走过这一步，
+        // 所以"干净"要在最后统一置位，不能跟着前面的 clear 走
+        dirty = false;
         for (Path file : existingFiles) {
             sequence.add(new TargetEntry(file, Origin.EXISTING));
         }
@@ -163,6 +177,7 @@ public final class Session {
         }
         TargetEntry entry = sequence.remove(from);
         sequence.add(target, entry);
+        dirty = true; // 位置变了，编号也就变了
         // 反向动作：把它从新位置搬回原位置
         pushUndo(() -> {
             TargetEntry e = sequence.remove(target);
@@ -178,6 +193,7 @@ public final class Session {
         checkIndex(index);
         TargetEntry entry = sequence.remove(index);
         trash.add(entry, index);
+        dirty = true; // 它离开了序列，保存时得真的从文件夹里消失
         // 反向动作：从垃圾桶里把它捡出来，放回原位
         pushUndo(() -> {
             TrashedItem item = trash.removeLast();
@@ -199,11 +215,17 @@ public final class Session {
         return !undoStack.isEmpty();
     }
 
+    /** 有没有还没保存的改动（关窗口时用来决定要不要问"是否保存"）。 */
+    public boolean isDirty() {
+        return dirty;
+    }
+
     /** 换目标文件夹时调用：中间商彻底清空，准备为新文件夹服务。 */
     public void clear() {
         sequence.clear();
         trash.clear();
         undoStack.clear();
+        dirty = false;
     }
 
     private void pushUndo(Runnable reversal) {

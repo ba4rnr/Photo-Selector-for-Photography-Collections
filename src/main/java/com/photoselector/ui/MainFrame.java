@@ -3,10 +3,14 @@ package com.photoselector.ui;
 import java.awt.Dimension;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.nio.file.Path;
+import java.util.function.Function;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
+import javax.swing.JButton;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
@@ -17,10 +21,10 @@ import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
-import com.photoselector.ui.theme.Theme;
 import com.photoselector.core.Workspace;
-import com.photoselector.io.WorkspaceStore;
 import com.photoselector.io.Saver;
+import com.photoselector.io.WorkspaceStore;
+import com.photoselector.ui.theme.Theme;
 
 /**
  * 主窗口：菜单栏 + {@link MainPanel}。
@@ -35,9 +39,18 @@ public final class MainFrame extends JFrame {
         super("摄影集照片筛选器");
         this.workspaceStore = workspaceStore;
 
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        // 不能再用 EXIT_ON_CLOSE：那样点 × 会绕过"有没有没保存的改动"这一问。
+        // 关窗口现在只有一条路——MainPanel.requestClose()，菜单里的"退出"也走它。
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                mainPanel.requestClose();
+            }
+        });
+        mainPanel.setOnExit(this::exit);
         setContentPane(mainPanel);
-        setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, this::dispose));
+        setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, mainPanel::requestClose));
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
         mainPanel.setOnSaveFinished(this::saveFinished);
@@ -79,14 +92,24 @@ public final class MainFrame extends JFrame {
         file.add(save);
         file.addSeparator();
         JMenuItem quit = new JMenuItem("退出");
-        quit.addActionListener(e -> {
-            mainPanel.shutdown();
-            quitAction.run();
-        });
+        quit.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Q, InputEvent.CTRL_DOWN_MASK));
+        // 不做 shutdown()——收线程池是"真要走了"才做的事，交给 quitAction 那条路统一收尾
+        quit.addActionListener(e -> quitAction.run());
         file.add(quit);
 
         JMenu edit = menu("编辑");
-        edit.add(pending("撤销", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK)));
+        // 不给它设加速键：这两个键已经通过 MainPanel 的输入映射全局生效，
+        // 菜单项再占同样的键就多了个出处，将来想换键得改两处。
+        JMenuItem addToTarget = new JMenuItem("加入目标文件夹（追加到末尾）");
+        addToTarget.addActionListener(e -> mainPanel.addCurrentPhotoToTarget());
+        edit.add(addToTarget);
+        edit.addSeparator();
+        // 只改文字、不挂动作：在菜单栏上点一下会先取得焦点，而 MainPanel 的
+        // WHEN_IN_FOCUSED_WINDOW 映射只在没有组件吃掉按键时生效——
+        // 菜单栏开着的时候按 Ctrl+Z 恰好会被它吃掉。挂个动作反而制造"从菜单点没反应"的怪现象。
+        JMenuItem undoItem = pending("撤销（用 Ctrl+Z）");
+        undoItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK));
+        edit.add(undoItem);
         edit.add(pending("重做", KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK)));
 
         JMenu image = menu("图像");
@@ -133,13 +156,26 @@ public final class MainFrame extends JFrame {
 
     /** 保存结束了：把做了什么、以及没做成什么告诉用户。 */
     private void saveFinished(Saver.Result result) {
+        if (mainPanel.isClosingAfterSave()) {
+            // 关窗口走的那次保存：程序马上就走，对话框只会闪一下，不如不弹——
+            // 没做成的那几张已经在回调里放回中间商，下次打开还在
+            return;
+        }
         String text = result.summary();
         if (result.hasProblems()) {
             text += "\n\n有 " + result.problems().size() + " 处没能完成：\n· "
                     + String.join("\n· ", result.problems());
         }
+        // 为什么这里不额外判断"是不是关窗口时触发的"：那种情况下窗口马上就要 dispose，
+        // 模态对话框会自己收起来，用户顶多看到它闪一下——不值得为它多养一个状态。
         JOptionPane.showMessageDialog(this, text, "保存",
                 result.hasProblems() ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** 真正退出：收掉后台线程池，再关窗口。 */
+    private void exit() {
+        mainPanel.shutdown();
+        dispose();
     }
 
     /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */

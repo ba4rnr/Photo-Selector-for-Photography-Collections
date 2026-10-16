@@ -195,4 +195,39 @@ class SessionTest {
         assertTrue(session.trash().isEmpty());
         assertFalse(session.canUndo(), "换了目标文件夹，旧步骤不该还能撤销");
     }
+
+    @Test
+    void 改动过才算脏_铺底和清空都算干净() {
+        Session session = newSession();
+        assertFalse(session.isDirty(), "刚建起来的中间商和磁盘没有差别");
+
+        session.seedExisting(List.of(Path.of("target", "x.jpg")));
+        assertFalse(session.isDirty(), "照磁盘现状铺底，之后并不是脏的");
+
+        session.add(PHOTO_A);
+        assertTrue(session.isDirty(), "多挑了一张，磁盘上还没有它");
+
+        // 保存就是把磁盘现状重新铺一遍底，所以这里等价于"保存之后"
+        session.seedExisting(List.of(Path.of("target", "010.jpg")));
+        assertFalse(session.isDirty(), "刚保存完就该是干净的");
+
+        session.add(PHOTO_B);
+        session.move(0, 1);
+        assertTrue(session.isDirty());
+
+        session.clear();
+        assertFalse(session.isDirty(), "换了目标文件夹，新的一轮从干净开始");
+    }
+
+    @Test
+    void 撤销之后仍然是脏的_因为它只是把改动改小了() {
+        Session session = newSession();
+        session.seedExisting(List.of(Path.of("target", "x.jpg")));
+        session.add(PHOTO_A);
+
+        session.undo(); // 又变回铺底时的样子：和磁盘一致，但中间商并没有跟磁盘对过账
+
+        assertTrue(session.isDirty(),
+                "撤销不等于保存——真要放弃全部改动，是关窗口时选\"不保存\"");
+    }
 }

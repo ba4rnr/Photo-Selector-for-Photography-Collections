@@ -15,9 +15,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import javax.swing.AbstractAction;
+import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
@@ -43,6 +46,26 @@ import com.photoselector.ui.theme.Theme;
  */
 @SuppressWarnings("serial") // 界面组件不参与序列化
 public final class MainPanel extends JPanel {
+
+    /**
+     * 键盘快捷键表：**这个程序里所有的键都在这一处**。
+     *
+     * <p>集中成一张表是为了改着方便：想换键就改这里的 {@code KeyStroke}，
+     * 不用去翻散落在各处的 {@code bind()} 调用。
+     *
+     * <p>"追加到末尾"给了两个键：空格是挑片时最顺手的那颗，回车是很多工具里
+     * "确认加上去"的习惯。它们走的是同一个动作。
+     */
+    private static final List<Shortcut> SHORTCUTS = List.of(
+            new Shortcut("addToTarget", KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0)),
+            new Shortcut("addToTargetAlt", KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)),
+            new Shortcut("undo", KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK)),
+            new Shortcut("previousPhoto", KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0)),
+            new Shortcut("nextPhoto", KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0)));
+
+    /** 表里的一行：动作名（同时也是按键映射的名字）和触发它的键。 */
+    private record Shortcut(String actionName, KeyStroke key) {
+    }
 
     /** 素材条里缩略图的高度。 */
     private static final int FILMSTRIP_THUMBNAIL_HEIGHT = 120;
@@ -96,6 +119,18 @@ public final class MainPanel extends JPanel {
 
     /** 保存结束后的回调（外部负责把结果告诉用户）。 */
     private Consumer<Saver.Result> onSaveFinished = result -> { };
+
+    /** 关闭流程走完后真正退出的动作（收线程池、关窗口）。 */
+    private Runnable onExit = () -> { };
+
+    /** 「有没保存的改动，要不要保存？」的提问方式；默认弹对话框。 */
+    private Function<java.awt.Component, Integer> confirmSaveOnClose = MainPanel::askToSave;
+
+    /** 关闭流程正在走（问过了、正在等保存）。防止连点 × 时再问一遍。 */
+    private boolean closing;
+
+    /** 这一轮关闭流程里，保存是不是跑完了。下一次 saveFinished 就是收尾信号。 */
+    private boolean saveFinishedDuringClose;
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -220,11 +255,6 @@ public final class MainPanel extends JPanel {
         bottomArea.add(placeholder("目标文件夹的照片", 100, 170, Theme.PANEL), ViewMode.ARRANGE.name());
     }
 
-    /**
-     * 打开一个素材文件夹，把里面的照片放进底部素材条。
-     *
-     * @return 这个文件夹里有多少张能读的照片
-     */
     /**
      * 选一个根文件夹：左栏目录树立刻换成它，整个档案夹在<b>后台</b>扫成若干组交给素材条。
      *
@@ -358,7 +388,7 @@ public final class MainPanel extends JPanel {
     }
 
     /** 空格：把素材条里点中的那张照片加入目标序列。 */
-    private void addCurrentPhotoToTarget() {
+    public void addCurrentPhotoToTarget() {
         addToTarget(filmstrip.currentPhoto());
     }
 
@@ -403,23 +433,36 @@ public final class MainPanel extends JPanel {
      * <p>文件操作可能很慢（复制几十张就是几十次磁盘写入），所以丢给后台线程池，
      * 做完回到界面线程：先按磁盘上的真实结果重建中间商（顺序不变、撤销记录清空），
      * 再把结果交给外部去告诉用户。
+     *
+     * <p>拍快照这一步本身（也就是 {@link Saver.Plan#from}）必须在这里、在界面线程上做完，
+     * 它可能因为读不了目录而抛异常。真抛了就当这次保存没启动：返回 false，
+     * 调用方（例如"关窗口时问要不要保存"那个流程）才知道自己该等着，而不是空等一场。
+     *
+     * @return 是否真的启动了保存；false 表示这次连快照都没拍成
      */
-    public void save() {
+    public boolean save() {
         Session session = targetPanel.session();
         if (session == null) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
                     List.of(), List.of("还没有选目标文件夹，没有可以保存的改动。")));
-            return;
+            return false;
         }
         if (session.isEmpty()) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
                     List.of(), List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
-            return;
+            return false;
         }
 
         // 在界面线程上先拍一份快照：保存跑在后台，而中间商是活的，
         // 不拍的话你在保存期间再挑一张，后台就会读到一半的数据
-        Saver.Plan plan = Saver.Plan.from(session);
+        Saver.Plan plan;
+        try {
+            plan = Saver.Plan.from(session);
+        } catch (RuntimeException e) {
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(), List.of(),
+                    List.of("保存没能开始：" + e.getMessage())));
+            return false;
+        }
         savePool.submit(() -> {
             Saver.Result result = new Saver().save(plan);
             SwingUtilities.invokeLater(() -> {
@@ -429,14 +472,26 @@ public final class MainPanel extends JPanel {
                 result.failedSources().forEach(session::add);
                 targetPanel.refresh();
                 arrangePanel.refresh();
-                onSaveFinished.accept(result);
+                handleSaveFinished(result);
             });
         });
+        return true;
     }
 
     /** 保存结束后的回调（外部负责把结果告诉用户）。 */
     public void setOnSaveFinished(Consumer<Saver.Result> listener) {
         this.onSaveFinished = listener == null ? result -> { } : listener;
+    }
+
+    /** 保存结束时的内部收尾：如果这次保存是关闭流程的一部分，就接着把程序关掉。 */
+    private void handleSaveFinished(Saver.Result result) {
+        // 先交给外部：它可能会弹个"哪几张没成"的报告。关窗口走的那次不弹，
+        // 由外部自己看 saveFinishedDuringClose 决定（见 MainFrame.saveFinished）。
+        onSaveFinished.accept(result);
+        if (saveFinishedDuringClose) {
+            saveFinishedDuringClose = false;
+            onExit.run();
+        }
     }
 
     /**
@@ -446,10 +501,100 @@ public final class MainPanel extends JPanel {
      * 工具栏上那几个按钮的接线等界面那一侧定下来再接。
      */
     private void bindKeys() {
-        bind(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "addToTarget", this::addCurrentPhotoToTarget);
-        bind(KeyStroke.getKeyStroke(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK), "undo", this::undo);
-        bind(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "previousPhoto", () -> filmstrip.moveCurrent(-1));
-        bind(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "nextPhoto", () -> filmstrip.moveCurrent(1));
+        for (Shortcut shortcut : SHORTCUTS) {
+            bind(shortcut.key(), shortcut.actionName(), actionFor(shortcut.actionName()));
+        }
+    }
+
+    /** 某个动作名对应的活儿。名字和 {@link #SHORTCUTS} 里写的一一对应。 */
+    private Runnable actionFor(String actionName) {
+        return switch (actionName) {
+            case "addToTarget", "addToTargetAlt" -> this::addCurrentPhotoToTarget;
+            case "undo" -> this::undo;
+            case "previousPhoto" -> () -> filmstrip.moveCurrent(-1);
+            case "nextPhoto" -> () -> filmstrip.moveCurrent(1);
+            default -> throw new IllegalArgumentException("快捷键表里有没接上动作的名字：" + actionName);
+        };
+    }
+
+    /**
+     * 中间商里有没有还没保存的改动（{@link MainFrame} 关窗口时用来决定要不要问一句）。
+     *
+     * <p>还没有目标文件夹时算"干净"——没有中间商，也就没有可保存的东西。
+     */
+    public boolean isDirty() {
+        Session session = targetPanel.session();
+        return session != null && session.isDirty();
+    }
+
+    /**
+     * 眼下这次保存是不是"关窗口"流程的一部分。
+     *
+     * <p>给外部用的：关窗口的那次保存结束后程序马上就走，这时候再弹"保存完了"的对话框，
+     * 用户只会看到它闪一下——不如干脆别弹。
+     */
+    public boolean isClosingAfterSave() {
+        return saveFinishedDuringClose;
+    }
+
+    /**
+     * 请求关闭程序：点 ×、菜单"退出"都走这里。
+     *
+     * <p>放在 {@code MainPanel} 而不是主窗口里，是因为它要摸的是"有没有改动""保存完成没"
+     * 这些界面自己的状态；主窗口只负责把"要走了"这件事接过去。
+     *
+     * <p>三步：没改动就直接走；有改动先问一句；选了保存就等保存真跑完再走。
+     * 保存是后台活儿，所以"退出"必须挂在保存完成的回调上，而不是问完就走——
+     * 那样等于在保存还没写完磁盘时把程序撤了。
+     */
+    public void requestClose() {
+        if (closing) {
+            return; // 已经在走关闭流程了，别问第二遍
+        }
+        if (!isDirty()) {
+            onExit.run();
+            return;
+        }
+
+        int choice = confirmSaveOnClose.apply(this);
+        if (choice == JOptionPane.CLOSED_OPTION) {
+            return; // 把对话框直接关掉：当作"取消"，程序留着
+        }
+        if (choice == JOptionPane.NO_OPTION) {
+            // 不保存：中间商连同垃圾桶一起消失，磁盘上什么都没变（见《软件设计》第 7 节）
+            onExit.run();
+            return;
+        }
+
+        closing = true;
+        saveFinishedDuringClose = true;
+        if (!save()) {
+            // 连快照都没拍成（回调刚刚已经说清原因了）：把状态退回原样，
+            // 否则窗口会卡在"点了保存、等一个永远不来的回调"上
+            closing = false;
+            saveFinishedDuringClose = false;
+        }
+    }
+
+    /** 关闭流程走完后真正退出的动作（主窗口拿去收线程池、关窗口）。 */
+    public void setOnExit(Runnable listener) {
+        this.onExit = listener == null ? () -> { } : listener;
+    }
+
+    /** 换掉"要不要保存"的提问方式；给测试用的（默认弹对话框）。 */
+    void setConfirmSaveOnClose(Function<java.awt.Component, Integer> confirm) {
+        this.confirmSaveOnClose = confirm == null ? MainPanel::askToSave : confirm;
+    }
+
+    /** 默认的问法。返回值取 {@link JOptionPane} 那几样：YES 保存、NO 不保存、CLOSED 取消。 */
+    private static int askToSave(java.awt.Component owner) {
+        JButton save = new JButton("保存");
+        JButton discard = new JButton("不保存");
+        return JOptionPane.showOptionDialog(owner,
+                "目标文件夹里还有没保存的改动。\n关掉之前要保存吗？（选“不保存”的话，文件保持原样、什么都不会丢）",
+                "还没保存",
+                JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, new Object[] {save, discard}, save);
     }
 
     private void bind(KeyStroke key, String actionName, Runnable action) {
