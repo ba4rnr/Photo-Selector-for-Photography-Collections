@@ -88,4 +88,20 @@ class ThumbnailLoaderTest {
         assertEquals(0, loader.inFlightCount(), "取完之后不该还占着名额");
         loader.shutdown();
     }
+
+    @Test
+    void 关掉之后迟到的请求会被忽略_而不是抛异常() throws Exception {
+        Path photo = TestImages.writeJpeg(tempDir.resolve("a.jpg"), 900, 600);
+        ThumbnailLoader loader = newLoader();
+        loader.shutdown();
+
+        AtomicInteger received = new AtomicInteger();
+        // 关窗口那一刻界面还可能收到一次 resize，跟着就来请求缩略图。
+        // 这时候线程池已经收工，直接忽略即可——不能把 RejectedExecutionException 甩出来
+        loader.load(photo, 100, image -> received.incrementAndGet());
+        loader.loadFull(photo, image -> received.incrementAndGet());
+
+        Thread.sleep(200); // 给"万一真排上了队"一点时间露馅
+        assertEquals(0, received.get(), "关掉之后不该再送结果出来");
+    }
 }

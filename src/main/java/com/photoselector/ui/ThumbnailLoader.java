@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -39,6 +40,9 @@ final class ThumbnailLoader {
     /** 当前是第几轮。每次换文件夹就加一，旧一轮的回调自然全部失效。 */
     private final AtomicLong session = new AtomicLong();
 
+    /** 是不是已经关掉了。关掉之后不再收新的请求。 */
+    private final AtomicBoolean shutdown = new AtomicBoolean();
+
     ThumbnailLoader(ThumbnailService service) {
         this.service = service;
         // 留一个核给界面和系统，别把整台机器占满
@@ -63,6 +67,11 @@ final class ThumbnailLoader {
      * 取不到图不会抛异常（服务那边已经换成占位图了），失败的回调会被安静地丢掉。
      */
     void load(Path photo, int maxHeight, Consumer<BufferedImage> onReady) {
+        if (shutdown.get()) {
+            // 线程池已经收工了。迟到的请求（比如关窗口那一刻界面又收到一次 resize）
+            // 直接忽略：不忽略的话 submit 会抛 RejectedExecutionException
+            return;
+        }
         long mySession = session.get();
         String key = photo.toAbsolutePath() + "|" + maxHeight;
         if (!inFlight.add(key)) {
@@ -88,6 +97,9 @@ final class ThumbnailLoader {
      * 读不出来时回调收到 {@code null}——大图视图据此显示"读不出来"，而不是一直转圈。
      */
     void loadFull(Path photo, Consumer<BufferedImage> onReady) {
+        if (shutdown.get()) {
+            return;
+        }
         long mySession = session.get();
         String key = photo.toAbsolutePath() + "|full";
         if (!inFlight.add(key)) {
@@ -127,6 +139,7 @@ final class ThumbnailLoader {
      * 外面的程序（比如测试要删临时目录）就会删失败。
      */
     void shutdown() {
+        shutdown.set(true);
         pool.shutdownNow();
         try {
             pool.awaitTermination(3, TimeUnit.SECONDS);

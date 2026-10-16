@@ -111,6 +111,15 @@ public final class MainPanel extends JPanel {
     /** 扫描出来的全部组；剔除哪些由目录树的勾选状态决定。 */
     private List<PhotoGroup> scannedGroups = List.of();
 
+    /**
+     * 目标文件夹读取的第几轮。
+     *
+     * <p>读目录是后台活儿，回来的时候世界可能已经变了——用户可能已经换了工作区。
+     * 每换一次就加一，结果回来先对暗号，不是当前这一轮的直接丢掉。
+     * 只在界面线程上读写，所以用不着原子类型。
+     */
+    private long targetLoadRound;
+
     /** 当前工作区。还没选过时为 null。 */
     private Workspace workspace;
 
@@ -128,6 +137,16 @@ public final class MainPanel extends JPanel {
 
     /** 关闭流程正在走（问过了、正在等保存）。防止连点 × 时再问一遍。 */
     private boolean closing;
+
+    /**
+     * 正在保存。
+     *
+     * <p>保存跑在后台，界面本来是能继续点的；但保存一结束，中间商会按磁盘的真实结果
+     * <b>整个重建</b>（{@code seedExisting}），保存期间挑进来的会被这一下盖掉——
+     * 你以为加进去了，其实没有。所以保存期间把会改中间商的操作挡在外面，
+     * 等保存回来再放开。挑片手速再快，也快不过一次保存（最多几秒）。
+     */
+    private boolean saving;
 
     /** 这一轮关闭流程里，保存是不是跑完了。下一次 saveFinished 就是收尾信号。 */
     private boolean saveFinishedDuringClose;
@@ -267,11 +286,18 @@ public final class MainPanel extends JPanel {
             try {
                 groups = PhotoFiles.groupsIn(folder);
             } catch (IOException e) {
-                SwingUtilities.invokeLater(() -> onFolderOpened.accept(folder, -1));
+                SwingUtilities.invokeLater(() -> {
+                    if (workspace != null && folder.equals(workspace.sourceRoot())) {
+                        onFolderOpened.accept(folder, -1);
+                    }
+                });
                 return;
             }
 
             SwingUtilities.invokeLater(() -> {
+                if (workspace == null || !folder.equals(workspace.sourceRoot())) {
+                    return; // 扫的是旧的根目录：用户已经换过工作区，这批结果作废
+                }
                 scannedGroups = groups;
                 applyGroups();
                 onFolderOpened.accept(folder, filmstrip.photoCount());
@@ -365,6 +391,7 @@ public final class MainPanel extends JPanel {
      * <p>读目录同样是文件系统操作，所以丢给后台线程池；读完再回到界面线程建中间商。
      */
     private void openTargetFolder(Path target) {
+        long myRound = ++targetLoadRound; // 换目标文件夹 = 开新的一轮，旧结果作废
         if (target == null) {
             targetPanel.setSession(null);
             arrangePanel.setSession(null);
@@ -379,6 +406,9 @@ public final class MainPanel extends JPanel {
             }
             List<Path> files = existing;
             SwingUtilities.invokeLater(() -> {
+                if (myRound != targetLoadRound) {
+                    return; // 这一轮已经过期：用户换过目标文件夹了
+                }
                 Session session = new Session(target, NumberingRule.DEFAULT);
                 session.seedExisting(files);
                 targetPanel.setSession(session);
@@ -408,7 +438,7 @@ public final class MainPanel extends JPanel {
      */
     public void addToTargetAt(Path photo, int index) {
         Session session = targetPanel.session();
-        if (photo == null || session == null) {
+        if (saving || photo == null || session == null) {
             return;
         }
         boolean added = index < 0 ? session.add(photo) : session.insert(index, photo);
@@ -421,7 +451,7 @@ public final class MainPanel extends JPanel {
     /** Ctrl+Z：撤销上一步（挑入、挪位、丢垃圾桶都算）。 */
     private void undo() {
         Session session = targetPanel.session();
-        if (session != null && session.undo()) {
+        if (!saving && session != null && session.undo()) {
             targetPanel.refresh();
             arrangePanel.refresh();
         }
@@ -463,9 +493,11 @@ public final class MainPanel extends JPanel {
                     List.of("保存没能开始：" + e.getMessage())));
             return false;
         }
+        saving = true; // 从这一刻起到下面的回调回来之前，不许再改中间商
         savePool.submit(() -> {
             Saver.Result result = new Saver().save(plan);
             SwingUtilities.invokeLater(() -> {
+                saving = false; // 中间商马上要重建，此刻起放行——重建之后磁盘就是新的基准
                 // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
                 session.seedExisting(result.finalOrder());
                 // 没复制成功的那几条放回末尾，别让用户再去素材条里挑一遍
