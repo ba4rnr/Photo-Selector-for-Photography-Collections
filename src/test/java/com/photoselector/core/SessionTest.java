@@ -26,7 +26,7 @@ class SessionTest {
         session.add(PHOTO_A);
         session.add(PHOTO_B);
 
-        assertEquals(List.of("0010", "0020"), session.names());
+        assertEquals(List.of("010", "020"), session.names());
         assertEquals(Origin.PENDING, session.entryAt(0).origin());
         assertEquals("L1000001.JPG", session.entryAt(0).fileName());
     }
@@ -51,7 +51,7 @@ class SessionTest {
         assertEquals(List.of("L1000002.JPG", "L1000003.JPG", "L1000001.JPG"),
                 session.entries().stream().map(TargetEntry::fileName).toList());
         // 名字没有存在任何条目里，位置变了它自然就变
-        assertEquals(List.of("0010", "0020", "0030"), session.names());
+        assertEquals(List.of("010", "020", "030"), session.names());
     }
 
     @Test
@@ -64,7 +64,7 @@ class SessionTest {
         session.trash(1);
 
         assertEquals(2, session.size());
-        assertEquals(List.of("0010", "0020"), session.names());
+        assertEquals(List.of("010", "020"), session.names());
         TrashedItem item = session.trash().items().get(0);
         assertEquals("L1000002.JPG", item.entry().fileName());
         assertEquals(1, item.originalIndex());
@@ -175,12 +175,12 @@ class SessionTest {
 
         assertEquals(2, session.size());
         assertEquals(Origin.EXISTING, session.entryAt(0).origin(), "铺底的条目是真实文件");
-        assertEquals(List.of("0010", "0020"), session.names());
+        assertEquals(List.of("010", "020"), session.names());
 
         assertTrue(session.add(PHOTO_A));
         assertEquals(3, session.size());
         assertEquals(Origin.PENDING, session.entryAt(2).origin(), "新挑的还没复制过去");
-        assertEquals(List.of("0010", "0020", "0030"), session.names());
+        assertEquals(List.of("010", "020", "030"), session.names());
     }
 
     @Test

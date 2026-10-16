@@ -51,8 +51,8 @@ class TargetPanelTest {
 
         TargetPanel targetPanel = panel.targetPanelForTest();
         assertEquals(2, targetPanel.entryCount(), "目标文件夹里原有的两张成为底色");
-        assertEquals("0010", targetPanel.nameAt(0), "名字按位置现算，而不是文件现在叫什么");
-        assertEquals("0020", targetPanel.nameAt(1));
+        assertEquals("010", targetPanel.nameAt(0), "名字按位置现算，而不是文件现在叫什么");
+        assertEquals("020", targetPanel.nameAt(1));
         assertEquals(Origin.EXISTING, targetPanel.session().entryAt(0).origin());
 
         // 在素材条里点中一张，然后按空格（等价于按下绑定好的那个动作）
@@ -61,7 +61,7 @@ class TargetPanelTest {
                 .actionPerformed(new ActionEvent(panel, 0, "addToTarget")));
 
         assertEquals(3, targetPanel.entryCount());
-        assertEquals("0030", targetPanel.nameAt(2), "新挑的接在末尾");
+        assertEquals("030", targetPanel.nameAt(2), "新挑的接在末尾");
         assertEquals(Origin.PENDING, targetPanel.session().entryAt(2).origin(), "还没复制到磁盘");
 
         // 撤销把它拿掉
