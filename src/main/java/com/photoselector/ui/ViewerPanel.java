@@ -46,9 +46,6 @@ final class ViewerPanel extends JPanel {
     /** 图片四周的留白。 */
     private static final int PADDING = 12;
 
-    /** 滚轮每格的缩放倍数。 */
-    private static final double WHEEL_STEP = 1.15;
-
     /** 缩放比例的上下限。 */
     private static final double MIN_SCALE = 0.05;
     private static final double MAX_SCALE = 8.0;
@@ -131,7 +128,7 @@ final class ViewerPanel extends JPanel {
 
             @Override
             public void mouseWheelMoved(MouseWheelEvent e) {
-                zoomBy(Math.pow(WHEEL_STEP, -e.getWheelRotation()));
+                zoomStep(-e.getWheelRotation() > 0 ? 1 : -1);
             }
         };
         addMouseListener(mouse);
@@ -171,14 +168,37 @@ final class ViewerPanel extends JPanel {
         onZoomChanged.run();
     }
 
-    /** 按倍数缩放（滚轮用）。 */
-    void zoomBy(double factor) {
+    /**
+     * 滚轮缩放：在"整百倍率"的档位之间跳。
+     *
+     * <p>档位是 {@code 100%、200%、300%……}，外加最下面那档默认的
+     * {@link #DEFAULT_SCALE}（14%）。<b>第一格一定是跳到 100%</b>——
+     * 之前做成连续倍数（14% → 16% → 18%……）是个错误：那样靠滚轮根本到不了 100%，
+     * 而 100% 恰恰是看合焦最常用的那一档。
+     *
+     * <p>从别的比例（比如"适应窗口"算出来的 63%）滚下去，也是先落到最近的整百档：
+     * 往上取比它大的那一档，往下取比它小的那一档——方向感比"绝对最近"更重要。
+     *
+     * @param direction 正数放大，负数缩小
+     */
+    void zoomStep(int direction) {
         if (image == null) {
             return;
         }
-        double base = fitToWindow ? fitScale() : customScale;
+        double current = fitToWindow ? fitScale() : customScale;
         fitToWindow = false;
-        customScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, base * factor));
+
+        if (direction > 0) {
+            // 还没到 100% 就直接跳到 100%，否则往下一个整百档去
+            customScale = current < 1.0 ? 1.0 : Math.floor(current) + 1.0;
+        } else {
+            // 100% 及以下就退回默认那档；再往下没有更小的整百档了
+            customScale = current <= 1.0 ? DEFAULT_SCALE : Math.ceil(current) - 1.0;
+            if (customScale < 1.0) {
+                customScale = DEFAULT_SCALE;
+            }
+        }
+        customScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, customScale));
         clampOffset();
         repaint();
         onZoomChanged.run();

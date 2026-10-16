@@ -118,7 +118,7 @@ class ViewerPanelTest {
     }
 
     @Test
-    void 滚轮缩放有上下限() throws Exception {
+    void 滚轮在整百倍率之间跳() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
         ViewerPanel viewer = new ViewerPanel(loader);
@@ -130,19 +130,30 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        SwingUtilities.invokeAndWait(() -> {
-            for (int i = 0; i < 40; i++) {
-                viewer.zoomBy(2.0);
-            }
-        });
-        assertTrue(viewer.zoomPercent() <= 800, "放大到 800% 就该停住");
+        // 从默认的 14% 起，第一格必须直接落到 100%——不然靠滚轮到不了 100%
+        assertEquals(14, viewer.zoomPercent());
+        SwingUtilities.invokeAndWait(() -> viewer.zoomStep(1));
+        assertEquals(100, viewer.zoomPercent(), "第一格应当跳到 100%");
+        viewer.zoomStep(1);
+        assertEquals(200, viewer.zoomPercent());
+        viewer.zoomStep(1);
+        assertEquals(300, viewer.zoomPercent());
 
-        SwingUtilities.invokeAndWait(() -> {
-            for (int i = 0; i < 80; i++) {
-                viewer.zoomBy(0.5);
-            }
-        });
-        assertTrue(viewer.zoomPercent() >= 5, "缩小到 5% 就该停住");
+        viewer.zoomStep(-1);
+        assertEquals(200, viewer.zoomPercent());
+        viewer.zoomStep(-1);
+        assertEquals(100, viewer.zoomPercent());
+        viewer.zoomStep(-1);
+        assertEquals(14, viewer.zoomPercent(), "再往下回到默认那档");
+        viewer.zoomStep(-1);
+        assertEquals(14, viewer.zoomPercent(), "已经在最低档，再滚也不动");
+
+        // 从"适应窗口"算出来的零碎比例滚下去，也要先落到最近的那个整百档
+        viewer.fitToWindow();
+        int fitted = viewer.zoomPercent();
+        assertTrue(fitted != 100, "900 宽的图塞进 400 宽的窗口，适应出来的不是整百档");
+        viewer.zoomStep(1);
+        assertEquals(100, viewer.zoomPercent(), "不管从哪儿来，往上第一格都该是 100%");
         loader.shutdown();
     }
 
@@ -193,8 +204,12 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        // 放大到远超窗口，照片会溢出图片区
-        SwingUtilities.invokeAndWait(() -> viewer.zoomBy(6.0));
+        // 放大到远超窗口：连滚七格到 700%，照片必然溢出图片区
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 7; i++) {
+                viewer.zoomStep(1);
+            }
+        });
 
         BufferedImage rendered = render(viewer);
         // 表头底部那条分隔线（HEADER_HEIGHT 26，往上 7 像素）应当还在。
