@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -80,6 +81,46 @@ class MainPanelRenderTest {
         Files.createDirectories(output.getParent());
         ImageIO.write(image, "png", output.toFile());
         assertTrue(sampleColors(image).size() > 3, "工具栏应当画出图标和文字");
+    }
+
+    @Test
+    void 打开文件夹之后的整窗样子() throws Exception {
+        String configured = System.getProperty("photoselector.samples");
+        assumeTrue(configured != null && Files.isDirectory(Path.of(configured)),
+                "没有用 -Dphotoselector.samples=<目录> 指定样例照片，跳过");
+
+        Theme.install();
+        MainPanel mainPanel = new MainPanel();
+        JPanel screen = new JPanel(new BorderLayout());
+        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
+        screen.add(mainPanel, BorderLayout.CENTER);
+        screen.setSize(WIDTH, HEIGHT);
+
+        int count = mainPanel.setRootFolder(Path.of(configured));
+        assertTrue(count > 0, "样例目录里应当有照片");
+        layoutTree(screen);
+
+        // 素材条只为"看得见的那十几格"取图，所以这里等它稳定下来就够了，
+        // 不应当、也不可能等到全部 253 张——那正是虚拟化要避免的事
+        long deadline = System.currentTimeMillis() + 60_000;
+        int lastSeen = -1;
+        while (System.currentTimeMillis() < deadline) {
+            int now = mainPanel.loadedThumbnails();
+            if (now >= 6 && now == lastSeen) {
+                break;
+            }
+            lastSeen = now;
+            Thread.sleep(200);
+        }
+        assertTrue(mainPanel.loadedThumbnails() >= 6, "看得见的那几格应当取到缩略图");
+        assertTrue(mainPanel.loadedThumbnails() < count, "不应当把整个文件夹都解出来");
+
+        BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        paintScreen(screen, g);
+        g.dispose();
+        ImageIO.write(image, "png", Path.of("target", "ui-workspace.png").toFile());
+        mainPanel.shutdown();
     }
 
     @Test

@@ -109,7 +109,7 @@ public final class MainFrame extends JFrame {
 
         Path folder = chooser.getSelectedFile().toPath();
         try {
-            int count = mainPanel.showFolder(folder);
+            int count = mainPanel.setRootFolder(folder);
             setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, "读不了这个文件夹：\n" + e.getMessage(),

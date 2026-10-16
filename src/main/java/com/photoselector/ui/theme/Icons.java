@@ -34,6 +34,41 @@ public final class Icons {
 
     // ─────────────────────────── 左组：文件与历史 ───────────────────────────
 
+    /** 文件：一页带折角的纸。目录树里给照片文件用。 */
+    public static Icon file() {
+        return stroke(g -> {
+            Path2D page = new Path2D.Double();
+            page.moveTo(4, 2);
+            page.lineTo(10.5, 2);
+            page.lineTo(14, 5.5);
+            page.lineTo(14, 16);
+            page.lineTo(4, 16);
+            page.closePath();
+            g.draw(page);
+            // 折角
+            g.draw(new Line2D.Double(10.5, 2, 10.5, 5.5));
+            g.draw(new Line2D.Double(10.5, 5.5, 14, 5.5));
+        });
+    }
+
+    /** 目录树上展开 / 收起用的小三角。 */
+    public static Icon triangle(boolean pointingDown) {
+        return filled(g -> {
+            Path2D shape = new Path2D.Double();
+            if (pointingDown) {
+                shape.moveTo(1, 3);
+                shape.lineTo(9, 3);
+                shape.lineTo(5, 8);
+            } else {
+                shape.moveTo(3, 1);
+                shape.lineTo(3, 9);
+                shape.lineTo(8, 5);
+            }
+            shape.closePath();
+            g.fill(shape);
+        });
+    }
+
     /** 重新选择工作区：文件夹。 */
     public static Icon folder() {
         return stroke(g -> {
@@ -156,6 +191,25 @@ public final class Icons {
 
     // ─────────────────────────── 右组：视图辅助 ───────────────────────────
 
+    /**
+     * 目录树上的勾选框：勾上表示这个文件夹纳入范围。
+     *
+     * <p>占据的是树节点的"图标位"，所以它同时也就是点击热区——
+     * 点在它上面是切换勾选，点在别处是选中节点。
+     */
+    public static Icon checkBox(boolean checked) {
+        return stroke(g -> {
+            g.draw(new Rectangle2D.Double(3, 3, 12, 12));
+            if (checked) {
+                Path2D tick = new Path2D.Double();
+                tick.moveTo(5.8, 9.2);
+                tick.lineTo(8.2, 11.6);
+                tick.lineTo(12.6, 6.2);
+                g.draw(tick);
+            }
+        });
+    }
+
     /** 网格：田字。 */
     public static Icon grid() {
         return stroke(g -> {
@@ -217,6 +271,35 @@ public final class Icons {
             @Override
             public int getIconHeight() {
                 return SIZE;
+            }
+        };
+    }
+
+    /** 和 {@link #stroke} 一样，只是把颜色填满而不是描边。 */
+    private static Icon filled(Consumer<Graphics2D> painter) {
+        return new Icon() {
+            @Override
+            public void paintIcon(Component c, Graphics g, int x, int y) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.translate(x, y);
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                            RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(c == null ? Theme.TEXT : c.getForeground());
+                    painter.accept(g2);
+                } finally {
+                    g2.dispose();
+                }
+            }
+
+            @Override
+            public int getIconWidth() {
+                return 10;
+            }
+
+            @Override
+            public int getIconHeight() {
+                return 10;
             }
         };
     }

@@ -1,10 +1,14 @@
 package com.photoselector.ui.theme;
 
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
 
+import javax.swing.JButton;
+import javax.swing.JScrollBar;
 import javax.swing.UIManager;
 import javax.swing.plaf.ColorUIResource;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 
 /**
  * 全局配色与外观设置。
@@ -92,8 +96,25 @@ public final class Theme {
         put("ScrollBar.background", CANVAS);
         put("ScrollBar.thumb", HIGHLIGHT);
         put("ScrollBar.track", CANVAS);
+        // Metal 会给滑块画一圈立体边框，不换成同色就还是亮银色
+        put("ScrollBar.thumbHighlight", HIGHLIGHT);
+        put("ScrollBar.thumbShadow", BORDER);
+        put("ScrollBar.thumbDarkShadow", BORDER);
+        put("ScrollBar.thumbLightShadow", BORDER);
 
         put("SplitPane.background", PANEL);
+
+        // 目录树的展开把手：换掉 Metal 默认那个空心小圆圈
+        UIManager.put("Tree.collapsedIcon", Icons.triangle(false));
+        UIManager.put("Tree.expandedIcon", Icons.triangle(true));
+        put("Tree.background", PANEL);
+        put("Tree.textBackground", PANEL);
+        put("Tree.textForeground", TEXT);
+        put("Tree.selectionBackground", HIGHLIGHT);
+        put("Tree.selectionForeground", TEXT);
+        // 连接节点的那些线：默认是亮蓝色，在深底上非常刺眼
+        put("Tree.line", BORDER);
+        put("Tree.hash", BORDER);
         put("SplitPaneDivider.draggingColor", DIVIDER_HINT);
 
         put("ToolTip.background", HIGHLIGHT);
@@ -106,5 +127,41 @@ public final class Theme {
         // ColorUIResource 是 UIManager 认识的"默认值"类型，
         // 用它才能保证外观实现愿意采纳我们的颜色
         UIManager.put(key, new ColorUIResource(color));
+    }
+
+    /**
+     * 把自己造的滚动条换成朴素外观。
+     *
+     * <p>默认（Metal）外观会画亮银色的立体滑块和两个箭头按钮，在深色界面上非常扎眼；
+     * 换成基础实现后，颜色就能用我们设的那两个键控制，箭头按钮也一并去掉。
+     */
+    @SuppressWarnings("serial")
+    public static void themeScrollBar(JScrollBar bar) {
+        bar.setUI(new BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                thumbColor = HIGHLIGHT;
+                trackColor = CANVAS;
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            private JButton zeroSizeButton() {
+                JButton button = new JButton();
+                Dimension zero = new Dimension(0, 0);
+                button.setPreferredSize(zero);
+                button.setMinimumSize(zero);
+                button.setMaximumSize(zero);
+                return button;
+            }
+        });
     }
 }

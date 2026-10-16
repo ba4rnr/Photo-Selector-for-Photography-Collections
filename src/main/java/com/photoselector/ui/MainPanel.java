@@ -5,8 +5,10 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Stream;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -39,6 +41,7 @@ public final class MainPanel extends JPanel {
     private final ThumbnailService thumbnailService = new ThumbnailService(ThumbnailService.defaultCacheDir());
     private final ThumbnailLoader thumbnailLoader = new ThumbnailLoader(thumbnailService);
     private final FilmstripPanel filmstrip = new FilmstripPanel(thumbnailLoader);
+    private final SourceTreePanel sourceTree = new SourceTreePanel();
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -68,6 +71,8 @@ public final class MainPanel extends JPanel {
         outerSplit = Splitters.vertical(mainSplit, bottomArea, 1.0);
 
         toolBar.modeButton().addActionListener(e -> toggleMode());
+        // 目录树里点一个文件夹，底部素材条就加载它
+        sourceTree.setOnFolderChosen(this::openFolderQuietly);
 
         add(toolBar, BorderLayout.NORTH);
         add(outerSplit, BorderLayout.CENTER);
@@ -126,6 +131,7 @@ public final class MainPanel extends JPanel {
         scroll.setBorder(null);
         scroll.getViewport().setBackground(Theme.PANEL);
         scroll.getHorizontalScrollBar().setUnitIncrement(40); // 滚一格别只挪几个像素
+        Theme.themeScrollBar(scroll.getHorizontalScrollBar());
         scroll.getViewport().addChangeListener(e -> filmstrip.requestVisibleThumbnails());
         scroll.setPreferredSize(new Dimension(100, BOTTOM_HEIGHT));
         return scroll;
@@ -142,13 +148,58 @@ public final class MainPanel extends JPanel {
         return photos.size();
     }
 
+    /**
+     * 选一个根文件夹：左栏目录树换成它，底部素材条先自动打开第一个有照片的子文件夹。
+     *
+     * <p>打开一个拍摄档案夹之后直接看到东西，比看到一片空白强得多。
+     *
+     * @return 自动打开的那个文件夹里有多少张；一个都没有就是 0
+     */
+    public int setRootFolder(Path folder) throws IOException {
+        sourceTree.setRoot(folder);
+
+        Path firstWithPhotos = firstFolderWithPhotos(folder);
+        return firstWithPhotos == null ? 0 : showFolder(firstWithPhotos);
+    }
+
+    /** 在根目录的直接子文件夹里找第一个装着照片的；根目录自己散落着照片就用它。 */
+    private static Path firstFolderWithPhotos(Path root) throws IOException {
+        if (!PhotoFiles.imagesIn(root).isEmpty()) {
+            return root;
+        }
+        try (Stream<Path> children = Files.list(root)) {
+            List<Path> folders = children.filter(Files::isDirectory).sorted().toList();
+            for (Path child : folders) {
+                if (!PhotoFiles.imagesIn(child).isEmpty()) {
+                    return child;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 目录树里点中的文件夹：读不了就安静地保持原样，别弹窗打断浏览。 */
+    private void openFolderQuietly(Path folder) {
+        try {
+            showFolder(folder);
+        } catch (IOException ignored) {
+            // 点错了或者没权限，忽略即可
+        }
+    }
+
+    /** 素材条上已经拿到缩略图的张数。给测试和排查用。 */
+    int loadedThumbnails() {
+        return filmstrip.loadedCount();
+    }
+
     /** 关窗口时收掉后台取图的线程池。 */
     public void shutdown() {
         thumbnailLoader.shutdown();
     }
 
     private JComponent leftColumn() {
-        return placeholder("素材目录树", 190, 400, Theme.PANEL);
+        sourceTree.setPreferredSize(new Dimension(220, 400));
+        return sourceTree;
     }
 
     /**
