@@ -62,6 +62,15 @@ final class TargetPanel extends JPanel {
     /** 缩略图的默认宽度（"查看 → 缩略图大小"里可以改）。 */
     private static final int DEFAULT_BOX_WIDTH = 150;
 
+    /**
+     * 一格缩略图的高 : 宽的比。
+     *
+     * <p>取 1:1（方框）是为了两种朝向都放得下：横照片按 3:2 满宽排，
+     * 竖照片也能占满一格宽度、竖着立起来。格子要是横形的（原来按 3:2），
+     * 竖照片只能缩成中间一条窄条。
+     */
+    private static final float BOX_ASPECT = 1.0f;
+
     private final ThumbnailLoader loader;
     private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
 
@@ -91,7 +100,7 @@ final class TargetPanel extends JPanel {
     // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
     private int extraSpace;
-    private int thumbnailHeight = Math.round(DEFAULT_BOX_WIDTH / 1.5f);
+    private int thumbnailHeight = Math.round(DEFAULT_BOX_WIDTH * BOX_ASPECT);
 
     TargetPanel(ThumbnailLoader loader) {
         this.loader = loader;
@@ -347,7 +356,7 @@ final class TargetPanel extends JPanel {
      * 这样拖动左边框看到的是"照片之间松了/紧了"，而不是照片忽大忽小。
      */
     private void updateMetrics() {
-        thumbnailHeight = Math.max(16, Math.round(boxWidth / 1.5f));
+        thumbnailHeight = Math.max(16, Math.round(boxWidth * BOX_ASPECT));
         int available = Math.max(40, getWidth() - PADDING * 2);
         columns = Math.max(1, (available + GAP) / (boxWidth + GAP));
         int used = columns * boxWidth + (columns - 1) * GAP;

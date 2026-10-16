@@ -176,23 +176,27 @@ class FilmstripPanelTest {
     void 视口变宽后新露出来的格子也会去取图() throws Exception {
         Theme.install();
 
-        List<Path> photos = new ArrayList<>();
-        for (int i = 0; i < 12; i++) {
-            photos.add(TestImages.writeJpeg(tempDir.resolve("wide-" + i + ".jpg"), 900, 600));
-        }
-
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
         FilmstripPanel filmstrip = new FilmstripPanel(loader);
         // 用生产代码里那套滚动面板，连同它挂的监听一起测
         JScrollPane scroll = filmstrip.wrapInScrollPane();
+        // 张数按"一屏 + 各方向各预取两屏（KEEP_SCREENS=2）"来定，再多给几张：
+        // 少了的话"窄视口也不该全解出来"这句话就不成立（格子宽度是会变的）
+        int cellWidth = Math.round(120 / 1.0f) + 8;
+        int prefetched = 5 * 300 / cellWidth + 4;
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < prefetched + 2; i++) {
+            photos.add(TestImages.writeJpeg(tempDir.resolve("wide-" + i + ".jpg"), 900, 600));
+        }
 
         SwingUtilities.invokeAndWait(() -> {
-            scroll.setSize(400, 190);
+            scroll.setSize(300, 190);
             filmstrip.setGroups(oneGroup("照片", photos), 120);
             layoutTree(scroll);
         });
         int before = waitUntilStable(filmstrip, 2);
-        assertTrue(before < photos.size(), "窄视口下不应当把 12 张全解出来");
+        assertTrue(before < photos.size(),
+                "窄视口下不应当把 " + photos.size() + " 张全解出来");
 
         // 一次拉宽到远超"一屏 + 预取余量"，新露出来的格子必须被重新请求。
         // 离屏渲染时组件不会自己派发 resize 事件，所以这里手动补一个——

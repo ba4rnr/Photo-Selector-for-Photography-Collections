@@ -58,6 +58,8 @@ class DragAndCloseTest {
             Path dragged = filmstrip.photoAtForTest(1);
             assertNotNull(dragged, "素材条里应当有第二张");
             filmstrip.setCurrentPhoto(dragged); // 就像点中了它，缩略图得先在手里
+            // 拖动时跟着鼠标走的就是这张缩略图；还没解好就没有可比的尺寸，先等它
+            Assumptions.assumeTrue(waitForThumbnail(filmstrip), "缩略图没解出来就不比尺寸");
 
             java.util.concurrent.atomic.AtomicReference<Point> draggedOnFilmstrip =
                     new java.util.concurrent.atomic.AtomicReference<>();
@@ -94,7 +96,8 @@ class DragAndCloseTest {
             SwingUtilities.invokeAndWait(() -> release(filmstrip, draggedOnFilmstrip.get()));
 
             assertEquals(before + 1, target.entryCount(), "松手后照片应当插进目标序列");
-            assertEquals(dragged, target.session().entryAt(hint).source(), "插的就是白线标出的那个位置");
+            assertEquals(dragged, target.session().entryAt(hint).source(),
+                    "插的就是白线标出的那个位置");
             assertTrue(target.dropHintIndex() < 0, "松手后白线要擦掉");
             assertNull(DragOut.ghostBoundsForTest(filmstrip), "松手后跟着鼠标的缩略图要收起来");
         } finally {
@@ -291,19 +294,29 @@ class DragAndCloseTest {
 
     /** 目标面板的画面上有没有那条纯白的落点线。 */
     private static boolean hasWhiteLine(TargetPanel target) {
-        int width = Math.max(1, target.getWidth());
-        int height = Math.max(1, target.getHeight());
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = image.createGraphics();
-        target.paint(g);
-        g.dispose();
+        // 逐像素找纯白（那条线只有 3 像素宽，隔一个看一个会漏），
+        // 而且允许再画几遍：拖动刚结束，面板的重绘可能还排在事件队列里，
+        // 只画一次会读到"还没轮到它"的旧画面
         int wanted = Theme.DIVIDER_HINT.getRGB() & 0xFFFFFF;
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int rgb = image.getRGB(x, y) & 0xFFFFFF;
-                if (rgb == wanted) {
-                    return true;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            int width = Math.max(1, target.getWidth());
+            int height = Math.max(1, target.getHeight());
+            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = image.createGraphics();
+            target.paint(g);
+            g.dispose();
+            for (int y = 0; y < image.getHeight(); y++) {
+                for (int x = 0; x < image.getWidth(); x++) {
+                    if ((image.getRGB(x, y) & 0xFFFFFF) == wanted) {
+                        return true;
+                    }
                 }
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false; // 被叫停了，别再画了
             }
         }
         return false;
@@ -315,5 +328,14 @@ class DragAndCloseTest {
             Thread.sleep(30);
         }
         assertTrue(condition.getAsBoolean(), "等不到：" + what);
+    }
+
+    /** 等素材条手里的那张缩略图解好。 */
+    private static boolean waitForThumbnail(FilmstripPanel filmstrip) throws Exception {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (filmstrip.currentThumbnail() == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(30);
+        }
+        return filmstrip.currentThumbnail() != null;
     }
 }

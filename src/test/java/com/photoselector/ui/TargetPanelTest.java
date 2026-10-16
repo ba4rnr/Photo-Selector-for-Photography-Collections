@@ -236,6 +236,55 @@ class TargetPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 竖照片要竖着立起来_占满一格的宽度() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("成片"));
+        // 竖照片：600 宽 × 900 高
+        Path portrait = TestImages.writeJpeg(folder.resolve("竖.jpg"), 600, 900);
+        Session session = new Session(folder, NumberingRule.DEFAULT);
+        session.seedExisting(java.util.List.of(portrait));
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(360, 500);
+            panel.setSession(session);
+            layoutTree(panel);
+        });
+        waitUntil(() -> panel.isLoaded(portrait), "竖照片的缩略图");
+
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(360, 500,
+                java.awt.image.BufferedImage.TYPE_INT_RGB);
+        SwingUtilities.invokeAndWait(() -> {
+            java.awt.Graphics2D gx = image.createGraphics();
+            panel.paint(gx);
+            gx.dispose();
+        });
+
+        // 缩略图那一片（表头下面）数一数橙色占了多宽。测试图是橙底黑圆的。
+        int boxWidth = panel.thumbnailWidthForTest();
+        int cellLeft = panel.cellXForTest(0);
+        int orangeColumns = 0;
+        for (int x = cellLeft; x < Math.min(cellLeft + boxWidth, image.getWidth()); x++) {
+            int orange = 0;
+            for (int y = 40; y < Math.min(40 + boxWidth, image.getHeight()); y++) {
+                int rgb = image.getRGB(x, y);
+                if (((rgb >> 16) & 0xFF) > 180 && ((rgb >> 8) & 0xFF) > 90) {
+                    orange++;
+                }
+            }
+            if (orange > 5) {
+                orangeColumns++;
+            }
+        }
+        assertTrue(orangeColumns > boxWidth * 0.4,
+                "竖照片应当占满一格宽度、立起来显示，而不是缩成中间一条窄条（实测 " 
+                        + orangeColumns + " / " + boxWidth + "）");
+
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;

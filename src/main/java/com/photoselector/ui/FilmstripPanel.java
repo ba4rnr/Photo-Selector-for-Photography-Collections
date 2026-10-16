@@ -88,6 +88,14 @@ final class FilmstripPanel extends JPanel {
     private final Set<Path> collapsed = new HashSet<>();
     private final AtomicInteger loaded = new AtomicInteger();
 
+    /**
+     * 一格缩略图的高 : 宽的比。
+     *
+     * <p>和 {@code TargetPanel} 用同一个数：方框让横照片（3:2）和竖照片（2:3）
+     * 都放得下——竖照片能占满一格宽度、竖着立起来，而不是缩成中间一条窄条。
+     */
+    private static final float BOX_ASPECT = 1.0f;
+
     private List<PhotoGroup> groups = List.of();
     private int cellWidth = 188;
     private int thumbnailHeight = 120;
@@ -123,7 +131,8 @@ final class FilmstripPanel extends JPanel {
     void setGroups(List<PhotoGroup> newGroups, int height) {
         this.groups = List.copyOf(newGroups);
         this.thumbnailHeight = height;
-        this.cellWidth = Math.round(height * 1.5f) + GAP;
+        // 宽度由高度和格子比例算出来：格子是方框，所以宽 = 高
+        this.cellWidth = Math.round(height / BOX_ASPECT) + GAP;
         thumbnails.clear();
         collapsed.clear();
         loaded.set(0);
