@@ -350,6 +350,68 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 垃圾桶面板_能拖进去也能拖回来() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            // 垃圾桶在展开排序模式的右栏。切模式之后要重新布局一次：
+            // 卡片切换本身不会马上分配尺寸，不布局的话垃圾桶还是 0×0
+            SwingUtilities.invokeAndWait(() -> {
+                window.panel.setMode(ViewMode.ARRANGE);
+                window.frame.validate();
+            });
+            TargetPanel arrange = window.panel.arrangePanelForTest();
+            TrashPanel trash = window.panel.trashPanelForTest();
+            assertEquals(2, arrange.entryCount(), "起点：目标文件夹里两张");
+            assertEquals(0, trash.entryCount(), "起点：垃圾桶是空的");
+
+            // —— 把第一张拖到垃圾桶里 ——
+            Path first = arrange.session().entryAt(0).source();
+            Point onFirst = new Point(arrange.cellXForTest(0) + 20, arrange.rowHeightForTest() / 2);
+            Point onTrash = new Point(trash.cellXForTest(0) + 20, trash.rowHeightForTest() / 2);
+            Point overTrash = convertLocal(trash, onTrash, arrange);
+            SwingUtilities.invokeAndWait(() -> {
+                press(arrange, onFirst);
+                drag(arrange, new Point(onFirst.x + 12, onFirst.y));
+                drag(arrange, overTrash);
+            });
+            SwingUtilities.invokeAndWait(() -> release(arrange, overTrash));
+
+            assertEquals(1, arrange.entryCount(), "扔进垃圾桶之后目标序列少一张");
+            assertEquals(1, trash.entryCount(), "垃圾桶里多了一条");
+            assertEquals(first, trash.itemAt(0).entry().source(), "垃圾桶里就是刚扔的那张");
+
+            // —— 再把它从垃圾桶拖回目标面板 ——
+            Point inTrash = new Point(trash.cellXForTest(0) + 20, trash.rowHeightForTest() / 2);
+            Point inArrange = new Point(arrange.cellXForTest(0) + 20,
+                    arrange.rowHeightForTest() / 2);
+            Point back = convertLocal(arrange, inArrange, trash);
+            SwingUtilities.invokeAndWait(() -> {
+                press(trash, inTrash);
+                drag(trash, new Point(inTrash.x + 12, inTrash.y));
+                drag(trash, back);
+            });
+            assertTrue(arrange.dropHintIndex() >= 0, "拖回目标面板时应当标出落点");
+            assertEquals(0, arrange.dropHintIndex(), "落点在左边，应当标在第 0 个缝");
+            SwingUtilities.invokeAndWait(() -> release(trash, back));
+
+            assertEquals(2, arrange.entryCount(), "捡回来之后目标序列又满了两张");
+            assertEquals(0, trash.entryCount(), "垃圾桶里没有它了");
+            assertEquals(first, arrange.session().entryAt(0).source(),
+                    "插回第 0 位（落点在左边）");
+
+            // —— 撤销：又回到垃圾桶里 ——
+            SwingUtilities.invokeAndWait(() -> window.panel.getActionMap().get("undo")
+                    .actionPerformed(new java.awt.event.ActionEvent(window.panel, 0, "undo")));
+            assertEquals(1, arrange.entryCount(), "撤销捡回来，目标序列又少一张");
+            assertEquals(1, trash.entryCount(), "垃圾桶里又有了");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 从目标栏拖到主大图区_照片进垃圾桶() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();

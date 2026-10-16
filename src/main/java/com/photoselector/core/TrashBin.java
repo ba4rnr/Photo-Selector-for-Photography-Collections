@@ -52,6 +52,32 @@ public final class TrashBin {
         return items.remove(items.size() - 1);
     }
 
+    /** 按位置取走一条（"把照片从垃圾桶拖回来"用）。 */
+    public TrashedItem removeAt(int index) {
+        return items.remove(index);
+    }
+
+    /**
+     * 把一条放回指定位置（撤销"捡回来"时用）。
+     *
+     * <p>要连原位置一起记着：撤销要让垃圾桶回到捡走之前的样子，
+     * 界面是按顺序渲染的，位置错了列表就跳来跳去。
+     */
+    public void insert(int index, TrashedItem item) {
+        items.add(Math.max(0, Math.min(index, items.size())), Objects.requireNonNull(item));
+    }
+
+    /**
+     * 最近的排前面：界面上一眼能看到刚刚扔掉的。
+     *
+     * <p>用倒序视图而不是反过来存，是因为"撤销"依赖插入顺序（后进先出）。
+     */
+    public List<TrashedItem> recentFirst() {
+        List<TrashedItem> reversed = new ArrayList<>(items);
+        Collections.reverse(reversed);
+        return Collections.unmodifiableList(reversed);
+    }
+
     /** 只读视图，供界面渲染垃圾桶面板。视图跟随内部列表实时变化。 */
     public List<TrashedItem> items() {
         return Collections.unmodifiableList(items);

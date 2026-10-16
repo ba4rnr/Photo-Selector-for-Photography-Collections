@@ -84,6 +84,7 @@ public final class MainPanel extends JPanel {
     private final FilmstripPanel filmstrip;
     private final TargetPanel targetPanel;
     private final TargetPanel arrangePanel;
+    private final TrashPanel trashPanel;
     private final ViewerPanel viewer;
     private final SourceTreePanel sourceTree = new SourceTreePanel();
 
@@ -192,6 +193,7 @@ public final class MainPanel extends JPanel {
         targetLoader = new ThumbnailLoader(thumbnailService);
         targetPanel = new TargetPanel(targetLoader);
         arrangePanel = new TargetPanel(targetLoader);
+        trashPanel = new TrashPanel(targetLoader);
         arrangePanel.setThumbnailWidth(ARRANGE_THUMBNAIL_WIDTH);
         targetPanel.setOnToggleExpanded(this::toggleMode);
         arrangePanel.setOnToggleExpanded(this::toggleMode);
@@ -203,19 +205,25 @@ public final class MainPanel extends JPanel {
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
         DragOut.install(filmstrip, filmstrip::currentPhoto, filmstrip::thumbnailOf,
-                () -> true, this::addToTargetAt, null, null);
+                () -> true, this::addToTargetAt, null, null, null);
         // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
         DragOut.install(viewer, viewer::photo, viewer::ghostThumbnail,
-                viewer::isDragOutEnabled, this::addToTargetAt, null, null);
+                viewer::isDragOutEnabled, this::addToTargetAt, null, null, null);
 
         // 目标文件夹里的照片也能拖：往旁边一放就是重排顺序（白线照旧标落点）。
         // 这两块是"同一个序列的两个视图"（选图模式的窄栏、展开排序模式的大网格），
         // 拖哪一块都是改同一个中间商的顺序。
         // 另外：选图模式下拖到中间的大图区 = 丢垃圾桶（只记指针，保存时才真删）。
         DragOut.install(targetPanel, targetPanel::selectedPhoto, this::thumbnailOfTargetPhoto,
-                () -> true, this::reorder, this::dropOnViewer, viewer);
+                () -> true, this::reorder, null, this::dropOnViewer, viewer);
         DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::thumbnailOfTargetPhoto,
-                () -> true, this::reorder, this::dropOnViewer, viewer);
+                () -> true, this::reorder, null, this::dropOnViewer, viewer);
+
+        // 垃圾桶里的照片可以拖回目标栏：
+        // · 落在选图模式那块窄栏上，或者展开排序模式的大网格上，都算数
+        // · 拖到大图区、素材条这些地方什么都不做——照片留在垃圾桶里
+        DragOut.installTrashBack(trashPanel, trashPanel::selectedPhoto, trashPanel::thumbnailOf,
+                this::untrashFromTrash);
         toolBar.setOnToolChanged(viewer::setCursorTool);
 
         buildAreas();
@@ -287,7 +295,9 @@ public final class MainPanel extends JPanel {
         centerArea.add(arrangePanel.wrapInScrollPane(), ViewMode.ARRANGE.name());
 
         rightArea.add(targetPanel.wrapInScrollPane(), ViewMode.BROWSE.name());
-        rightArea.add(placeholder("垃圾桶", 360, 400, Theme.PANEL), ViewMode.ARRANGE.name());
+        JScrollPane trashScroll = trashPanel.wrapInScrollPane();
+        trashScroll.setPreferredSize(new Dimension(360, 400));
+        rightArea.add(trashScroll, ViewMode.ARRANGE.name());
 
         JScrollPane filmstripScroll = filmstrip.wrapInScrollPane();
         filmstripScroll.setPreferredSize(new Dimension(100, BOTTOM_HEIGHT));
@@ -426,6 +436,7 @@ public final class MainPanel extends JPanel {
         if (target == null) {
             targetPanel.setSession(null);
             arrangePanel.setSession(null);
+            trashPanel.setSession(null);
             return;
         }
         scanPool.submit(() -> {
@@ -444,6 +455,7 @@ public final class MainPanel extends JPanel {
                 session.seedExisting(files);
                 targetPanel.setSession(session);
                 arrangePanel.setSession(session);
+                trashPanel.setSession(session);
             });
         });
     }
@@ -541,6 +553,24 @@ public final class MainPanel extends JPanel {
         session.trash(index);
         targetPanel.refresh();
         arrangePanel.refresh();
+        trashPanel.refresh();
+    }
+
+    /**
+     * 从垃圾桶把照片拖回了目标栏：插到落点指示的位置。
+     *
+     * <p>插回之后编号按新位置现算——垃圾桶里那条记的旧号只是用来对照的。
+     */
+    private void untrashFromTrash(Path photo, TargetPanel panel, int slot) {
+        Session session = targetPanel.session();
+        if (session == null || saving) {
+            return;
+        }
+        if (session.untrash(photo, slot)) {
+            targetPanel.refresh();
+            arrangePanel.refresh();
+            trashPanel.refresh();
+        }
     }
 
     /**
@@ -801,6 +831,11 @@ public final class MainPanel extends JPanel {
     /** 目标文件夹面板，给测试用。 */
     TargetPanel targetPanelForTest() {
         return targetPanel;
+    }
+
+    /** 垃圾桶面板，给测试用。 */
+    TrashPanel trashPanelForTest() {
+        return trashPanel;
     }
 
     /** 展开排序模式中间那块面板，给测试用。 */

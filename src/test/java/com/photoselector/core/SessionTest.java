@@ -197,6 +197,50 @@ class SessionTest {
     }
 
     @Test
+    void 从垃圾桶捡回来_插到指定位置() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.add(PHOTO_C);
+        session.trash(1); // B 进了垃圾桶
+
+        assertTrue(session.untrash(PHOTO_B, 0), "垃圾桶里有 B，应当捡得回来");
+
+        assertEquals(3, session.size());
+        assertEquals(List.of("L1000002.JPG", "L1000001.JPG", "L1000003.JPG"),
+                session.entries().stream().map(TargetEntry::fileName).toList(),
+                "B 应当插在第 0 项之前");
+        assertTrue(session.trash().isEmpty(), "捡回来之后垃圾桶里没有它了");
+        assertTrue(session.isDirty(), "序列变了，和磁盘又不一样了");
+    }
+
+    @Test
+    void 不在垃圾桶里的照片捡不回来() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+
+        assertFalse(session.untrash(PHOTO_B, 0), "B 根本没进过垃圾桶");
+        assertEquals(1, session.size());
+    }
+
+    @Test
+    void 撤销捡回来_把它放回垃圾桶() {
+        Session session = newSession();
+        session.add(PHOTO_A);
+        session.add(PHOTO_B);
+        session.trash(1);
+        session.untrash(PHOTO_B, 0);
+
+        assertTrue(session.undo(), "撤销捡回来这一步");
+
+        assertEquals(1, session.size());
+        assertEquals("L1000001.JPG", session.entryAt(0).fileName(), "序列回到只有 A");
+        assertEquals(1, session.trash().size(), "B 回到了垃圾桶里");
+        assertEquals(PHOTO_B.toAbsolutePath().normalize(),
+                session.trash().items().get(0).entry().source());
+    }
+
+    @Test
     void 改动过才算脏_铺底和清空都算干净() {
         Session session = newSession();
         assertFalse(session.isDirty(), "刚建起来的中间商和磁盘没有差别");

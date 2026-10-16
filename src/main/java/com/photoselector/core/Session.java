@@ -217,6 +217,46 @@ public final class Session {
         });
     }
 
+    /**
+     * 把垃圾桶里的一张照片捡回来，插到指定位置——面板上"把照片从垃圾桶拖回目标栏"走这里。
+     *
+     * <p>和丢进去是对称的：同样只动内存，保存时按新序列重新落盘。
+     * 拖回之后编号按新位置现算（垃圾桶里那一条记的还是它原来的号，只是用来对照）。
+     *
+     * @param source 哪一张（按规范化路径找，垃圾桶里每张照片只会在里面一次）
+     * @param index  插到第几项之前；越界会夹到合法范围
+     * @return 是否真的捡回来了
+     */
+    public boolean untrash(Path source, int index) {
+        Objects.requireNonNull(source, "source 不能为空");
+        Path normalized = source.toAbsolutePath().normalize();
+
+        int at = -1;
+        TrashedItem picked = null;
+        for (int i = 0; i < trash.items().size(); i++) {
+            if (trash.items().get(i).entry().source().equals(normalized)) {
+                at = i;
+                picked = trash.items().get(i);
+                break;
+            }
+        }
+        if (picked == null) {
+            return false; // 不在垃圾桶里（可能是刚被换掉的旧目标文件夹），没什么可捡的
+        }
+
+        int to = Math.max(0, Math.min(index, sequence.size()));
+        trash.removeAt(at);
+        sequence.add(to, picked.entry());
+        dirty = true;
+        // 反向动作：把刚插进去的这条再丢回垃圾桶
+        TrashedItem back = picked;
+        pushUndo(() -> {
+            TargetEntry entry = sequence.remove(to);
+            trash.add(entry, back.originalIndex());
+        });
+        return true;
+    }
+
     /** 撤销最近一步操作。 */
     public boolean undo() {
         Runnable reversal = undoStack.pollLast();
