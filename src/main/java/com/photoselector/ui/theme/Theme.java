@@ -4,6 +4,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JScrollBar;
 import javax.swing.UIManager;
@@ -26,6 +27,9 @@ public final class Theme {
 
     /** 高亮与选中：鼠标悬停、当前选中的项。 */
     public static final Color HIGHLIGHT = new Color(0x414141);
+
+    /** 鼠标移到按钮上时用的底色，比 {@link #HIGHLIGHT} 轻一档。 */
+    public static final Color HOVER = new Color(0x363636);
 
     /** 激活的工具。Capture One 用它标记"当前正在用的那个工具"。 */
     public static final Color ACCENT = new Color(0xFF8B16);
@@ -85,6 +89,19 @@ public final class Theme {
         put("MenuItem.selectionForeground", TEXT);
         put("PopupMenu.background", PANEL);
         put("PopupMenu.foreground", TEXT);
+        // 菜单一律用基础外观：系统外观会给弹层画白边、蓝底和蓝色的快捷键文字，
+        // 在深色界面上非常跳。换成基础实现后，颜色就完全听我们的。
+        UIManager.put("MenuUI", "javax.swing.plaf.basic.BasicMenuUI");
+        UIManager.put("MenuItemUI", "javax.swing.plaf.basic.BasicMenuItemUI");
+        UIManager.put("PopupMenuUI", "javax.swing.plaf.basic.BasicPopupMenuUI");
+        UIManager.put("PopupMenuSeparatorUI", "javax.swing.plaf.basic.BasicPopupMenuSeparatorUI");
+        UIManager.put("MenuItem.borderPainted", Boolean.FALSE);
+        UIManager.put("Menu.borderPainted", Boolean.FALSE);
+        UIManager.put("PopupMenu.border", BorderFactory.createLineBorder(BORDER));
+        put("MenuItem.acceleratorForeground", TEXT_MUTED);
+        put("MenuItem.acceleratorSelectionForeground", TEXT);
+        put("Separator.foreground", HIGHLIGHT);
+        put("Separator.background", BORDER);
 
         put("Button.background", PANEL);
         put("Button.foreground", TEXT);
