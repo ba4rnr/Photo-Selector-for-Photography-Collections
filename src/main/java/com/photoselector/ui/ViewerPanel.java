@@ -28,7 +28,7 @@ import com.photoselector.ui.theme.Theme;
  * <p>缩放与平移的状态就两个：一个比例、一个偏移。分三种比例：
  * <ul>
  *   <li><b>适应窗口</b>：按窗口大小现算，随窗口变化。默认就是它。</li>
- *   <li><b>1:1</b>：一个像素对一个屏幕像素，看合焦与否就靠它。</li>
+ *   <li><b>100%</b>：一个图片像素对一个屏幕像素，看合焦与否就靠它。</li>
  *   <li><b>滚轮缩放</b>：在适应窗口的基础上乘以倍数，从 5% 到 800%。</li>
  * </ul>
  *
@@ -53,6 +53,15 @@ final class ViewerPanel extends JPanel {
     private static final double MIN_SCALE = 0.05;
     private static final double MAX_SCALE = 8.0;
 
+    /**
+     * 打开一张照片时的默认放大倍率。
+     *
+     * <p>用一个固定比例而不是"适应窗口"，是为了让不同的照片都按同一个倍率显示——
+     * 你的照片多在 6000 像素上下，14% 大约是 840 像素，正好一屏宽。
+     * 连着翻几张时看到的比例一致，方便横向比较。
+     */
+    private static final double DEFAULT_SCALE = 0.14;
+
     private final ThumbnailLoader loader;
 
     private Path photo;
@@ -60,11 +69,11 @@ final class ViewerPanel extends JPanel {
     private boolean loading;
     private boolean failed;
 
-    /** 是不是"适应窗口"。滚轮或 1:1 之后就不是了。 */
-    private boolean fitToWindow = true;
+    /** 是不是"适应窗口"。默认不是——默认按 {@link #DEFAULT_SCALE} 显示。 */
+    private boolean fitToWindow;
 
     /** 非适应窗口时用的比例。 */
-    private double customScale = 1.0;
+    private double customScale = DEFAULT_SCALE;
 
     /** 相对"居中"位置挪了多少。 */
     private int offsetX;
@@ -79,7 +88,7 @@ final class ViewerPanel extends JPanel {
     private Rectangle fitButtonBounds;
     private Rectangle actualButtonBounds;
 
-    /** 点"1:1"时通知外部（菜单里的选中状态跟着变）。 */
+    /** 缩放状态变了时通知外部（菜单里的勾选跟着变）。 */
     private Runnable onZoomChanged = () -> { };
 
     ViewerPanel(ThumbnailLoader loader) {
@@ -153,7 +162,7 @@ final class ViewerPanel extends JPanel {
         onZoomChanged.run();
     }
 
-    /** 1:1：一个图片像素对一个屏幕像素。 */
+    /** 100%：一个图片像素对一个屏幕像素。 */
     void actualSize() {
         fitToWindow = false;
         customScale = 1.0;

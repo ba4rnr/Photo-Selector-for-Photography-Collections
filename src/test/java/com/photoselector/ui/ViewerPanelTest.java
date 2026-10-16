@@ -104,8 +104,9 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        assertTrue(viewer.isFitToWindow(), "默认是适应窗口");
-        assertTrue(viewer.zoomPercent() < 100, "900 宽的图塞进 400 宽的窗口，比例必然小于 100%");
+        // 默认不是"适应窗口"：照片按固定倍率显示，连着翻几张时比例一致，方便横向比较
+        assertTrue(!viewer.isFitToWindow(), "默认不该是适应窗口");
+        assertEquals(14, viewer.zoomPercent(), "默认放大倍率是 14%");
 
         SwingUtilities.invokeAndWait(viewer::actualSize);
         assertTrue(!viewer.isFitToWindow());
