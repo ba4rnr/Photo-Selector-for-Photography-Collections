@@ -179,6 +179,32 @@ class ViewerPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 放大到超出窗口时_表头不会被照片盖住() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 1200, 800);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        // 放大到远超窗口，照片会溢出图片区
+        SwingUtilities.invokeAndWait(() -> viewer.zoomBy(6.0));
+
+        BufferedImage rendered = render(viewer);
+        // 表头底部那条分隔线（HEADER_HEIGHT 26，往上 7 像素）应当还在。
+        // 照片要是盖上来，这条线就没有了。
+        int lineY = 19;
+        int rgb = rendered.getRGB(rendered.getWidth() / 2, lineY) & 0xFFFFFF;
+        assertEquals(Theme.BORDER.getRGB() & 0xFFFFFF, rgb,
+                "放大之后表头那条分隔线应当还在，说明照片被限制在图片区里");
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;

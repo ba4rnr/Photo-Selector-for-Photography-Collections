@@ -340,7 +340,7 @@ final class ViewerPanel extends JPanel {
         String percent = image == null ? "" : zoomPercent() + "%";
         int percentWidth = percent.isEmpty() ? 0 : metrics.stringWidth(percent) + 10;
 
-        int actualWidth = metrics.stringWidth("1:1") + 18;
+        int actualWidth = metrics.stringWidth("100%") + 18;
         int fitWidth = metrics.stringWidth("适应") + 18;
         int height = 20;
         int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
@@ -350,7 +350,7 @@ final class ViewerPanel extends JPanel {
         fitButtonBounds = new Rectangle(x, y, fitWidth, height);
 
         paintChip(g, fitButtonBounds, "适应", metrics, fitToWindow);
-        paintChip(g, actualButtonBounds, "1:1", metrics, !fitToWindow && customScale == 1.0);
+        paintChip(g, actualButtonBounds, "100%", metrics, !fitToWindow && customScale == 1.0);
 
         if (!percent.isEmpty()) {
             g.setColor(Theme.TEXT_MUTED);
@@ -401,7 +401,12 @@ final class ViewerPanel extends JPanel {
 
         int x = area.x + (area.width - size.width) / 2 + offsetX;
         int y = area.y + (area.height - size.height) / 2 + offsetY;
-        g.drawImage(image, x, y, size.width, size.height, null);
+        // 必须把绘制范围限制在图片区之内：放大之后图片比这块地方大得多，
+        // 不裁的话它会从表头上方一路盖过去，把文件名和缩放控件全糊掉
+        Graphics2D clipped = (Graphics2D) g.create();
+        clipped.clip(area);
+        clipped.drawImage(image, x, y, size.width, size.height, null);
+        clipped.dispose();
     }
 
     /** 留给图片的那块地方：表头以下、四周留白以内。 */

@@ -182,7 +182,7 @@ public final class MainFrame extends JFrame {
     private static JMenu zoomMenu(MainPanel mainPanel) {
         JMenu menu = menu("缩放");
         JRadioButtonMenuItem fit = new JRadioButtonMenuItem("适应窗口", true);
-        JRadioButtonMenuItem actual = new JRadioButtonMenuItem("1:1", false);
+        JRadioButtonMenuItem actual = new JRadioButtonMenuItem("100%", false);
         for (JRadioButtonMenuItem item : new JRadioButtonMenuItem[] {fit, actual}) {
             item.setForeground(Theme.TEXT);
             item.setBackground(Theme.PANEL);
