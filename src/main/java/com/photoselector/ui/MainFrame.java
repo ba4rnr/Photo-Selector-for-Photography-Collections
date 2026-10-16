@@ -1,6 +1,7 @@
 package com.photoselector.ui;
 
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
@@ -191,6 +192,9 @@ public final class MainFrame extends JFrame {
     private static JMenu menu(String text) {
         JMenu menu = new JMenu(text);
         menu.setForeground(Theme.TEXT);
+        // 上下各留一点：菜单栏太扁的话，字贴着边框显得局促。
+        // 菜单的高度看的是边框的衬边（PreferredSize 里用的是 getInsets），不是 margin
+        menu.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
         return menu;
     }
 

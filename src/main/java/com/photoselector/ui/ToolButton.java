@@ -40,7 +40,8 @@ final class ToolButton extends JButton {
         setContentAreaFilled(false); // 背景不再由外观画，改由下面的 paintComponent 负责
         setFocusPainted(false);
         setBorderPainted(false);
-        setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        // 上下留得比左右多一点：图标在上、文字在下，扁了会显得挤
+        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         setRolloverEnabled(true);
     }
 
