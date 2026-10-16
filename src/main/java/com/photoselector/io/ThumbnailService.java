@@ -241,6 +241,16 @@ public final class ThumbnailService {
     }
 
     /**
+     * 缩略图"怎么画"的代次。渲染逻辑一改（比如开始按 EXIF 方向摆正）就 +1。
+     *
+     * <p>为什么必须有它：缓存键是"路径 + 大小 + 修改时间 + 目标高度"，
+     * 照片文件本身没变的话，程序升级后键还是老样子——旧版本缓存下来的图
+     * （比如方向没摆正的那批）会被当成新鲜的继续用，怎么重启都不更新。
+     * 代次号一变，所有旧缓存自动作废，重算一遍。
+     */
+    private static final int RENDER_VERSION = 2;
+
+    /**
      * 把"路径 + 大小 + 修改时间 + 目标高度"揉成一个定长的文件名。
      *
      * <p>为什么不直接用路径当文件名？因为路径里有冒号斜杠、还可能很长，
@@ -251,6 +261,7 @@ public final class ThumbnailService {
             String raw = photo.toAbsolutePath()
                     + "|" + Files.size(photo)
                     + "|" + Files.getLastModifiedTime(photo).toMillis()
+                    + "|v" + RENDER_VERSION
                     + "|" + maxHeight;
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(raw.getBytes(StandardCharsets.UTF_8));

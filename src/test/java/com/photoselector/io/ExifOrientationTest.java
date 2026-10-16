@@ -1,9 +1,11 @@
 package com.photoselector.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
@@ -115,6 +117,66 @@ class ExifOrientationTest {
         assertTrue(thumbnail.getWidth() < thumbnail.getHeight(),
                 "摆正之后是竖图，宽应当小于高（实际 "
                         + thumbnail.getWidth() + "×" + thumbnail.getHeight() + "）");
+    }
+
+    @Test
+    void 缓存里躺着一张老版本画的横图_不该再被当成新鲜的用() throws Exception {
+        // 复现用户遇到的情况：程序升级前缓存过一张"方向没摆正"的缩略图，
+        // 照片文件本身一直没变——按老规矩（键里只有路径/大小/时间）它会被一直用下去
+        Path photo = TestImages.writeJpegWithOrientation(
+                tempDir.resolve("竖.jpg"), 300, 200, 6);
+        ThumbnailService service = new ThumbnailService(tempDir.resolve("cache"));
+
+        // 假装老版本写下的缓存：放在**老算法**算出来的位置上
+        // （第一版这条测试把它写到了当前版本号的路径上，等于伪造了一份"当前缓存"，
+        //   测出来的是"缓存照常命中"——自欺欺人）。
+        Path legacyFile = service.cacheFileFor(photo, 100).getParent()
+                .resolve(legacyKey(photo, 100) + ".png");
+        Files.createDirectories(legacyFile.getParent());
+        // 尺寸用一个独有的（333×111）：别撞上"占位图"的 150×100，
+        // 否则"旧缓存还在用"和"读盘失败回了占位图"分不出来
+        BufferedImage stale = new BufferedImage(333, 111, BufferedImage.TYPE_INT_RGB);
+        javax.imageio.ImageIO.write(stale, "png", legacyFile.toFile());
+
+        BufferedImage got = service.thumbnail(photo, 100);
+
+        assertEquals(333 == got.getWidth() && 111 == got.getHeight(), false,
+                "旧的缓存图不该再被端出来（实际 " + got.getWidth() + "×" + got.getHeight() + "）");
+        assertTrue(got.getWidth() < got.getHeight(),
+                "老缓存该被作废、按 EXIF 重算：应当是竖图，实际 "
+                        + got.getWidth() + "×" + got.getHeight());
+        assertTrue(Files.exists(service.cacheFileFor(photo, 100)),
+                "顺手把新版本的结果写进了缓存");
+    }
+
+    /** 老的缓存键算法（没有版本号那一项）：用来伪造"上一版本留下的缓存"。 */
+    private static String legacyKey(Path photo, int maxHeight) throws Exception {
+        String raw = photo.toAbsolutePath()
+                + "|" + Files.size(photo)
+                + "|" + Files.getLastModifiedTime(photo).toMillis()
+                + "|" + maxHeight;
+        byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < 16; i++) {
+            hex.append(String.format("%02x", digest[i]));
+        }
+        return hex.toString();
+    }
+
+    @Test
+    void 缩略图和大图的宽高比一致() throws Exception {
+        // 两边都得摆正，不然会出现"大图是竖的、缩略图是横的"这种对不上
+        Path photo = TestImages.writeJpegWithOrientation(
+                tempDir.resolve("竖.jpg"), 300, 200, 8);
+        ImageSource source = ImageSource.open(photo);
+
+        boolean fullPortrait = source.width() < source.height();
+        BufferedImage thumbnail = new ThumbnailService(tempDir.resolve("cache"))
+                .thumbnail(photo, 100);
+        boolean thumbPortrait = thumbnail.getWidth() < thumbnail.getHeight();
+
+        assertEquals(fullPortrait, thumbPortrait, "缩略图的方向要和大图一致");
     }
 
     @Test
