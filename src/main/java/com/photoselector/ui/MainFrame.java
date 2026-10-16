@@ -16,6 +16,8 @@ import javax.swing.KeyStroke;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
 import com.photoselector.ui.theme.Theme;
+import com.photoselector.core.Workspace;
+import com.photoselector.io.WorkspaceStore;
 
 /**
  * 主窗口：菜单栏 + {@link MainPanel}。
@@ -24,14 +26,17 @@ import com.photoselector.ui.theme.Theme;
 public final class MainFrame extends JFrame {
 
     private final MainPanel mainPanel = new MainPanel();
+    private final WorkspaceStore workspaceStore;
 
-    public MainFrame() {
+    public MainFrame(WorkspaceStore workspaceStore) {
         super("摄影集照片筛选器");
+        this.workspaceStore = workspaceStore;
 
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setContentPane(mainPanel);
-        setJMenuBar(createMenuBar(mainPanel, this::chooseFolder, this::dispose));
+        setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, this::dispose));
         mainPanel.setOnFolderOpened(this::folderOpened);
+        mainPanel.setOnWorkspaceChanged(workspaceStore::save);
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
@@ -55,10 +60,10 @@ public final class MainFrame extends JFrame {
         bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
 
         JMenu file = menu("文件");
-        JMenuItem openFolder = new JMenuItem("打开素材文件夹…");
-        openFolder.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
-        openFolder.addActionListener(e -> openFolderAction.run());
-        file.add(openFolder);
+        JMenuItem chooseWorkspace = new JMenuItem("选择工作区…");
+        chooseWorkspace.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
+        chooseWorkspace.addActionListener(e -> openFolderAction.run());
+        file.add(chooseWorkspace);
         file.add(pending("保存", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK)));
         file.addSeparator();
         JMenuItem quit = new JMenuItem("退出");
@@ -93,22 +98,21 @@ public final class MainFrame extends JFrame {
         return bar;
     }
 
-    /**
-     * 让用户挑一个素材文件夹，然后把里面的照片放进底部素材条。
-     *
-     * <p>这是"选择工作区"的临时入口：完整的那个还要选剔除哪些子文件夹、
-     * 选目标文件夹，并记住上次的选择，等那一块做好会把它替换掉。
-     */
-    private void chooseFolder() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("选择素材文件夹");
-        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
-            return;
-        }
+    /** 打开「选择工作区」对话框；用户确认后应用并记下来。 */
+    public void chooseWorkspace() {
+        WorkspaceDialog.show(this, mainPanel.workspace()).ifPresent(this::showWorkspace);
+    }
 
-        Path folder = chooser.getSelectedFile().toPath();
-        mainPanel.setRootFolder(folder); // 扫描在后台进行，结果通过回调通知
+    /** 应用一个工作区：界面切过去，配置写回文件。 */
+    public void showWorkspace(Workspace workspace) {
+        mainPanel.applyWorkspace(workspace); // 扫描在后台进行，结果通过回调通知
+    }
+
+    /** 上次的素材文件夹不见了时的提示。 */
+    public void warnMissingSourceRoot(Path missing) {
+        JOptionPane.showMessageDialog(this,
+                "上次打开的素材文件夹找不到了：\n" + missing + "\n\n请重新选一个。",
+                "工作区", JOptionPane.WARNING_MESSAGE);
     }
 
     /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */

@@ -1,7 +1,12 @@
 package com.photoselector;
 
+import java.nio.file.Files;
+import java.util.Optional;
+
 import javax.swing.SwingUtilities;
 
+import com.photoselector.core.Workspace;
+import com.photoselector.io.WorkspaceStore;
 import com.photoselector.ui.MainFrame;
 import com.photoselector.ui.theme.Theme;
 
@@ -32,7 +37,33 @@ public final class PhotoSelectorApp {
         // invokeLater 把这段任务排进 EDT 的队列，而不是在 main 线程里直接开窗口。
         SwingUtilities.invokeLater(() -> {
             Theme.install();
-            new MainFrame().setVisible(true);
+            WorkspaceStore store = new WorkspaceStore();
+            MainFrame frame = new MainFrame(store);
+            frame.setVisible(true);
+            restoreOrChooseWorkspace(frame, store);
         });
+    }
+
+    /**
+     * 启动时的工作区逻辑。
+     *
+     * <p>上次选过就直接用；没选过、或者素材根文件夹已经不在了，就打开「选择工作区」。
+     * 根目录不在了要先说一句再弹——不然用户只会看到一个空界面，不知道发生了什么。
+     */
+    private static void restoreOrChooseWorkspace(MainFrame frame, WorkspaceStore store) {
+        Optional<Workspace> saved = store.load();
+        if (saved.isEmpty()) {
+            frame.chooseWorkspace(); // 头一次打开
+            return;
+        }
+
+        Workspace workspace = saved.get();
+        if (Files.isDirectory(workspace.sourceRoot())) {
+            frame.showWorkspace(workspace);
+            return;
+        }
+
+        frame.warnMissingSourceRoot(workspace.sourceRoot());
+        frame.chooseWorkspace();
     }
 }

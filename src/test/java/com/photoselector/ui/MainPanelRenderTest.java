@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 
 import com.photoselector.ui.theme.Theme;
 import com.photoselector.testing.TestImages;
+import com.photoselector.core.Workspace;
 
 /**
  * 窗口骨架的冒烟测试：组件能搭起来、能画出一张像样的图。
@@ -111,7 +112,8 @@ class MainPanelRenderTest {
         // 扫描在后台跑，结果通过回调回来
         AtomicInteger opened = new AtomicInteger(-2);
         mainPanel.setOnFolderOpened((folder, count) -> opened.set(count));
-        SwingUtilities.invokeAndWait(() -> mainPanel.setRootFolder(Path.of(configured)));
+        SwingUtilities.invokeAndWait(() ->
+                mainPanel.applyWorkspace(Workspace.of(Path.of(configured))));
 
         long openDeadline = System.currentTimeMillis() + 30_000;
         while (opened.get() == -2 && System.currentTimeMillis() < openDeadline) {
@@ -155,7 +157,7 @@ class MainPanelRenderTest {
         }
 
         MainPanel mainPanel = newMainPanel();
-        SwingUtilities.invokeAndWait(() -> mainPanel.setRootFolder(root));
+        SwingUtilities.invokeAndWait(() -> mainPanel.applyWorkspace(Workspace.of(root)));
 
         long deadline = System.currentTimeMillis() + 20_000;
         while (mainPanel.filmstripGroupCount() < 2 && System.currentTimeMillis() < deadline) {

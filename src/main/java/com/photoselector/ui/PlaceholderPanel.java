@@ -21,13 +21,19 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial")
 final class PlaceholderPanel extends JPanel {
 
-    private final String title;
+    private String title;
 
     PlaceholderPanel(String title, Color background) {
         this.title = title;
         setBackground(background);
         setOpaque(true);
         setBorder(BorderFactory.createLineBorder(Theme.BORDER));
+    }
+
+    /** 换掉中间那行说明文字（比如把目标文件夹的路径显示上去）。 */
+    void setTitle(String title) {
+        this.title = title;
+        repaint();
     }
 
     @Override

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
@@ -21,6 +22,7 @@ import javax.swing.SwingUtilities;
 import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.core.Workspace;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -64,11 +66,20 @@ public final class MainPanel extends JPanel {
     /** 扫描出来的全部组；剔除哪些由目录树的勾选状态决定。 */
     private List<PhotoGroup> scannedGroups = List.of();
 
+    /** 当前工作区。还没选过时为 null。 */
+    private Workspace workspace;
+
+    /** 工作区变化时的回调（用来写回配置文件）。 */
+    private Consumer<Workspace> onWorkspaceChanged = updated -> { };
+
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
 
     private final CardLayout rightCards = new CardLayout();
     private final JPanel rightArea = new JPanel(rightCards);
+
+    /** 浏览模式右栏那个面板：选了目标文件夹之后，在这里显示它的路径。 */
+    private final PlaceholderPanel targetPanel = placeholder("目标文件夹（还没选）", 360, 400, Theme.PANEL);
 
     private final CardLayout bottomCards = new CardLayout();
     private final JPanel bottomArea = new JPanel(bottomCards);
@@ -102,7 +113,7 @@ public final class MainPanel extends JPanel {
         toolBar.modeButton().addActionListener(e -> toggleMode());
         // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组
         sourceTree.setOnFolderChosen(filmstrip::scrollToGroup);
-        sourceTree.setOnInclusionChanged(this::applyGroups);
+        sourceTree.setOnInclusionChanged(this::inclusionChanged);
 
         add(toolBar, BorderLayout.NORTH);
         add(outerSplit, BorderLayout.CENTER);
@@ -146,7 +157,7 @@ public final class MainPanel extends JPanel {
         centerArea.add(placeholder("素材大图", 700, 400, Theme.CANVAS), ViewMode.BROWSE.name());
         centerArea.add(placeholder("目标文件夹的缩略图（可拖动排序）", 700, 400, Theme.CANVAS), ViewMode.ARRANGE.name());
 
-        rightArea.add(placeholder("目标文件夹", 360, 400, Theme.PANEL), ViewMode.BROWSE.name());
+        rightArea.add(targetPanel, ViewMode.BROWSE.name());
         rightArea.add(placeholder("垃圾桶", 360, 400, Theme.PANEL), ViewMode.ARRANGE.name());
 
         JScrollPane filmstripScroll = filmstrip.wrapInScrollPane();
@@ -166,8 +177,7 @@ public final class MainPanel extends JPanel {
      * <p>列目录是文件系统操作，一个档案夹可能有几十个子目录、上千张照片，
      * 在界面线程上扫会卡住；所以这里立刻返回，结果通过 {@link #setOnFolderOpened} 通知。
      */
-    public void setRootFolder(Path folder) {
-        sourceTree.setRoot(folder);
+    private void reloadGroups(Path folder) {
         scanPool.submit(() -> {
             List<PhotoGroup> groups;
             try {
@@ -185,6 +195,15 @@ public final class MainPanel extends JPanel {
         });
     }
 
+    /** 勾选变化：重新筛组，并把新的剔除项记进工作区。 */
+    private void inclusionChanged() {
+        applyGroups();
+        if (workspace != null) {
+            workspace = workspace.withExcluded(sourceTree.excludedFolders());
+            onWorkspaceChanged.accept(workspace);
+        }
+    }
+
     /** 按目录树的勾选状态筛一遍：被剔除的组不进素材条。 */
     private void applyGroups() {
         List<PhotoGroup> included = new ArrayList<>();
@@ -199,6 +218,35 @@ public final class MainPanel extends JPanel {
     /** 设置"某个文件夹被打开"的回调。 */
     public void setOnFolderOpened(BiConsumer<Path, Integer> listener) {
         this.onFolderOpened = listener == null ? (folder, count) -> { } : listener;
+    }
+
+    /** 工作区变化时通知外部（外部负责写回配置文件）。 */
+    public void setOnWorkspaceChanged(Consumer<Workspace> listener) {
+        this.onWorkspaceChanged = listener == null ? updated -> { } : listener;
+    }
+
+    /** 当前工作区；还没选过时为 null。 */
+    public Workspace workspace() {
+        return workspace;
+    }
+
+    /**
+     * 应用一个工作区：左栏按它的剔除项勾好，素材条按它的根目录重新扫一遍。
+     *
+     * <p>顺序要紧——{@code setRoot} 会把剔除记录清空（换了根目录，旧记录就没意义了），
+     * 所以必须先换根、再把剔除项设回去。
+     */
+    public void applyWorkspace(Workspace newWorkspace) {
+        this.workspace = newWorkspace;
+        sourceTree.setRoot(newWorkspace.sourceRoot());
+        sourceTree.setExcluded(newWorkspace.excludedFolders());
+        updateTargetPanel(newWorkspace.targetFolder());
+        reloadGroups(newWorkspace.sourceRoot());
+        onWorkspaceChanged.accept(newWorkspace);
+    }
+
+    private void updateTargetPanel(Path target) {
+        targetPanel.setTitle(target == null ? "目标文件夹（还没选）" : "目标文件夹：" + target);
     }
 
 

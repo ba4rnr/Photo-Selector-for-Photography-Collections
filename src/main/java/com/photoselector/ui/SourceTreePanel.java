@@ -158,6 +158,18 @@ final class SourceTreePanel extends JPanel {
         return Set.copyOf(excluded);
     }
 
+    /**
+     * 直接指定哪些文件夹被剔除（从工作区配置恢复时用）。
+     *
+     * <p>和 {@link #toggleIncluded} 的区别：这个方法不通知外部——
+     * 它就是外部设置进来的，再回手通知一遍会转成死循环。
+     */
+    void setExcluded(Set<Path> folders) {
+        excluded.clear();
+        excluded.addAll(folders);
+        tree.repaint();
+    }
+
     /** 只留给测试用。 */
     JTree tree() {
         return tree;
