@@ -19,8 +19,8 @@ import com.photoselector.ui.theme.Theme;
  */
 final class Splitters {
 
-    /** 分隔条宽度：够手指抓，又不至于显得笨重。 */
-    private static final int SIZE = 6;
+    /** 分隔条宽度：太宽会显得笨重，太窄不好抓，4 像素是两者的折中。 */
+    private static final int SIZE = 4;
 
     private Splitters() {
     }
