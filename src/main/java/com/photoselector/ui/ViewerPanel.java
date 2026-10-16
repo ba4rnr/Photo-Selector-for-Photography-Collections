@@ -106,6 +106,9 @@ final class ViewerPanel extends JPanel {
     private int dragOffsetX;
     private int dragOffsetY;
 
+    /** 从目标栏拖来的照片正悬在大图区上：这时整块面板要亮一圈，示意"松手就扔"。 */
+    private boolean trashHint;
+
     /** 当前的光标工具。它决定在大图上按住左键拖动是什么意思。 */
     private CursorTool tool = CursorTool.SELECT;
 
@@ -480,7 +483,30 @@ final class ViewerPanel extends JPanel {
 
         paintHeader(g2);
         paintImageArea(g2);
+        if (trashHint) {
+            paintTrashHint(g2);
+        }
         g2.dispose();
+    }
+
+    /** 从目标栏拖过来、正悬在大图区上：亮一圈白边，示意"松手就丢进垃圾桶"。 */
+    private void paintTrashHint(Graphics2D g) {
+        g.setColor(Theme.DIVIDER_HINT);
+        g.setStroke(new java.awt.BasicStroke(3));
+        g.drawRect(2, 2, Math.max(0, getWidth() - 5), Math.max(0, getHeight() - 5));
+    }
+
+    /** 拖过来的照片悬在大图区上时亮边框；松手或移开就灭掉。 */
+    void setTrashHint(boolean on) {
+        if (trashHint != on) {
+            trashHint = on;
+            repaint();
+        }
+    }
+
+    /** 眼下是不是正亮着"垃圾桶"框。给测试用。 */
+    boolean isTrashHintForTest() {
+        return trashHint;
     }
 
     private void paintHeader(Graphics2D g) {

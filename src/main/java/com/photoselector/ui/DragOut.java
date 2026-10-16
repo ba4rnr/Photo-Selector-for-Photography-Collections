@@ -13,6 +13,7 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -50,22 +51,26 @@ final class DragOut {
     /**
      * 让某个组件可以往外拖照片。
      *
-     * @param source    从哪个组件拖
-     * @param photo     拖的是哪一张（松手时才问，避免拖动过程中照片已经换了）
-     * @param ghost     跟着鼠标走的那张图：**按正在拖的那张照片**现取，
-     *                  拿不到就返回 null（退化成一个小方块）。
-     *                  参数是照片而不是"当前选中的那张"——从展开排序模式拖时，
-     *                  两块面板的"选中"可能不是同一张，按参数取才不会张冠李戴。
-     * @param enabled   现在允不允许往外拖（大图那边由"选择 / 平移"工具决定）
-     * @param onDropped 落在目标面板上时回调，第二个参数是"插在第几项之前"
+     * @param source      从哪个组件拖
+     * @param ghost       跟着鼠标走的那张图：**按正在拖的那张照片**现取，
+     *                    拿不到就返回 null（退化成一个小方块）。
+     *                    参数是照片而不是"当前选中的那张"——从展开排序模式拖时，
+     *                    两块面板的"选中"可能不是同一张，按参数取才不会张冠李戴。
+     * @param enabled     现在允不允许往外拖（大图那边由"选择 / 平移"工具决定）
+     * @param onDropped   落在目标面板上时回调，第二个参数是"插在第几项之前"
+     * @param onTrashed   落在主大图区上时回调（选图模式：拖到那儿＝丢垃圾桶）；
+     *                    不需要这个落点就传 null
+     * @param trashTarget 那个"垃圾桶"大图面板——悬上去时要给它亮边框。
+     *                    不认这个落点时传 null
      */
-    static void install(JComponent source, Supplier<Path> photo,
-                        Function<Path, BufferedImage> ghost,
-                        BooleanSupplier enabled, BiConsumer<Path, Integer> onDropped) {
+    static void install(JComponent source, Supplier<Path> photo, Function<Path, BufferedImage> ghost,
+                        BooleanSupplier enabled, BiConsumer<Path, Integer> onDropped,
+                        Consumer<Path> onTrashed, ViewerPanel trashTarget) {
         MouseAdapter handler = new MouseAdapter() {
 
             private Point pressedAt;
-            private TargetPanel hinted;
+            private TargetPanel hintedPanel;
+            private boolean hintedTrash;
 
             @Override
             public void mousePressed(MouseEvent e) {
@@ -81,8 +86,8 @@ final class DragOut {
                 if (dragging == null) {
                     return;
                 }
-                TargetPanel target = targetPanelAt(source, e.getPoint());
-                showHint(target, e.getPoint());
+                Point at = e.getPoint();
+                showHint(resolveDropSink(source, at, onTrashed != null), at);
                 showGhost(source, e.getPoint(), ghost.apply(dragging));
             }
 
@@ -91,34 +96,57 @@ final class DragOut {
                 Point start = pressedAt;
                 pressedAt = null;
                 hideGhost(source);
-                TargetPanel target = targetPanelAt(source, e.getPoint());
-                int index = target == null ? -1 : target.dropIndexAt(toTargetPoint(target, e.getPoint()));
+                Point at = e.getPoint();
+                DropSink sink = resolveDropSink(source, at, onTrashed != null);
+                int index = sink.kind() == DropKind.PANEL
+                        ? sink.panel().dropIndexAt(toTargetPoint(sink.panel(), at))
+                        : -1;
                 clearHint();
                 if (start == null || !SwingUtilities.isLeftMouseButton(e)
                         || e.getPoint().distance(start) <= THRESHOLD || !enabled.getAsBoolean()) {
                     return;
                 }
                 Path dragged = photo.get();
-                if (dragged != null && index >= 0) {
+                if (dragged == null) {
+                    return;
+                }
+                if (sink.kind() == DropKind.PANEL && index >= 0) {
                     onDropped.accept(dragged, index);
+                } else if (sink.kind() == DropKind.TRASH) {
+                    onTrashed.accept(dragged);
                 }
             }
 
-            /** 白线只画在当前悬停的那块面板上，换目标就把上一块擦掉。 */
-            private void showHint(TargetPanel target, Point pointInSource) {
-                if (hinted != null && hinted != target) {
-                    hinted.clearDropHint();
+            /** 落点提示只画在当前悬停的那个落点上，换目标就把上一处擦掉。 */
+            private void showHint(DropSink sink, Point pointInSource) {
+                TargetPanel panel = sink.kind() == DropKind.PANEL ? sink.panel() : null;
+                if (hintedPanel != null && hintedPanel != panel) {
+                    hintedPanel.clearDropHint();
                 }
-                hinted = target;
-                if (target != null) {
-                    target.setDropHint(target.dropIndexAt(toTargetPoint(target, pointInSource)));
+                hintedPanel = panel;
+                if (panel != null) {
+                    panel.setDropHint(panel.dropIndexAt(toTargetPoint(panel, pointInSource)));
+                }
+
+                boolean trash = sink.kind() == DropKind.TRASH;
+                if (trash != hintedTrash) {
+                    hintedTrash = trash;
+                    if (trashTarget != null) {
+                        trashTarget.setTrashHint(trash);
+                    }
                 }
             }
 
             private void clearHint() {
-                if (hinted != null) {
-                    hinted.clearDropHint();
-                    hinted = null;
+                if (hintedPanel != null) {
+                    hintedPanel.clearDropHint();
+                    hintedPanel = null;
+                }
+                if (hintedTrash) {
+                    hintedTrash = false;
+                    if (trashTarget != null) {
+                        trashTarget.setTrashHint(false);
+                    }
                 }
             }
 
@@ -288,6 +316,62 @@ final class DragOut {
     }
 
     // ─────────────────────────── 落点判断 ───────────────────────────
+
+    /** 拖动松手时能落在哪一类地方。 */
+    private enum DropKind { NONE, PANEL, TRASH }
+
+    /** 解析出来的落点：目标面板，或者主大图区（＝垃圾桶）。 */
+    private record DropSink(DropKind kind, TargetPanel panel) {
+
+        static final DropSink NONE = new DropSink(DropKind.NONE, null);
+
+        static DropSink of(TargetPanel panel) {
+            return panel == null ? NONE : new DropSink(DropKind.PANEL, panel);
+        }
+
+        static final DropSink TRASH = new DropSink(DropKind.TRASH, null);
+    }
+
+    /**
+     * 松手那一点落在哪儿。
+     *
+     * <p>两类落点：目标文件夹面板（白线标插到哪个缝），以及**主大图区**——
+     * 选图模式下从目标栏把照片拖到那里，意思是"这张不要了"，丢进垃圾桶
+     * （垃圾桶只记指针，保存时才真删；关程序不保存就全当没发生）。
+     *
+     * @param withTrash 这次拖动认不认"大图区＝垃圾桶"这个落点。
+     *                  从素材条拖过来的照片本来就不在目标序列里，没有可扔的，
+     *                  所以那种情况不认，免得误伤。
+     */
+    private static DropSink resolveDropSink(JComponent source, Point pointInSource,
+                                            boolean withTrash) {
+        JRootPane root = SwingUtilities.getRootPane(source);
+        if (root == null) {
+            return DropSink.NONE;
+        }
+        Point inRoot = toWindow(source, pointInSource, root);
+        Component deepest = SwingUtilities.getDeepestComponentAt(root, inRoot.x, inRoot.y);
+        TargetPanel panel = panelOf(deepest);
+        if (panel != null) {
+            return DropSink.of(panel);
+        }
+        return withTrash && viewerOf(deepest) != null ? DropSink.TRASH : DropSink.NONE;
+    }
+
+    /** 从某个组件往上找，看它是不是（或包在）主大图区里。 */
+    private static ViewerPanel viewerOf(Component component) {
+        for (Component current = component; current != null; current = current.getParent()) {
+            if (current instanceof ViewerPanel viewer) {
+                return viewer;
+            }
+        }
+        return null;
+    }
+
+    /** 从某个组件往上找，看它是不是（或包在）主大图区里。给测试用。 */
+    static ViewerPanel viewerOfForTest(Component component) {
+        return viewerOf(component);
+    }
 
     /** 松手那一点底下是不是目标文件夹面板。 */
     private static TargetPanel targetPanelAt(JComponent source, Point pointInSource) {

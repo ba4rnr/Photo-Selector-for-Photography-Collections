@@ -350,6 +350,49 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 从目标栏拖到主大图区_照片进垃圾桶() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            TargetPanel target = window.panel.targetPanelForTest();
+            ViewerPanel viewer = window.panel.viewerForTest();
+            assertEquals(2, target.entryCount(), "目标文件夹里原有两张");
+            Path dragged = target.session().entryAt(0).source();
+
+            Point onFirstCell = new Point(target.cellXForTest(0) + 20,
+                    target.rowHeightForTest() / 2);
+            // 大图区在中间：挑它靠中间的一点，别贴着别的面板
+            Point onViewer = new Point(viewer.getWidth() / 2, viewer.getHeight() / 2);
+            Point overViewer = convertLocal(viewer, onViewer, target);
+            SwingUtilities.invokeAndWait(() -> {
+                press(target, onFirstCell);
+                drag(target, new Point(onFirstCell.x + 12, onFirstCell.y));
+                drag(target, overViewer);
+            });
+
+            // 悬在大图区上时，整块大图区要亮一圈，示意"松手就扔"
+            assertTrue(viewer.isTrashHintForTest(), "悬在大图区上时该亮出垃圾桶提示");
+
+            SwingUtilities.invokeAndWait(() -> release(target, overViewer));
+
+            assertEquals(1, target.entryCount(), "照片应当从目标序列里消失");
+            assertFalse(target.session().entries().stream()
+                            .anyMatch(e -> e.source().equals(dragged)),
+                    "被扔的那张不在目标序列里了");
+            assertEquals(1, target.session().trash().size(),
+                    "垃圾桶里应当记下这一个指针");
+            assertEquals(dragged, target.session().trash().items().get(0).entry().source(),
+                    "垃圾桶里记的就是被扔的那张");
+            assertFalse(viewer.isTrashHintForTest(), "松手之后提示要收起来");
+            // 只动了中间商，磁盘上什么都没动
+            assertTrue(Files.isRegularFile(dragged), "选不保存之前，文件还在磁盘上");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 目标文件夹里的照片可以拖着换位置() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();

@@ -203,18 +203,19 @@ public final class MainPanel extends JPanel {
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
         DragOut.install(filmstrip, filmstrip::currentPhoto, filmstrip::thumbnailOf,
-                () -> true, this::addToTargetAt);
+                () -> true, this::addToTargetAt, null, null);
         // 拖动是"拖照片"还是"搬画面"，由工具栏上的选择 / 平移工具决定
         DragOut.install(viewer, viewer::photo, viewer::ghostThumbnail,
-                viewer::isDragOutEnabled, this::addToTargetAt);
+                viewer::isDragOutEnabled, this::addToTargetAt, null, null);
 
         // 目标文件夹里的照片也能拖：往旁边一放就是重排顺序（白线照旧标落点）。
         // 这两块是"同一个序列的两个视图"（选图模式的窄栏、展开排序模式的大网格），
         // 拖哪一块都是改同一个中间商的顺序。
+        // 另外：选图模式下拖到中间的大图区 = 丢垃圾桶（只记指针，保存时才真删）。
         DragOut.install(targetPanel, targetPanel::selectedPhoto, this::thumbnailOfTargetPhoto,
-                () -> true, this::reorder);
+                () -> true, this::reorder, this::dropOnViewer, viewer);
         DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::thumbnailOfTargetPhoto,
-                () -> true, this::reorder);
+                () -> true, this::reorder, this::dropOnViewer, viewer);
         toolBar.setOnToolChanged(viewer::setCursorTool);
 
         buildAreas();
@@ -518,6 +519,26 @@ public final class MainPanel extends JPanel {
         // 照片挪了位置，"选中"要跟着挪，否则高亮会指着另一张（编号也跟着对不上）
         targetPanel.moveSelectionTo(to);
         arrangePanel.moveSelectionTo(to);
+        targetPanel.refresh();
+        arrangePanel.refresh();
+    }
+
+    /**
+     * 把目标序列里的一张照片丢进垃圾桶——选图模式下"从目标栏拖到中间大图区"走这里。
+     *
+     * <p>只是把它从序列里摘出来、在垃圾桶里记一个指针；磁盘上什么都没动。
+     * 保存时那些真实文件才会被删掉；关程序时选"不保存"就等于全没发生。
+     */
+    private void dropOnViewer(Path photo) {
+        Session session = targetPanel.session();
+        if (session == null || saving) {
+            return;
+        }
+        int index = session.indexOf(photo);
+        if (index < 0) {
+            return; // 不在目标序列里，没什么可扔的
+        }
+        session.trash(index);
         targetPanel.refresh();
         arrangePanel.refresh();
     }
