@@ -25,6 +25,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.io.PhotoFiles;
+import com.photoselector.io.Saver;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
 import com.photoselector.core.NumberingRule;
@@ -79,6 +80,9 @@ public final class MainPanel extends JPanel {
 
     /** 工作区变化时的回调（用来写回配置文件）。 */
     private Consumer<Workspace> onWorkspaceChanged = updated -> { };
+
+    /** 保存结束后的回调（外部负责把结果告诉用户）。 */
+    private Consumer<Saver.Result> onSaveFinished = result -> { };
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -230,6 +234,11 @@ public final class MainPanel extends JPanel {
         this.onFolderOpened = listener == null ? (folder, count) -> { } : listener;
     }
 
+    /** 设置右栏目标文件夹里缩略图的大小（「查看 → 缩略图大小」用）。 */
+    public void setTargetThumbnailWidth(int width) {
+        targetPanel.setThumbnailWidth(width);
+    }
+
     /** 工作区变化时通知外部（外部负责写回配置文件）。 */
     public void setOnWorkspaceChanged(Consumer<Workspace> listener) {
         this.onWorkspaceChanged = listener == null ? updated -> { } : listener;
@@ -302,6 +311,42 @@ public final class MainPanel extends JPanel {
     }
 
     /**
+     * 保存：把中间商里的改动一次性落到磁盘。
+     *
+     * <p>文件操作可能很慢（复制几十张就是几十次磁盘写入），所以丢给后台线程池，
+     * 做完回到界面线程：先按磁盘上的真实结果重建中间商（顺序不变、撤销记录清空），
+     * 再把结果交给外部去告诉用户。
+     */
+    public void save() {
+        Session session = targetPanel.session();
+        if (session == null) {
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
+                    List.of("还没有选目标文件夹，没有可以保存的改动。")));
+            return;
+        }
+        if (session.isEmpty()) {
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
+                    List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
+            return;
+        }
+
+        scanPool.submit(() -> {
+            Saver.Result result = new Saver().save(session);
+            SwingUtilities.invokeLater(() -> {
+                // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
+                session.seedExisting(result.finalOrder());
+                targetPanel.refresh();
+                onSaveFinished.accept(result);
+            });
+        });
+    }
+
+    /** 保存结束后的回调（外部负责把结果告诉用户）。 */
+    public void setOnSaveFinished(Consumer<Saver.Result> listener) {
+        this.onSaveFinished = listener == null ? result -> { } : listener;
+    }
+
+    /**
      * 键盘快捷键。
      *
      * <p>挂在 {@code WHEN_IN_FOCUSED_WINDOW} 上，所以不管焦点在素材条还是目录树上都管用。
@@ -336,6 +381,11 @@ public final class MainPanel extends JPanel {
     /** 素材条，给测试用。 */
     FilmstripPanel filmstripForTest() {
         return filmstrip;
+    }
+
+    /** 工具栏，给主窗口挂"重新选择工作区"和"保存"两个按钮用。 */
+    ToolBarPanel toolBar() {
+        return toolBar;
     }
 
     /** 目标文件夹面板，给测试用。 */

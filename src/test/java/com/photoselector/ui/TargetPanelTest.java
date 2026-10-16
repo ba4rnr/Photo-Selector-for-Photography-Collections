@@ -1,6 +1,7 @@
 package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.event.ActionEvent;
@@ -129,15 +130,41 @@ class TargetPanelTest {
         assertTrue(targetPanel.getPreferredSize().height > 300,
                 "内容比视口高，应当出现垂直滚动条");
 
-        // 先只看得见前几行，把它们取到手
+        Path lastPhoto = existing.get(existing.size() - 1);
+        // 先只看得见前几行
         waitUntil(() -> targetPanel.loadedCount() >= 2, "首屏缩略图");
-        int before = targetPanel.loadedCount();
+        assertFalse(targetPanel.isLoaded(lastPhoto), "最后一张在首屏之外，这会儿还不该取到");
 
         // 滚到底部，新露出来的格子也要去取图
         SwingUtilities.invokeAndWait(() -> scroll.getViewport().setViewPosition(
                 new java.awt.Point(0, Math.max(0, targetPanel.getPreferredSize().height))));
-        waitUntil(() -> targetPanel.loadedCount() > before, "滚动之后新露出来的格子");
+        // 注意：不能用"张数变多"来判断——滚远之后看不见的那些会被从手里丢掉，
+        // 所以总数可能是平的。直接看最后一行那一张有没有到位。
+        waitUntil(() -> targetPanel.isLoaded(lastPhoto), "滚到底部之后最后一行也取到图");
 
+        loader.shutdown();
+    }
+
+    @Test
+    void 拉宽面板时缩略图尺寸不变_变的是间距() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+
+        SwingUtilities.invokeAndWait(() -> panel.setSize(360, 500));
+        int widthBefore = panel.thumbnailWidth();
+        int columnsBefore = panel.columnsForTest();
+        int spacingBefore = panel.extraSpaceForTest();
+
+        SwingUtilities.invokeAndWait(() -> panel.setSize(760, 500));
+        assertEquals(widthBefore, panel.thumbnailWidth(), "缩略图尺寸不该跟着面板宽度变");
+        assertTrue(panel.columnsForTest() > columnsBefore, "变宽之后应当能多排几列");
+        assertTrue(panel.extraSpaceForTest() > spacingBefore, "多出来的宽度应当分给间距");
+
+        // 尺寸本身由"查看 → 缩略图大小"改
+        SwingUtilities.invokeAndWait(() -> panel.setThumbnailWidth(210));
+        assertEquals(210, panel.thumbnailWidth());
+        assertTrue(panel.columnsForTest() < 4, "调大之后一列放不下那么多了");
         loader.shutdown();
     }
 

@@ -41,11 +41,11 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial")
 final class TargetPanel extends JPanel {
 
-    /** 四周留白。 */
+    /** 四周留白的最小值；有多余宽度时会一起变宽。 */
     private static final int PADDING = 12;
 
-    /** 格子之间、行之间的间隔。 */
-    private static final int GAP = 10;
+    /** 格子之间、行之间的最小间隔；有多余宽度时横向间隔会一起变宽。 */
+    private static final int GAP = 8;
 
     /** 表头（目标文件夹路径 + 张数）占的高度。 */
     private static final int HEADER_HEIGHT = 26;
@@ -53,23 +53,21 @@ final class TargetPanel extends JPanel {
     /** 名字那一行占的高度。 */
     private static final int CAPTION_HEIGHT = 18;
 
-    /**
-     * 排几列时参考的理想格子宽度；实际宽度按可用空间均分。
-     *
-     * <p>这个数只影响"分成几列"：右栏默认 360 宽，可用 336，
-     * 取 150 正好两列、每格 163 —— 比原来写死 132 大了一圈，右侧也不留空。
-     */
-    private static final int WANTED_BOX_WIDTH = 150;
+    /** 缩略图的默认宽度（"查看 → 缩略图大小"里可以改）。 */
+    private static final int DEFAULT_BOX_WIDTH = 150;
 
     private final ThumbnailLoader loader;
     private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
 
     private Session session;
 
+    /** 缩略图宽度由"查看 → 缩略图大小"决定，不随面板宽度变化。 */
+    private int boxWidth = DEFAULT_BOX_WIDTH;
+
     // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
-    private int boxWidth = WANTED_BOX_WIDTH;
-    private int thumbnailHeight = Math.round(WANTED_BOX_WIDTH / 1.5f);
+    private int extraSpace;
+    private int thumbnailHeight = Math.round(DEFAULT_BOX_WIDTH / 1.5f);
 
     TargetPanel(ThumbnailLoader loader) {
         this.loader = loader;
@@ -116,9 +114,45 @@ final class TargetPanel extends JPanel {
         return thumbnails.size();
     }
 
+    /** 某一张的缩略图在不在手里。测试用。 */
+    boolean isLoaded(Path photo) {
+        return thumbnails.containsKey(photo);
+    }
+
     /** 第 index 条将来在磁盘上叫什么名字。测试用。 */
     String nameAt(int index) {
         return session == null ? null : session.nameAt(index);
+    }
+
+    /**
+     * 改缩略图大小（"查看 → 缩略图大小"里选）。
+     *
+     * <p>尺寸一变，手里那些缩略图就不合用了——先清空再重新取。
+     * 缩略图服务的缓存键里带着高度，所以换尺寸不会和旧的那批打架。
+     */
+    void setThumbnailWidth(int width) {
+        this.boxWidth = Math.max(60, width);
+        thumbnails.clear();
+        updateMetrics();
+        updatePreferredSize();
+        repaint();
+        SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+    }
+
+    int thumbnailWidth() {
+        return boxWidth;
+    }
+
+    /** 一行排几列。测试用。 */
+    int columnsForTest() {
+        updateMetrics();
+        return columns;
+    }
+
+    /** 每处间隔分到的多余宽度。测试用。 */
+    int extraSpaceForTest() {
+        updateMetrics();
+        return extraSpace;
     }
 
     /**
@@ -149,16 +183,23 @@ final class TargetPanel extends JPanel {
     // ─────────────────────────── 尺寸计算 ───────────────────────────
 
     /**
-     * 按当前宽度决定排几列、每格多宽。
+     * 按当前宽度算排几列、以及多余的宽度怎么分。
      *
-     * <p>先定列数，再把可用宽度<b>均分</b>给这些列——这样右边不会剩一条空白，
-     * 也不会因为写死了格子宽度而在窄栏里挤成一团。
+     * <p>缩略图尺寸是固定的（由"查看 → 缩略图大小"定），宽度变化时变的是<b>间距</b>：
+     * 先把能放下的列数定下来，剩下的宽度平均分给每条间隔和左右留白。
+     * 这样拖动左边框看到的是"照片之间松了/紧了"，而不是照片忽大忽小。
      */
     private void updateMetrics() {
-        int available = Math.max(40, getWidth() - PADDING * 2);
-        columns = Math.max(1, (available + GAP) / (WANTED_BOX_WIDTH + GAP));
-        boxWidth = Math.max(24, (available - (columns - 1) * GAP) / columns);
         thumbnailHeight = Math.max(16, Math.round(boxWidth / 1.5f));
+        int available = Math.max(40, getWidth() - PADDING * 2);
+        columns = Math.max(1, (available + GAP) / (boxWidth + GAP));
+        int used = columns * boxWidth + (columns - 1) * GAP;
+        extraSpace = Math.max(0, (available - used) / (columns + 1));
+    }
+
+    /** 第 column 列的左边缘：留白、间隔都加上分到的那份多余宽度。 */
+    private int cellX(int column) {
+        return PADDING + extraSpace + column * (boxWidth + GAP + extraSpace);
     }
 
     private int rowHeight() {
@@ -225,8 +266,7 @@ final class TargetPanel extends JPanel {
                 if (index >= session.size()) {
                     return;
                 }
-                paintCell(g, index, PADDING + column * (boxWidth + GAP),
-                        HEADER_HEIGHT + row * rowHeight());
+                paintCell(g, index, cellX(column), HEADER_HEIGHT + row * rowHeight());
             }
         }
     }

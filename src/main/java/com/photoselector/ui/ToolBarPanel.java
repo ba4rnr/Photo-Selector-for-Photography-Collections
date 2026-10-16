@@ -28,14 +28,18 @@ final class ToolBarPanel extends JPanel {
     /** 最右边的模式切换按钮。 */
     private final ToolButton modeButton = new ToolButton("整理模式", Icons.layout());
 
+    /** 左组那两个要接实际功能的按钮。 */
+    private final ToolButton chooseWorkspaceButton = new ToolButton("重新选择工作区", Icons.folder());
+    private final ToolButton saveButton = new ToolButton("保存", Icons.save());
+
     ToolBarPanel() {
         super(new FlowLayout(FlowLayout.LEFT, 4, 5));
         setBackground(Theme.PANEL);
         setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
 
         // 左组 · 文件与历史
-        add(new ToolButton("重新选择工作区", Icons.folder()));
-        add(new ToolButton("保存", Icons.save()));
+        add(chooseWorkspaceButton);
+        add(saveButton);
         add(new ToolButton("重置", Icons.reset()));
         add(new ToolButton("撤销", Icons.undo()));
         add(new ToolButton("重做", Icons.redo()));
@@ -64,6 +68,16 @@ final class ToolBarPanel extends JPanel {
     /** 供主面板挂监听：点一下就切换视图模式。 */
     ToolButton modeButton() {
         return modeButton;
+    }
+
+    /** 供外部挂监听：重新选择工作区。 */
+    ToolButton chooseWorkspaceButton() {
+        return chooseWorkspaceButton;
+    }
+
+    /** 供外部挂监听：保存。 */
+    ToolButton saveButton() {
+        return saveButton;
     }
 
     /** 切换模式后，更新按钮上的文字，让它显示"点了会去哪"。 */

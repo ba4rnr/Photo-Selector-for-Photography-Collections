@@ -6,18 +6,21 @@ import java.awt.event.KeyEvent;
 import java.nio.file.Path;
 
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
 import com.photoselector.ui.theme.Theme;
 import com.photoselector.core.Workspace;
 import com.photoselector.io.WorkspaceStore;
+import com.photoselector.io.Saver;
 
 /**
  * 主窗口：菜单栏 + {@link MainPanel}。
@@ -37,6 +40,11 @@ public final class MainFrame extends JFrame {
         setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, this::dispose));
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
+        mainPanel.setOnSaveFinished(this::saveFinished);
+
+        // 工具栏左组那两个按钮：和菜单里对应的项走同一条路
+        mainPanel.toolBar().chooseWorkspaceButton().addActionListener(e -> chooseWorkspace());
+        mainPanel.toolBar().saveButton().addActionListener(e -> mainPanel.save());
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
@@ -64,7 +72,10 @@ public final class MainFrame extends JFrame {
         chooseWorkspace.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
         chooseWorkspace.addActionListener(e -> openFolderAction.run());
         file.add(chooseWorkspace);
-        file.add(pending("保存", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK)));
+        JMenuItem save = new JMenuItem("保存");
+        save.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
+        save.addActionListener(e -> mainPanel.save());
+        file.add(save);
         file.addSeparator();
         JMenuItem quit = new JMenuItem("退出");
         quit.addActionListener(e -> {
@@ -90,6 +101,8 @@ public final class MainFrame extends JFrame {
         arrange.addActionListener(e -> mainPanel.setMode(ViewMode.ARRANGE));
         view.add(browse);
         view.add(arrange);
+        view.addSeparator();
+        view.add(thumbnailSizeMenu(mainPanel));
 
         bar.add(file);
         bar.add(edit);
@@ -115,6 +128,17 @@ public final class MainFrame extends JFrame {
                 "工作区", JOptionPane.WARNING_MESSAGE);
     }
 
+    /** 保存结束了：把做了什么、以及没做成什么告诉用户。 */
+    private void saveFinished(Saver.Result result) {
+        String text = result.summary();
+        if (result.hasProblems()) {
+            text += "\n\n有 " + result.problems().size() + " 处没能完成：\n· "
+                    + String.join("\n· ", result.problems());
+        }
+        JOptionPane.showMessageDialog(this, text, "保存",
+                result.hasProblems() ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
+    }
+
     /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */
     private void folderOpened(Path folder, int count) {
         if (count < 0) {
@@ -129,6 +153,31 @@ public final class MainFrame extends JFrame {
         JMenu menu = new JMenu(text);
         menu.setForeground(Theme.TEXT);
         return menu;
+    }
+
+    /**
+     * 「查看 → 缩略图大小」：目标文件夹那一栏的缩略图尺寸。
+     *
+     * <p>放在菜单里而不是靠拖分隔条，是因为这两件事分工不同：分隔条决定这块地方有多宽，
+     * 而尺寸是你对"一次能看清多少张"的偏好。宽度变化时变的是间距，照片本身不缩放。
+     */
+    private static JMenu thumbnailSizeMenu(MainPanel mainPanel) {
+        JMenu sizeMenu = menu("缩略图大小");
+        ButtonGroup group = new ButtonGroup();
+        sizeMenu.add(sizeItem(group, mainPanel, "小", 110, false));
+        sizeMenu.add(sizeItem(group, mainPanel, "中", 150, true));
+        sizeMenu.add(sizeItem(group, mainPanel, "大", 210, false));
+        return sizeMenu;
+    }
+
+    private static JRadioButtonMenuItem sizeItem(ButtonGroup group, MainPanel mainPanel,
+                                                 String text, int width, boolean selected) {
+        JRadioButtonMenuItem item = new JRadioButtonMenuItem(text, selected);
+        item.setForeground(Theme.TEXT);
+        item.setBackground(Theme.PANEL);
+        item.addActionListener(e -> mainPanel.setTargetThumbnailWidth(width));
+        group.add(item);
+        return item;
     }
 
     /** 尚未实现的菜单项：先禁用占位。 */
