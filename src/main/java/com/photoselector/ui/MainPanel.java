@@ -4,11 +4,17 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
 
 import javax.swing.JComponent;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 
+import com.photoselector.io.PhotoFiles;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -25,7 +31,14 @@ public final class MainPanel extends JPanel {
     /** 底栏（照片条）的默认高度。 */
     private static final int BOTTOM_HEIGHT = 170;
 
+    /** 素材条里缩略图的高度。 */
+    private static final int FILMSTRIP_THUMBNAIL_HEIGHT = 120;
+
     private final ToolBarPanel toolBar = new ToolBarPanel();
+
+    private final ThumbnailService thumbnailService = new ThumbnailService(ThumbnailService.defaultCacheDir());
+    private final ThumbnailLoader thumbnailLoader = new ThumbnailLoader(thumbnailService);
+    private final FilmstripPanel filmstrip = new FilmstripPanel(thumbnailLoader);
 
     private final CardLayout centerCards = new CardLayout();
     private final JPanel centerArea = new JPanel(centerCards);
@@ -101,9 +114,37 @@ public final class MainPanel extends JPanel {
         rightArea.add(placeholder("目标文件夹", 360, 400, Theme.PANEL), ViewMode.BROWSE.name());
         rightArea.add(placeholder("垃圾桶", 360, 400, Theme.PANEL), ViewMode.ARRANGE.name());
 
-        bottomArea.add(placeholder("素材照片 · 按子文件夹分组，每组可收起", 100, 170, Theme.PANEL),
-                ViewMode.BROWSE.name());
+        bottomArea.add(createFilmstripScrollPane(), ViewMode.BROWSE.name());
         bottomArea.add(placeholder("目标文件夹的照片", 100, 170, Theme.PANEL), ViewMode.ARRANGE.name());
+    }
+
+    /** 把自绘的素材条装进滚动条里。滚动时通知它重算该取哪些缩略图。 */
+    private JScrollPane createFilmstripScrollPane() {
+        JScrollPane scroll = new JScrollPane(filmstrip,
+                JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.setBorder(null);
+        scroll.getViewport().setBackground(Theme.PANEL);
+        scroll.getHorizontalScrollBar().setUnitIncrement(40); // 滚一格别只挪几个像素
+        scroll.getViewport().addChangeListener(e -> filmstrip.requestVisibleThumbnails());
+        scroll.setPreferredSize(new Dimension(100, BOTTOM_HEIGHT));
+        return scroll;
+    }
+
+    /**
+     * 打开一个素材文件夹，把里面的照片放进底部素材条。
+     *
+     * @return 这个文件夹里有多少张能读的照片
+     */
+    public int showFolder(Path folder) throws IOException {
+        List<Path> photos = PhotoFiles.imagesIn(folder);
+        filmstrip.setPhotos(photos, FILMSTRIP_THUMBNAIL_HEIGHT);
+        return photos.size();
+    }
+
+    /** 关窗口时收掉后台取图的线程池。 */
+    public void shutdown() {
+        thumbnailLoader.shutdown();
     }
 
     private JComponent leftColumn() {

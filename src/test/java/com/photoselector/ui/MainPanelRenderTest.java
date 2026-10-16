@@ -89,7 +89,7 @@ class MainPanelRenderTest {
         // 与主截图用同一套搭法，保证这里看到的布局和真实窗口一致
         MainPanel mainPanel = new MainPanel();
         JPanel screen = new JPanel(new BorderLayout());
-        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }), BorderLayout.NORTH);
+        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
         screen.add(mainPanel, BorderLayout.CENTER);
         screen.setSize(WIDTH, HEIGHT);
         layoutTree(screen);
@@ -241,7 +241,7 @@ class MainPanelRenderTest {
 
         // 菜单栏平时挂在窗口上，这里和主内容拼进同一个容器，好一起画下来
         JPanel screen = new JPanel(new BorderLayout());
-        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }), BorderLayout.NORTH);
+        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
         screen.add(mainPanel, BorderLayout.CENTER);
         screen.setSize(WIDTH, HEIGHT);
         layoutTree(screen);

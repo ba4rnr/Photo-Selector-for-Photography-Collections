@@ -2,6 +2,7 @@ package com.photoselector.io;
 
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
+import java.util.Locale;
 
 /**
  * 一张照片的内容来源。
@@ -42,10 +43,15 @@ public interface ImageSource {
      * 调用方（缩略图服务、界面）都不用动。
      */
     static ImageSource open(Path file) {
-        String name = file.getFileName().toString().toLowerCase();
-        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+        if (isSupported(file)) {
             return new JpegImageSource(file);
         }
         throw new UnsupportedOperationException("暂时只支持 JPG，还不认识：" + file.getFileName());
+    }
+
+    /** 这个文件是不是我们读得了的格式。判断只此一处，别处都从这里问。 */
+    static boolean isSupported(Path file) {
+        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".jpg") || name.endsWith(".jpeg");
     }
 }

@@ -22,6 +22,8 @@ import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.photoselector.testing.TestImages;
+
 class ThumbnailServiceTest {
 
     @TempDir

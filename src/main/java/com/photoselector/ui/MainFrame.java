@@ -3,12 +3,16 @@ package com.photoselector.ui;
 import java.awt.Dimension;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.IOException;
+import java.nio.file.Path;
 
 import javax.swing.BorderFactory;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.KeyStroke;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
@@ -27,7 +31,7 @@ public final class MainFrame extends JFrame {
 
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setContentPane(mainPanel);
-        setJMenuBar(createMenuBar(mainPanel, this::dispose));
+        setJMenuBar(createMenuBar(mainPanel, this::chooseFolder, this::dispose));
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
@@ -42,7 +46,7 @@ public final class MainFrame extends JFrame {
      *
      * <p>写成 static 是方便测试把菜单栏单独拿去渲染，不必真的开一个窗口。
      */
-    static JMenuBar createMenuBar(MainPanel mainPanel, Runnable quitAction) {
+    static JMenuBar createMenuBar(MainPanel mainPanel, Runnable openFolderAction, Runnable quitAction) {
         JMenuBar bar = new JMenuBar();
         // Metal 的菜单栏默认会画一道渐变，换成基础实现后它就老老实实只填背景色
         bar.setUI(new BasicMenuBarUI());
@@ -51,11 +55,17 @@ public final class MainFrame extends JFrame {
         bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
 
         JMenu file = menu("文件");
-        file.add(pending("选择工作区…"));
+        JMenuItem openFolder = new JMenuItem("打开素材文件夹…");
+        openFolder.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK));
+        openFolder.addActionListener(e -> openFolderAction.run());
+        file.add(openFolder);
         file.add(pending("保存", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK)));
         file.addSeparator();
         JMenuItem quit = new JMenuItem("退出");
-        quit.addActionListener(e -> quitAction.run());
+        quit.addActionListener(e -> {
+            mainPanel.shutdown();
+            quitAction.run();
+        });
         file.add(quit);
 
         JMenu edit = menu("编辑");
@@ -81,6 +91,30 @@ public final class MainFrame extends JFrame {
         bar.add(image);
         bar.add(view);
         return bar;
+    }
+
+    /**
+     * 让用户挑一个素材文件夹，然后把里面的照片放进底部素材条。
+     *
+     * <p>这是"选择工作区"的临时入口：完整的那个还要选剔除哪些子文件夹、
+     * 选目标文件夹，并记住上次的选择，等那一块做好会把它替换掉。
+     */
+    private void chooseFolder() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("选择素材文件夹");
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        Path folder = chooser.getSelectedFile().toPath();
+        try {
+            int count = mainPanel.showFolder(folder);
+            setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "读不了这个文件夹：\n" + e.getMessage(),
+                    "打开失败", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private static JMenu menu(String text) {

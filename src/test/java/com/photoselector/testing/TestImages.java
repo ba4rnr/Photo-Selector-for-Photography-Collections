@@ -1,4 +1,4 @@
-package com.photoselector.io;
+package com.photoselector.testing;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -9,13 +9,17 @@ import java.util.Locale;
 
 import javax.imageio.ImageIO;
 
-/** 测试用的假照片：造一张颜色和形状都固定、尺寸可控的 JPG。 */
-final class TestImages {
+/**
+ * 测试用的假照片：造一张颜色和形状都固定、尺寸可控的 JPG。
+ *
+ * <p>放在公共的 testing 包里，是为了让 io 和 ui 两个包的测试都能用。
+ */
+public final class TestImages {
 
     private TestImages() {
     }
 
-    static Path writeJpeg(Path file, int width, int height) throws IOException {
+    public static Path writeJpeg(Path file, int width, int height) throws IOException {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         g.setColor(new Color(0xFF8B16));
@@ -27,7 +31,7 @@ final class TestImages {
         return file;
     }
 
-    static boolean looksLikeJpeg(Path path) {
+    public static boolean looksLikeJpeg(Path path) {
         String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
         return name.endsWith(".jpg") || name.endsWith(".jpeg");
     }
