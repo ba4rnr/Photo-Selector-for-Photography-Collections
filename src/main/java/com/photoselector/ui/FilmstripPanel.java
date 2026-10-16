@@ -4,6 +4,7 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
@@ -27,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
+import javax.swing.JViewport;
 
 import com.photoselector.core.PhotoGroup;
 import com.photoselector.ui.theme.Theme;
@@ -110,6 +112,7 @@ final class FilmstripPanel extends JPanel {
         this.loader = loader;
         setBackground(Theme.PANEL);
         setOpaque(true);
+        setFocusable(true); // 点照片时要把键盘焦点接过来，方向键过片才不会被目录树截走
 
         addComponentListener(new ComponentAdapter() {
             @Override
@@ -147,16 +150,42 @@ final class FilmstripPanel extends JPanel {
 
     /** 把某一组滚到视野里。目录树里点文件夹时用。 */
     void scrollToGroup(Path folder) {
-        for (GroupBox box : computeLayout()) {
-            if (groups.get(box.index()).folder().equals(folder)) {
-                scrollRectToVisible(new Rectangle(box.x(), 0, 1, 1));
-                return;
-            }
+        if (!(getParent() instanceof JViewport viewport)) {
+            return; // 还没挂到滚动面板上（离屏渲染），没有可滚的东西
         }
+        // 滚到这一组的左边缘，而不是"刚好看得见"——在目录树里选一个文件夹，
+        // 意思是"从这一组的开头看起"，所以它必须停在最左边
+        SwingUtilities.invokeLater(() -> {
+            for (GroupBox box : computeLayout()) {
+                if (groups.get(box.index()).folder().equals(folder)) {
+                    Point position = viewport.getViewPosition();
+                    viewport.setViewPosition(new Point(box.x(), position.y));
+                    return;
+                }
+            }
+        });
+    }
+
+    /** 当前视口滚到哪了。给测试用。 */
+    int viewPositionXForTest() {
+        if (getParent() instanceof JViewport viewport) {
+            return viewport.getViewPosition().x;
+        }
+        return -1;
     }
 
     int groupCount() {
         return groups.size();
+    }
+
+    /** 某个文件夹是第几组；不在里面返回 -1。给测试用。 */
+    int groupFolderIndexForTest(Path folder) {
+        for (int i = 0; i < groups.size(); i++) {
+            if (groups.get(i).folder().equals(folder)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     int photoCount() {
@@ -366,6 +395,12 @@ final class FilmstripPanel extends JPanel {
                 PhotoGroup group = groups.get(box.index());
                 int index = (x - box.x()) / cellWidth;
                 if (index >= 0 && index < group.size()) {
+                    // 把键盘焦点拿到素材条这边来。左右方向键是"过片"，而焦点要是还留在
+                    // 左边的目录树上，方向键会被那棵树吃掉——表现就是"点完照片，
+                    // 方向键还是翻不动"。requestFocusInWindow 让点击顺手把焦点带过来。
+                    // requestFocus 而不是 requestFocusInWindow：点一下就是明确的用户操作，
+                    // 用强一点的那个才能保证焦点真的从目录树那边挪过来
+                    requestFocus();
                     setCurrentPhoto(group.photos().get(index));
                 }
                 return;

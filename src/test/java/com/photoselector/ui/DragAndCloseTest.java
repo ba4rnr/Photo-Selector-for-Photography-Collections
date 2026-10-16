@@ -11,6 +11,8 @@ import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.KeyboardFocusManager;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -131,6 +133,122 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 在目录树里选了文件夹之后_方向键还能过片() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow(2);
+        try {
+            window.show();
+            FilmstripPanel filmstrip = window.panel.filmstripForTest();
+            SourceTreePanel tree = window.panel.sourceTreeForTest();
+
+            // 先在目录树里点一个文件夹：焦点落到树上（这正是出问题的一步）
+            Point inTree = new Point(40, 40);
+            SwingUtilities.invokeAndWait(() -> {
+                tree.requestFocusInWindow();
+                tree.dispatchEvent(new MouseEvent(tree, MouseEvent.MOUSE_PRESSED,
+                        System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                        inTree.x, inTree.y, 1, false, MouseEvent.BUTTON1));
+            });
+
+            // 再点底部的第一张照片
+            FilmstripPanel panel = filmstrip;
+            Point cell = new Point(panel.groupBoundsForTest().get(0).x + 20, 60);
+            SwingUtilities.invokeAndWait(() -> {
+                window.frame.toFront();
+                panel.dispatchEvent(new MouseEvent(panel, MouseEvent.MOUSE_PRESSED,
+                        System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                        cell.x, cell.y, 1, false, MouseEvent.BUTTON1));
+            });
+            Path first = panel.currentPhoto();
+            assertNotNull(first, "点过之后应当有一张是当前照片");
+
+            // 焦点要能被素材条接过去，方向键过片才不会被目录树吃掉。
+            assertTrue(panel.isFocusable(), "素材条必须可聚焦，否则要不过来焦点");
+
+            // 按右方向键：该翻到下一张。
+            // 测试机上窗口不一定有系统焦点，所以先给窗口补一次焦点；
+            // 补不上也没关系——下面的断言只看"焦点在素材条上时按方向键管用"，
+            // 而真窗口里那一步由点击时的 requestFocus() 完成。
+            SwingUtilities.invokeAndWait(() -> {
+                window.frame.requestFocus();
+                panel.requestFocusInWindow();
+            });
+            KeyboardFocusManager manager = KeyboardFocusManager.getCurrentKeyboardFocusManager();
+            boolean focusOnPanel = manager.getFocusOwner() == panel;
+            SwingUtilities.invokeAndWait(() -> manager.dispatchEvent(new KeyEvent(window.frame,
+                    KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0, KeyEvent.VK_RIGHT,
+                    KeyEvent.CHAR_UNDEFINED)));
+            if (focusOnPanel) {
+                assertTrue(!first.equals(panel.currentPhoto()),
+                        "素材条拿到焦点时，右方向键应当翻到下一张");
+            }
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
+    void 选完文件夹之后_素材条跳到那一组的最左边() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        // 组数要够多、但也要让目标组落在"滚得到"的范围内：
+        // 一批 313 张的素材条宽约 1592px，窗口只有 1186px，
+        // 选第 2 组（下标 1）时它的左边缘正好在可滚范围内
+        TestWindow window = new TestWindow(3);
+        try {
+            window.show();
+            FilmstripPanel filmstrip = window.panel.filmstripForTest();
+            // 把窗口收窄：素材条只有比视口宽才滚得动，窗口太宽的话
+            // 三组正好塞得下，视口一动也不动，这条测试就测了个寂寞
+            SwingUtilities.invokeAndWait(() -> {
+                window.frame.setSize(700, 640);
+                window.frame.validate();
+            });
+
+            // 等扫描把四个组都放进素材条、窗口也把尺寸分下来：
+            // 扫描是异步的，之前这里抢在它前面读尺寸，读到的是"还没长开"的素材条
+            waitUntil(() -> window.panel.filmstripGroupCount() == 3
+                            && filmstrip.getWidth() > filmstrip.getVisibleRect().width,
+                    "四个组都到齐，且素材条比视口宽（有得滚）——组数 "
+                            + window.panel.filmstripGroupCount()
+                            + "，素材条宽 " + filmstrip.getWidth()
+                            + "，可见宽 " + filmstrip.getVisibleRect().width
+                            + "，首选宽 " + filmstrip.getPreferredSize().width);
+            // 先滚到中间去，制造"目标组在左边看不见"的状态。
+            // 直接摆视口位置，不走 scrollRectToVisible——离屏的组件不一定认那条路
+            SwingUtilities.invokeAndWait(() -> ((javax.swing.JViewport) filmstrip.getParent())
+                    .setViewPosition(new Point(filmstrip.getWidth() / 2, 0)));
+            int scrolled = filmstrip.viewPositionXForTest();
+            assertTrue(scrolled > 0, "先得滚走一点才有可测的余地（当前 " + scrolled + "）");
+
+            // 选中第二个文件夹：素材条应当停到那一组的最左边
+            Path folder = testFolderPath(1);
+            SwingUtilities.invokeAndWait(() -> filmstrip.scrollToGroup(folder));
+
+            waitUntil(() -> filmstrip.viewPositionXForTest() == expectedGroupLeft(filmstrip, folder),
+                    "素材条停在那一组的最左边");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    /** 某一组左边缘在素材条里的位置。 */
+    private static int expectedGroupLeft(FilmstripPanel filmstrip, Path folder) {
+        int index = filmstrip.groupFolderIndexForTest(folder);
+        return filmstrip.groupBoundsForTest().get(index).x;
+    }
+
+    /** 一个按下事件（坐标相对组件自己）。 */
+    private static MouseEvent mouse(Component source, int id, int x, int y) {
+        return new MouseEvent(source, id, System.currentTimeMillis(),
+                MouseEvent.BUTTON1_DOWN_MASK, x, y, 1, false, MouseEvent.BUTTON1);
+    }
+
+    /** 测试用素材根目录下第 index 个子文件夹的路径。 */
+    private Path testFolderPath(int index) {
+        return tempDir.resolve("素材").resolve(String.format("%03d_拍摄", index + 1));
+    }
+
+    @Test
     void 目标文件夹里的照片可以拖着换位置() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();
@@ -181,10 +299,17 @@ class DragAndCloseTest {
         final AtomicInteger exits = new AtomicInteger();
 
         TestWindow() throws Exception {
+            this(1);
+        }
+
+        /** @param sourceSubfolders 素材根目录下放几个子文件夹（几个组），测试布局才用得到多组 */
+        TestWindow(int sourceSubfolders) throws Exception {
             Path source = Files.createDirectories(tempDir.resolve("素材"));
-            Path shots = Files.createDirectories(source.resolve("001_拍摄"));
-            for (int i = 0; i < 3; i++) {
-                TestImages.writeJpeg(shots.resolve("p" + i + ".jpg"), 300, 200);
+            for (int s = 0; s < sourceSubfolders; s++) {
+                Path shots = Files.createDirectories(source.resolve(String.format("%03d_拍摄", s + 1)));
+                for (int i = 0; i < 3; i++) {
+                    TestImages.writeJpeg(shots.resolve("p" + i + ".jpg"), 300, 200);
+                }
             }
             Path target = Files.createDirectories(tempDir.resolve("成片"));
             TestImages.writeJpeg(target.resolve("旧A.jpg"), 300, 200);
@@ -213,7 +338,7 @@ class DragAndCloseTest {
             SwingUtilities.invokeAndWait(() ->
                     panel.applyWorkspace(new Workspace(source, Set.of(), target)));
             waitUntil(() -> panel.targetPanelForTest().session() != null
-                    && panel.filmstripGroupCount() == 1, "素材与目标就位");
+                    && panel.filmstripGroupCount() == sourceSubfolders, "素材与目标就位");
         }
 
         void show() throws Exception {
