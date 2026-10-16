@@ -8,6 +8,8 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -67,6 +69,15 @@ final class TargetPanel extends JPanel {
     /** 缩略图宽度由"查看 → 缩略图大小"决定，不随面板宽度变化。 */
     private int boxWidth = DEFAULT_BOX_WIDTH;
 
+    /** 表头右侧那个「展开 / 收起」按钮的位置；绘制时算出来，点击时用它做命中判断。 */
+    private Rectangle expandButtonBounds;
+
+    /** 现在是不是展开状态，决定按钮上写"展开"还是"收起"。 */
+    private boolean expanded;
+
+    /** 点「展开 / 收起」时通知外部去切换模式。 */
+    private Runnable onToggleExpanded = () -> { };
+
     // 下面三个由 updateMetrics() 按当前宽度算出来
     private int columns = 1;
     private int extraSpace;
@@ -85,6 +96,32 @@ final class TargetPanel extends JPanel {
                 requestVisibleThumbnails();
             }
         });
+        addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e)
+                        && expandButtonBounds != null
+                        && expandButtonBounds.contains(e.getPoint())) {
+                    onToggleExpanded.run();
+                }
+            }
+        });
+    }
+
+    /** 点表头那个按钮时通知外部。 */
+    void setOnToggleExpanded(Runnable listener) {
+        this.onToggleExpanded = listener == null ? () -> { } : listener;
+    }
+
+    /** 告诉面板现在是展开还是收起，好让按钮上的字跟着变。 */
+    void setExpanded(boolean expanded) {
+        this.expanded = expanded;
+        repaint();
+    }
+
+    /** 表头按钮的位置，测试用。 */
+    Rectangle expandButtonBoundsForTest() {
+        return expandButtonBounds;
     }
 
     /** 换一个中间商；传 null 表示还没选目标文件夹。 */
@@ -274,6 +311,40 @@ final class TargetPanel extends JPanel {
 
         g.setColor(Theme.BORDER);
         g.fillRect(PADDING, HEADER_HEIGHT - 7, Math.max(0, getWidth() - PADDING * 2), 1);
+        paintExpandButton(g, metrics);
+    }
+
+    /**
+     * 画表头右侧那个「展开 / 收起」按钮。
+     *
+     * <p>用一块实心底色加文字、不描边——一像素的边框在缩放显示下左右宽度会不一样，
+     * 这个坑在交接说明里记着。位置正好落在表头为它留出的 {@code HEADER_BUTTON_SPACE} 里。
+     */
+    private void paintExpandButton(Graphics2D g, FontMetrics metrics) {
+        String label = expanded ? "收起" : "展开";
+        int width = metrics.stringWidth(label) + 30;
+        int height = 20;
+        int x = getWidth() - PADDING - Math.max(width, HEADER_BUTTON_SPACE - 12);
+        int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
+        expandButtonBounds = new Rectangle(x, y, width, height);
+
+        g.setColor(Theme.HIGHLIGHT);
+        g.fillRoundRect(x, y, width, height, 7, 7);
+
+        // 小三角：展开时指向右（意思是"推出去"），收起时指向左
+        int arrowX = x + 9;
+        int arrowY = y + height / 2;
+        g.setColor(Theme.TEXT_MUTED);
+        if (expanded) {
+            g.fillPolygon(new int[] {arrowX, arrowX, arrowX + 6},
+                    new int[] {arrowY - 5, arrowY + 5, arrowY}, 3);
+        } else {
+            g.fillPolygon(new int[] {arrowX + 6, arrowX + 6, arrowX},
+                    new int[] {arrowY - 5, arrowY + 5, arrowY}, 3);
+        }
+
+        g.setColor(Theme.TEXT);
+        g.drawString(label, arrowX + 14, arrowY + metrics.getAscent() / 2 - 1);
     }
 
     /** 只画看得见的那几行。 */

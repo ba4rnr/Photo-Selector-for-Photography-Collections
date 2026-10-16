@@ -47,6 +47,9 @@ public final class MainPanel extends JPanel {
     /** 素材条里缩略图的高度。 */
     private static final int FILMSTRIP_THUMBNAIL_HEIGHT = 120;
 
+    /** 展开排序模式中间那块用的缩略图宽度：比右栏大一截，好做精细筛选。 */
+    private static final int ARRANGE_THUMBNAIL_WIDTH = 240;
+
     /** 底栏（照片条）的默认高度：按组头、缩略图、文件名加滚动条算出来。 */
     private static final int BOTTOM_HEIGHT = FilmstripPanel.preferredHeight(FILMSTRIP_THUMBNAIL_HEIGHT);
 
@@ -55,6 +58,7 @@ public final class MainPanel extends JPanel {
     private final ThumbnailLoader thumbnailLoader;
     private final FilmstripPanel filmstrip;
     private final TargetPanel targetPanel;
+    private final TargetPanel arrangePanel;
     private final SourceTreePanel sourceTree = new SourceTreePanel();
 
     /**
@@ -114,7 +118,14 @@ public final class MainPanel extends JPanel {
         filmstrip = new FilmstripPanel(thumbnailLoader);
         // 目标文件夹面板单独用一只取图器：素材条换文件夹时会重启自己那一轮取图，
         // 共用一只的话会把这边正在路上的请求一起作废。缩略图缓存还是共用同一份。
-        targetPanel = new TargetPanel(new ThumbnailLoader(thumbnailService));
+        // 两块面板显示的是同一批照片，共用一只取图器：缓存命中率高，也省一个线程池。
+        // （只有素材条会调 restart()，所以共用是安全的。）
+        ThumbnailLoader targetLoader = new ThumbnailLoader(thumbnailService);
+        targetPanel = new TargetPanel(targetLoader);
+        arrangePanel = new TargetPanel(targetLoader);
+        arrangePanel.setThumbnailWidth(ARRANGE_THUMBNAIL_WIDTH);
+        targetPanel.setOnToggleExpanded(this::toggleMode);
+        arrangePanel.setOnToggleExpanded(this::toggleMode);
 
         buildAreas();
 
@@ -161,6 +172,11 @@ public final class MainPanel extends JPanel {
         rightCards.show(rightArea, next.name());
         bottomCards.show(bottomArea, next.name());
         toolBar.setMode(next);
+        // 按钮上的字跟着状态变；刚露出来的那一块也要去取自己的缩略图
+        boolean expanded = next == ViewMode.ARRANGE;
+        targetPanel.setExpanded(expanded);
+        arrangePanel.setExpanded(expanded);
+        arrangePanel.refresh();
     }
 
     public ViewMode mode() {
@@ -169,7 +185,7 @@ public final class MainPanel extends JPanel {
 
     private void buildAreas() {
         centerArea.add(placeholder("素材大图", 700, 400, Theme.CANVAS), ViewMode.BROWSE.name());
-        centerArea.add(placeholder("目标文件夹的缩略图（可拖动排序）", 700, 400, Theme.CANVAS), ViewMode.ARRANGE.name());
+        centerArea.add(arrangePanel.wrapInScrollPane(), ViewMode.ARRANGE.name());
 
         rightArea.add(targetPanel.wrapInScrollPane(), ViewMode.BROWSE.name());
         rightArea.add(placeholder("垃圾桶", 360, 400, Theme.PANEL), ViewMode.ARRANGE.name());
@@ -272,6 +288,7 @@ public final class MainPanel extends JPanel {
     private void openTargetFolder(Path target) {
         if (target == null) {
             targetPanel.setSession(null);
+            arrangePanel.setSession(null);
             return;
         }
         scanPool.submit(() -> {
@@ -286,6 +303,7 @@ public final class MainPanel extends JPanel {
                 Session session = new Session(target, NumberingRule.DEFAULT);
                 session.seedExisting(files);
                 targetPanel.setSession(session);
+                arrangePanel.setSession(session);
             });
         });
     }
@@ -299,6 +317,7 @@ public final class MainPanel extends JPanel {
         }
         if (session.add(photo)) {
             targetPanel.refresh();
+            arrangePanel.refresh();
         }
     }
 
@@ -307,6 +326,7 @@ public final class MainPanel extends JPanel {
         Session session = targetPanel.session();
         if (session != null && session.undo()) {
             targetPanel.refresh();
+            arrangePanel.refresh();
         }
     }
 
@@ -336,6 +356,7 @@ public final class MainPanel extends JPanel {
                 // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
                 session.seedExisting(result.finalOrder());
                 targetPanel.refresh();
+            arrangePanel.refresh();
                 onSaveFinished.accept(result);
             });
         });
@@ -391,6 +412,11 @@ public final class MainPanel extends JPanel {
     /** 目标文件夹面板，给测试用。 */
     TargetPanel targetPanelForTest() {
         return targetPanel;
+    }
+
+    /** 展开排序模式中间那块面板，给测试用。 */
+    TargetPanel arrangePanelForTest() {
+        return arrangePanel;
     }
 
     /** 目录树，给测试用。 */

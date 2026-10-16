@@ -13,6 +13,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
 import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -170,6 +171,52 @@ class MainPanelRenderTest {
         SwingUtilities.invokeAndWait(() -> mainPanel.sourceTreeForTest().toggleIncluded(first));
         assertEquals(1, mainPanel.filmstripGroupCount(), "剔除之后素材条里不该再有它");
         mainPanel.shutdown();
+    }
+
+    @Test
+    void 表头的展开按钮按一下展开_再按一下收起() throws Exception {
+        Theme.install();
+        MainPanel mainPanel = newMainPanel();
+        JPanel screen = new JPanel(new BorderLayout());
+        screen.add(MainFrame.createMenuBar(mainPanel, () -> { }, () -> { }), BorderLayout.NORTH);
+        screen.add(mainPanel, BorderLayout.CENTER);
+        screen.setSize(WIDTH, HEIGHT);
+        layoutTree(screen);
+
+        // 按钮的位置是画的时候算出来的，所以先画一遍
+        paintOnce(screen);
+        TargetPanel browseTarget = mainPanel.targetPanelForTest();
+        Rectangle button = browseTarget.expandButtonBoundsForTest();
+        assertNotNull(button, "画过之后应当能算出按钮的位置");
+        assertEquals(ViewMode.BROWSE, mainPanel.mode());
+
+        clickAt(browseTarget, button);
+        assertEquals(ViewMode.ARRANGE, mainPanel.mode(), "按一下应当进入展开排序模式");
+
+        // 展开之后中间那块露出来，它的表头上也有同一个按钮
+        layoutTree(screen);
+        paintOnce(screen);
+        TargetPanel arrangeTarget = mainPanel.arrangePanelForTest();
+        Rectangle arrangeButton = arrangeTarget.expandButtonBoundsForTest();
+        assertNotNull(arrangeButton);
+
+        clickAt(arrangeTarget, arrangeButton);
+        assertEquals(ViewMode.BROWSE, mainPanel.mode(), "再按一下应当收起，回到选图模式");
+        mainPanel.shutdown();
+    }
+
+    private static void clickAt(javax.swing.JComponent component, Rectangle bounds) throws Exception {
+        SwingUtilities.invokeAndWait(() -> component.dispatchEvent(new MouseEvent(component,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 1, false,
+                MouseEvent.BUTTON1)));
+    }
+
+    private static void paintOnce(JPanel screen) {
+        BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        paintScreen(screen, g);
+        g.dispose();
     }
 
     @Test
