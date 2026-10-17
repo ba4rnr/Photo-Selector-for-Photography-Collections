@@ -57,7 +57,7 @@ final class JpegMetadataSegments {
     }
 
     /** 读出源文件里需要保留的完整 JPEG 段（含 FF、marker 和长度）。 */
-    static List<byte[]> from(Path jpeg) throws IOException {
+    static List<byte[]> from(Path jpeg, int pixelWidth, int pixelHeight) throws IOException {
         byte[] data = Files.readAllBytes(jpeg);
         if (data.length < 4 || (data[0] & 0xFF) != 0xFF || (data[1] & 0xFF) != SOI) {
             return List.of();
@@ -96,7 +96,7 @@ final class JpegMetadataSegments {
                 byte[] segment = Arrays.copyOfRange(data, pos, pos + total);
                 if (segmentMarker == APP1) {
                     if (isExif(segment)) {
-                        normalizeExifOrientation(segment);
+                        normalizeExifOrientation(segment, pixelWidth, pixelHeight);
                     } else if (isXmp(segment)) {
                         normalizeXmpOrientation(segment);
                     }
@@ -186,9 +186,12 @@ final class JpegMetadataSegments {
     }
 
     /** EXIF 段：marker(2) + length(2) + "Exif\0\0"(6) 之后才是 TIFF。 */
-    private static void normalizeExifOrientation(byte[] segment) {
+    private static void normalizeExifOrientation(byte[] segment, int width, int height) {
         byte[] tiff = Arrays.copyOfRange(segment, 10, segment.length);
-        if (ExifOrientation.setOrientation(tiff, 1)) {
+        boolean changed = width > 0 && height > 0
+                ? ExifOrientation.updateForEditedPixels(tiff, width, height)
+                : ExifOrientation.setOrientation(tiff, 1);
+        if (changed) {
             System.arraycopy(tiff, 0, segment, 10, tiff.length);
         }
     }

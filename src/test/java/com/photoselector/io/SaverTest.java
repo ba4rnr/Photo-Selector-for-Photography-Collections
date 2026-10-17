@@ -225,7 +225,7 @@ class SaverTest {
         assertEquals(1, ExifOrientation.read(saved),
                 "像素已经摆正，EXIF 方向必须改成 1，避免看图软件再转一次");
 
-        List<byte[]> segments = JpegMetadataSegments.from(saved);
+        List<byte[]> segments = JpegMetadataSegments.from(saved, 300, 200);
         assertTrue(containsText(segments, 0xE1, "Ab"),
                 "EXIF 里方向以外的字段（Make）也应当保留");
         assertTrue(containsText(segments, 0xE1, "photo-selector-metadata"),
@@ -237,6 +237,27 @@ class SaverTest {
         assertTrue(containsSegment(segments, 0xED, iptc), "IPTC 应当原样保留");
     }
 
+    @Test
+    void 重写编辑时同步EXIF宽高并断开旧的内嵌缩略图() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path source = TestImages.writeJpegWithOrientation(
+                tempDir.resolve("带尺寸.jpg"), 300, 200, 1);
+
+        Session session = sessionFor(target);
+        session.add(source);
+        session.setEdits(source, EditState.NONE.rotate(1));
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+        Path saved = target.resolve("010.jpg");
+        List<byte[]> segments = JpegMetadataSegments.from(saved, 200, 300);
+        byte[] tiff = exifTiff(segments);
+        assertArrayEquals(new int[] {200, 300}, ExifOrientation.dimensions(tiff),
+                "IFD0 / Exif SubIFD 的宽高都应当跟上旋转后的像素");
+        assertFalse(ExifOrientation.hasThumbnailIfd(tiff),
+                "旧缩略图 IFD 不能再挂在 EXIF 链上");
+    }
+
     private static boolean containsSegment(List<byte[]> segments, int marker, byte[] payload) {
         for (byte[] segment : segments) {
             if ((segment[1] & 0xFF) == marker
@@ -245,6 +266,18 @@ class SaverTest {
             }
         }
         return false;
+    }
+
+    private static byte[] exifTiff(List<byte[]> segments) {
+        for (byte[] segment : segments) {
+            if ((segment[1] & 0xFF) == 0xE1
+                    && segment.length > 10
+                    && segment[4] == 'E' && segment[5] == 'x' && segment[6] == 'i'
+                    && segment[7] == 'f' && segment[8] == 0 && segment[9] == 0) {
+                return Arrays.copyOfRange(segment, 10, segment.length);
+            }
+        }
+        throw new AssertionError("找不到 EXIF 段");
     }
 
     private static boolean containsText(List<byte[]> segments, int marker, String text) {

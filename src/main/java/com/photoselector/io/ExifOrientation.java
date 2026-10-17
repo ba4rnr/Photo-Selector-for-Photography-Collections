@@ -22,6 +22,11 @@ public final class ExifOrientation {
 
     /** TIFF 里方向标记的编号。 */
     private static final int TAG_ORIENTATION = 0x0112;
+    private static final int TAG_IMAGE_WIDTH = 0x0100;
+    private static final int TAG_IMAGE_LENGTH = 0x0101;
+    private static final int TAG_EXIF_IFD = 0x8769;
+    private static final int TAG_PIXEL_X_DIMENSION = 0xA002;
+    private static final int TAG_PIXEL_Y_DIMENSION = 0xA003;
 
     /** 段的起始字节，以及 APP1 段的编号。 */
     private static final int MARKER_PREFIX = 0xFF;
@@ -221,6 +226,163 @@ public final class ExifOrientation {
         return false;
     }
 
+    /**
+     * 让 EXIF 跟上“像素已经重新编码”这件事。
+     *
+     * <p>更新 IFD0 / Exif SubIFD 里的宽高，并把 IFD1（旧的内嵌缩略图）从链表中断开。
+     * 不移动任何现有数据，所以 MakerNote、GPS 等带偏移的私有字段仍然安全。
+     *
+     * @return 结构可读并至少处理了一部分字段时返回 true
+     */
+    static boolean updateForEditedPixels(byte[] tiff, int width, int height) {
+        try {
+            boolean little = endian(tiff);
+            if (u16(tiff, 2, little) != 42) {
+                return false;
+            }
+            int ifd0 = u32(tiff, 4, little);
+            if (!validIfd(tiff, ifd0)) {
+                return false;
+            }
+            writeOrientation(tiff, ifd0, little);
+            updateDimensions(tiff, ifd0, little, width, height);
+
+            int exifIfd = tagLong(tiff, ifd0, little, TAG_EXIF_IFD);
+            if (validIfd(tiff, exifIfd)) {
+                updateDimensions(tiff, exifIfd, little, width, height);
+            }
+
+            // IFD0 末尾的 4 字节指向下一张 IFD；IFD1 就是旧缩略图。
+            // 清零等于“没有下一张 IFD”，原缩略图字节留在文件里但不再被引用。
+            int nextIfdAt = nextIfdOffsetPosition(tiff, ifd0, little);
+            if (nextIfdAt > 0) {
+                writeU32(tiff, nextIfdAt, 0, little);
+            }
+            return true;
+        } catch (EOFException | ArrayIndexOutOfBoundsException e) {
+            return false;
+        }
+    }
+
+    /** 按 IFD0 优先、Exif SubIFD 补缺的方式读出宽高；读不到返回 -1。 */
+    static int[] dimensions(byte[] tiff) {
+        try {
+            boolean little = endian(tiff);
+            int ifd0 = u32(tiff, 4, little);
+            int width = tagLong(tiff, ifd0, little, TAG_IMAGE_WIDTH);
+            int height = tagLong(tiff, ifd0, little, TAG_IMAGE_LENGTH);
+            int exifIfd = tagLong(tiff, ifd0, little, TAG_EXIF_IFD);
+            if (validIfd(tiff, exifIfd)) {
+                if (width <= 0) {
+                    width = tagLong(tiff, exifIfd, little, TAG_PIXEL_X_DIMENSION);
+                }
+                if (height <= 0) {
+                    height = tagLong(tiff, exifIfd, little, TAG_PIXEL_Y_DIMENSION);
+                }
+            }
+            return new int[] {width, height};
+        } catch (EOFException | ArrayIndexOutOfBoundsException e) {
+            return new int[] {-1, -1};
+        }
+    }
+
+    /** IFD0 是否还指向一张缩略图 IFD。给回归测试用。 */
+    static boolean hasThumbnailIfd(byte[] tiff) {
+        try {
+            boolean little = endian(tiff);
+            int next = nextIfdOffsetPosition(tiff, u32(tiff, 4, little), little);
+            return next > 0 && u32(tiff, next, little) != 0;
+        } catch (EOFException | ArrayIndexOutOfBoundsException e) {
+            return false;
+        }
+    }
+
+    private static void writeOrientation(byte[] tiff, int ifd, boolean little) throws EOFException {
+        writeIfTagLong(tiff, ifd, little, TAG_ORIENTATION, 1);
+    }
+
+    private static void updateDimensions(byte[] tiff, int ifd, boolean little,
+                                         int width, int height) throws EOFException {
+        writeIfTagLong(tiff, ifd, little, TAG_IMAGE_WIDTH, width);
+        writeIfTagLong(tiff, ifd, little, TAG_IMAGE_LENGTH, height);
+        writeIfTagLong(tiff, ifd, little, TAG_PIXEL_X_DIMENSION, width);
+        writeIfTagLong(tiff, ifd, little, TAG_PIXEL_Y_DIMENSION, height);
+    }
+
+    /** 如果 IFD 里有这个 tag，按它自己的 SHORT / LONG 类型写回数值。 */
+    private static void writeIfTagLong(byte[] tiff, int ifd, boolean little,
+                                       int tag, int value) throws EOFException {
+        int count = u16(tiff, ifd, little);
+        for (int i = 0; i < count; i++) {
+            int entry = ifd + 2 + i * 12;
+            if (entry + 12 > tiff.length || u16(tiff, entry, little) != tag) {
+                continue;
+            }
+            int type = u16(tiff, entry + 2, little);
+            int items = u32(tiff, entry + 4, little);
+            if (items != 1) {
+                return;
+            }
+            if (type == 3) {
+                writeU16(tiff, entry + 8, value, little);
+            } else if (type == 4) {
+                writeU32(tiff, entry + 8, value, little);
+            }
+            return;
+        }
+    }
+
+    private static int tagLong(byte[] tiff, int ifd, boolean little, int tag)
+            throws EOFException {
+        if (!validIfd(tiff, ifd)) {
+            return -1;
+        }
+        int count = u16(tiff, ifd, little);
+        for (int i = 0; i < count; i++) {
+            int entry = ifd + 2 + i * 12;
+            if (entry + 12 > tiff.length) {
+                return -1;
+            }
+            if (u16(tiff, entry, little) != tag) {
+                continue;
+            }
+            int type = u16(tiff, entry + 2, little);
+            int items = u32(tiff, entry + 4, little);
+            if (items < 1) {
+                return -1;
+            }
+            return type == 3 ? u16(tiff, entry + 8, little) : u32(tiff, entry + 8, little);
+        }
+        return -1;
+    }
+
+    private static int nextIfdOffsetPosition(byte[] tiff, int ifd, boolean little)
+            throws EOFException {
+        if (!validIfd(tiff, ifd)) {
+            return -1;
+        }
+        int count = u16(tiff, ifd, little);
+        int at = ifd + 2 + count * 12;
+        return at + 4 <= tiff.length ? at : -1;
+    }
+
+    private static boolean validIfd(byte[] tiff, int ifd) {
+        return ifd >= 8 && ifd + 2 <= tiff.length;
+    }
+
+    private static boolean endian(byte[] tiff) throws EOFException {
+        if (tiff.length < 8) {
+            throw new EOFException("EXIF 头不完整");
+        }
+        if (tiff[0] == 'I' && tiff[1] == 'I') {
+            return true;
+        }
+        if (tiff[0] == 'M' && tiff[1] == 'M') {
+            return false;
+        }
+        throw new EOFException("未知的 EXIF 字节序");
+    }
+
     private static int u16(byte[] data, int at, boolean little) throws EOFException {
         if (at + 2 > data.length) {
             throw new EOFException("EXIF 段落不完整");
@@ -252,6 +414,24 @@ public final class ExifOrientation {
         } else {
             data[at] = (byte) (value >> 8);
             data[at + 1] = (byte) value;
+        }
+    }
+
+    private static void writeU32(byte[] data, int at, int value, boolean little)
+            throws EOFException {
+        if (at + 4 > data.length) {
+            throw new EOFException("EXIF 段落不完整");
+        }
+        if (little) {
+            data[at] = (byte) value;
+            data[at + 1] = (byte) (value >> 8);
+            data[at + 2] = (byte) (value >> 16);
+            data[at + 3] = (byte) (value >> 24);
+        } else {
+            data[at] = (byte) (value >> 24);
+            data[at + 1] = (byte) (value >> 16);
+            data[at + 2] = (byte) (value >> 8);
+            data[at + 3] = (byte) value;
         }
     }
 }

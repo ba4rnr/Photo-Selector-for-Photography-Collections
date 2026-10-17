@@ -46,7 +46,7 @@ public final class TestImages {
                                                 int orientation) throws IOException {
         writeJpeg(file, width, height);
         byte[] jpeg = java.nio.file.Files.readAllBytes(file);
-        byte[] exifSegment = exifSegment(orientation);
+        byte[] exifSegment = exifSegment(orientation, width, height);
         byte[] out = new byte[jpeg.length + exifSegment.length];
         // ImageIO 生成的 JPEG 在 SOI 后面紧跟 APP0/JFIF。EXIF 的 APP1 要放在它后面，
         // 否则 JDK 自己读元数据时会报“JFIF APP0 must be first marker after SOI”。
@@ -104,8 +104,12 @@ public final class TestImages {
         return 2;
     }
 
-    /** 造一个只带"方向"这一个小端的 EXIF 段（含 APP1 标记和长度）。 */
-    private static byte[] exifSegment(int orientation) {
+    /**
+     * 造一个结构完整的小端 EXIF 段：宽高、方向、Make、Exif SubIFD 和 IFD1 缩略图。
+     *
+     * <p>这些派生字段正是编辑重写时最容易忘记同步的部分，测试素材必须真的带上它们。
+     */
+    private static byte[] exifSegment(int orientation, int width, int height) throws IOException {
         java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
         body.writeBytes("Exif".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
         body.write(0);
@@ -113,15 +117,35 @@ public final class TestImages {
         // TIFF：小端（II）、版本 42、IFD0 从第 8 字节开始
         body.writeBytes(new byte[] {'I', 'I', 42, 0});
         body.writeBytes(new byte[] {8, 0, 0, 0});
-        // IFD0：2 条记录。除了方向，还放一个 Make 字段，用来验证重写时
-        // 除方向以外的 EXIF 内容没有丢。
-        body.writeBytes(new byte[] {2, 0});
-        // tag 0x010F（Make）、类型 2（ASCII）、数量 3、内联值 "Ab\0"
+        // IFD0 从 TIFF 偏移 8 开始，5 条记录共 66 字节；随后是 Exif SubIFD 与 IFD1。
+        body.writeBytes(new byte[] {5, 0});
+        // ImageWidth / ImageLength：LONG，各 1 项
+        tiffEntry(body, 0x0100, 4, 1, width);
+        tiffEntry(body, 0x0101, 4, 1, height);
+        // Make：ASCII，数量 3，内联 "Ab\0"
         body.writeBytes(new byte[] {0x0F, 0x01, 2, 0, 3, 0, 0, 0, 'A', 'b', 0, 0});
         // tag 0x0112（方向）、类型 3（short）、数量 1、值
-        body.writeBytes(new byte[] {(byte) 0x12, 0x01, 3, 0, 1, 0, 0, 0,
-                (byte) orientation, 0, 0, 0});
-        body.writeBytes(new byte[] {0, 0, 0, 0}); // 没有下一个 IFD
+        tiffEntry(body, 0x0112, 3, 1, orientation);
+        // ExifIFDPointer -> TIFF 偏移 74
+        tiffEntry(body, 0x8769, 4, 1, 74);
+        tiffLong(body, 104); // IFD1
+
+        // Exif SubIFD：PixelXDimension / PixelYDimension
+        body.writeBytes(new byte[] {2, 0});
+        tiffEntry(body, 0xA002, 4, 1, width);
+        tiffEntry(body, 0xA003, 4, 1, height);
+        tiffLong(body, 0);
+
+        byte[] thumbnail = tinyJpeg(24, 16);
+        // IFD1：旧的内嵌缩略图（24×16），紧跟在 IFD1 之后
+        body.writeBytes(new byte[] {4, 0});
+        tiffEntry(body, 0x0100, 3, 1, 24);   // ImageWidth
+        tiffEntry(body, 0x0101, 3, 1, 16);   // ImageLength
+        tiffEntry(body, 0x0201, 4, 1, 158);  // JPEGInterchangeFormat
+        tiffEntry(body, 0x0202, 4, 1, thumbnail.length);
+        tiffLong(body, 0);
+        body.writeBytes(thumbnail);
+
         byte[] payload = body.toByteArray();
         byte[] segment = new byte[payload.length + 4];
         segment[0] = (byte) 0xFF;
@@ -131,5 +155,37 @@ public final class TestImages {
         segment[3] = (byte) length;
         System.arraycopy(payload, 0, segment, 4, payload.length);
         return segment;
+    }
+
+    /** 12 字节的 TIFF IFD 项；数值按 4 字节内联字段写。 */
+    private static void tiffEntry(java.io.ByteArrayOutputStream out, int tag, int type,
+                                  int count, int value) {
+        tiffShort(out, tag);
+        tiffShort(out, type);
+        tiffLong(out, count);
+        tiffLong(out, value);
+    }
+
+    private static void tiffShort(java.io.ByteArrayOutputStream out, int value) {
+        out.write(value & 0xFF);
+        out.write((value >> 8) & 0xFF);
+    }
+
+    private static void tiffLong(java.io.ByteArrayOutputStream out, int value) {
+        out.write(value & 0xFF);
+        out.write((value >> 8) & 0xFF);
+        out.write((value >> 16) & 0xFF);
+        out.write((value >> 24) & 0xFF);
+    }
+
+    private static byte[] tinyJpeg(int width, int height) throws IOException {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        g.setColor(new Color(0x808080));
+        g.fillRect(0, 0, width, height);
+        g.dispose();
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        ImageIO.write(image, "jpg", out);
+        return out.toByteArray();
     }
 }

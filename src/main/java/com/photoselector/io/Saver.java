@@ -349,10 +349,11 @@ public final class Saver {
     /** 解码、套编辑、以较高质量写成新 JPG，再原子改名到最终位置。 */
     private static void writeEditedAtomically(Path source, Path target, EditState edits)
             throws IOException {
-        // 先把元数据段读出来再解码。新文件写完后原样注入，只把方向改成 1。
-        List<byte[]> metadata = JpegMetadataSegments.from(source);
         BufferedImage original = ImageSource.open(source).loadFull();
         BufferedImage result = PhotoTransforms.apply(original, edits);
+        // 元数据按“输出图”的尺寸同步 EXIF 宽高，并断开旧缩略图 IFD。
+        List<byte[]> metadata = JpegMetadataSegments.from(
+                source, result.getWidth(), result.getHeight());
 
         Path temp = Files.createTempFile(target.getParent(), "__writing_", ".tmp");
         try {

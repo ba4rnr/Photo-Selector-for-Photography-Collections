@@ -30,7 +30,7 @@ class JpegMetadataSegmentsTest {
         TestImages.insertAppSegment(jpeg, 0xE2, mpf);
         TestImages.insertAppSegment(jpeg, 0xEE, adobe14);
 
-        List<byte[]> kept = JpegMetadataSegments.from(jpeg);
+        List<byte[]> kept = JpegMetadataSegments.from(jpeg, 30, 20);
 
         assertTrue(kept.stream().anyMatch(segment ->
                         (segment[1] & 0xFF) == 0xE2
