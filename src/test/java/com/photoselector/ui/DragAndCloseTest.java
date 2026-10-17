@@ -109,6 +109,52 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 目标面板滚动后拖动_白线和实际插入位置一致() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow(1, 12, 24);
+        try {
+            window.show();
+            FilmstripPanel filmstrip = window.panel.filmstripForTest();
+            TargetPanel target = window.panel.targetPanelForTest();
+
+            java.util.concurrent.atomic.AtomicReference<Point> overTarget =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicReference<Path> dragged =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            int[] expected = new int[1];
+            SwingUtilities.invokeAndWait(() -> {
+                javax.swing.JViewport sourceViewport =
+                        (javax.swing.JViewport) filmstrip.getParent();
+                sourceViewport.setViewPosition(new Point(300, 0));
+                javax.swing.JViewport viewport = (javax.swing.JViewport) target.getParent();
+                viewport.setViewPosition(new Point(0, 350));
+                Point pointOnTarget = new Point(
+                        target.cellXForTest(0) + target.thumbnailWidthForTest() / 2,
+                        viewport.getViewPosition().y + 100);
+                expected[0] = target.dropIndexAt(pointOnTarget);
+                overTarget.set(SwingUtilities.convertPoint(target, pointOnTarget, filmstrip));
+
+                dragged.set(filmstrip.photoAtForTest(5));
+                Point from = cellCenter(filmstrip, 5);
+                press(filmstrip, from);
+                drag(filmstrip, new Point(
+                        from.x + 12, from.y));
+                drag(filmstrip, overTarget.get());
+            });
+
+            assertNotNull(DragOut.ghostBoundsForTest(filmstrip),
+                    "素材条已经横向滚动时，拖动仍要有跟着鼠标的缩略图");
+            assertEquals(expected[0], target.dropHintIndex(),
+                    "滚动目标栏后，白线必须落在鼠标实际指向的那一格附近");
+            SwingUtilities.invokeAndWait(() -> release(filmstrip, overTarget.get()));
+            assertEquals(expected[0], target.session().indexOf(dragged.get()),
+                    "松手后的插入位置也必须和白线一致");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 有没保存的改动时选不保存_窗口要真的关掉() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();
@@ -643,6 +689,13 @@ class DragAndCloseTest {
          * @param photosPerFolder 每个子文件夹里放几张
          */
         TestWindow(int sourceSubfolders, int photosPerFolder) throws Exception {
+            this(sourceSubfolders, photosPerFolder, 2);
+        }
+
+        /**
+         * @param targetPhotos 目标文件夹里预先放几张；测滚动落点时要多放一些
+         */
+        TestWindow(int sourceSubfolders, int photosPerFolder, int targetPhotos) throws Exception {
             Path source = Files.createDirectories(tempDir.resolve("素材"));
             for (int s = 0; s < sourceSubfolders; s++) {
                 Path shots = Files.createDirectories(source.resolve(String.format("%03d_拍摄", s + 1)));
@@ -651,8 +704,15 @@ class DragAndCloseTest {
                 }
             }
             Path target = Files.createDirectories(tempDir.resolve("成片"));
-            TestImages.writeJpeg(target.resolve("旧A.jpg"), 300, 200);
-            TestImages.writeJpeg(target.resolve("旧B.jpg"), 300, 200);
+            if (targetPhotos >= 1) {
+                TestImages.writeJpeg(target.resolve("旧A.jpg"), 300, 200);
+            }
+            if (targetPhotos >= 2) {
+                TestImages.writeJpeg(target.resolve("旧B.jpg"), 300, 200);
+            }
+            for (int i = 2; i < targetPhotos; i++) {
+                TestImages.writeJpeg(target.resolve(String.format("旧%02d.jpg", i + 1)), 300, 200);
+            }
 
             AtomicReference<MainFrame> created = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> {
@@ -740,14 +800,12 @@ class DragAndCloseTest {
         return fromWindow(root, toWindow(from, pointInFrom, root), to);
     }
 
-    // 和 DragOut 里那对换算方法同一套算法：只在窗口内部算，不绕屏幕坐标，滚动也要算进去
+    // 和 DragOut 里那对换算方法同一套算法：只在窗口内部算，不绕屏幕坐标。
+    // JViewport 已把视图组件定位在 -viewPosition，继续沿父链累加就包含滚动量。
     private static Point toWindow(Component from, Point pointInFrom, Component ancestor) {
         Point inAncestor = new Point(pointInFrom);
         for (Component c = from; c != null && c != ancestor; c = c.getParent()) {
             inAncestor.translate(c.getX(), c.getY());
-            if (c instanceof javax.swing.JViewport viewport) {
-                inAncestor.translate(-viewport.getViewPosition().x, -viewport.getViewPosition().y);
-            }
         }
         return inAncestor;
     }
@@ -756,9 +814,6 @@ class DragAndCloseTest {
         Point inTo = new Point(inAncestor);
         for (Component c = to; c != null && c != ancestor; c = c.getParent()) {
             inTo.translate(-c.getX(), -c.getY());
-            if (c instanceof javax.swing.JViewport viewport) {
-                inTo.translate(viewport.getViewPosition().x, viewport.getViewPosition().y);
-            }
         }
         return inTo;
     }

@@ -554,17 +554,14 @@ final class DragOut {
      * 实测在本机能把点算出去一千多像素，跟着鼠标的缩略图就整个跑到窗口外面了。
      * 这里只沿着父链累加位置，不碰屏幕坐标。
      *
-     * <p>滚动为什么也要算：素材条比它的窗口大，它挂在滚动面板里、自己并不跟着滚，
-     * 滚的是外层的视口。视口里显示的是组件的哪一段，要由 {@code viewPosition} 说。
+     * <p>滚动不要额外再算：{@link JViewport} 布局时已经把视图组件放在
+     * {@code -viewPosition} 的位置上，沿父链累加组件坐标时就自然包含了滚动量。
+     * 再手动加/减一次 {@code viewPosition} 会把同一个偏移算两遍。
      */
     private static Point toWindow(Component from, Point pointInFrom, Component ancestor) {
         Point inAncestor = new Point(pointInFrom);
         for (Component c = from; c != null && c != ancestor; c = c.getParent()) {
             inAncestor.translate(c.getX(), c.getY());
-            if (c instanceof JViewport viewport) {
-                // 往上走：出视口要把滚出去的那一段减掉
-                inAncestor.translate(-viewport.getViewPosition().x, -viewport.getViewPosition().y);
-            }
         }
         return inAncestor;
     }
@@ -574,10 +571,6 @@ final class DragOut {
         Point inTo = new Point(inAncestor);
         for (Component c = to; c != null && c != ancestor; c = c.getParent()) {
             inTo.translate(-c.getX(), -c.getY());
-            if (c instanceof JViewport viewport) {
-                // 往下走：进视口要把滚出去的那一段加回来
-                inTo.translate(viewport.getViewPosition().x, viewport.getViewPosition().y);
-            }
         }
         return inTo;
     }
