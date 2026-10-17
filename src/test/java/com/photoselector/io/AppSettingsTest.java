@@ -1,6 +1,7 @@
 package com.photoselector.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -21,6 +22,7 @@ class AppSettingsTest {
     void 没存过的时候给出厂默认() {
         AppSettings settings = new AppSettings(tempDir.resolve("preferences.properties"));
         assertEquals(18, settings.defaultZoomPercent(), "出厂默认 18%");
+        assertTrue(settings.defaultFitToWindow(), "新版本出厂默认适应窗口");
     }
 
     @Test
@@ -30,6 +32,20 @@ class AppSettingsTest {
 
         assertEquals(33, new AppSettings(file).defaultZoomPercent(),
                 "同一台机器上，重开程序应当还是上次选的倍率");
+        assertFalse(new AppSettings(file).defaultFitToWindow(),
+                "选了固定百分比就不再是默认适应窗口");
+    }
+
+    @Test
+    void 默认适应窗口的选择也会记住() {
+        Path file = tempDir.resolve("preferences.properties");
+        AppSettings settings = new AppSettings(file);
+        settings.setDefaultZoomPercent(33);
+        settings.setDefaultFitToWindow(true);
+
+        AppSettings reloaded = new AppSettings(file);
+        assertTrue(reloaded.defaultFitToWindow());
+        assertEquals(33, reloaded.defaultZoomPercent(), "切回 Fit 不应丢掉备用固定档位");
     }
 
     @Test

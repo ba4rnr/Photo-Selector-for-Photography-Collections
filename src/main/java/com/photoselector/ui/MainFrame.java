@@ -62,7 +62,7 @@ public final class MainFrame extends JFrame {
         this.workspaceStore = workspaceStore;
         this.settings = settings;
         this.mainPanel = new MainPanel(thumbnailCacheDir);
-        mainPanel.setDefaultZoomPercent(settings.defaultZoomPercent());
+        mainPanel.applyStartupZoom(settings.defaultFitToWindow(), settings.defaultZoomPercent());
 
         // 不能再用 EXIT_ON_CLOSE：那样点 × 会绕过"有没有没保存的改动"这一问。
         // 关窗口现在只有一条路——MainPanel.requestClose()，菜单里的"退出"也走它。
@@ -304,9 +304,13 @@ public final class MainFrame extends JFrame {
         mainPanel.switchWorkspace(workspace);
     }
 
-    /** 用户改了默认放大倍率：记下来，下次打开还是它。 */
+    /** 用户改了默认缩放方式：-1 表示适应窗口，其余是固定百分比。 */
     private void changeDefaultZoom(int percent) {
-        settings.setDefaultZoomPercent(percent);
+        if (percent < 0) {
+            settings.setDefaultFitToWindow(true);
+        } else {
+            settings.setDefaultZoomPercent(percent);
+        }
     }
 
     /** 上次的素材文件夹不见了时的提示。 */
@@ -492,19 +496,31 @@ public final class MainFrame extends JFrame {
     }
 
     /**
-     * 「查看 → 默认放大倍率」：打开一张照片时用多大的比例。
+     * 「查看 → 默认缩放」：以后每张照片打开时怎么摆。
      *
-     * <p>和上面那个「缩放」是两回事：那个管"眼前这一张现在多大"，这个管"以后每张打开时多大"。
-     * 挑一个档位，当前这张立刻按新倍率显示，之后翻到的每一张也都用它。
+     * <p>默认是适应窗口；也可以改成固定百分比。两种选择都会记住。
      */
     private static JMenu defaultZoomMenu(MainPanel mainPanel,
                                          java.util.function.IntConsumer onChange) {
-        JMenu menu = menu("默认放大倍率");
+        JMenu menu = menu("默认缩放");
         ButtonGroup group = new ButtonGroup();
+        JRadioButtonMenuItem fit = new JRadioButtonMenuItem(
+                "适应窗口", mainPanel.defaultFitToWindow());
+        fit.setForeground(Theme.TEXT);
+        fit.setBackground(Theme.PANEL);
+        fit.addActionListener(e -> {
+            mainPanel.setDefaultFitToWindow();
+            onChange.accept(-1);
+        });
+        group.add(fit);
+        menu.add(fit);
+        menu.addSeparator();
         // 档位都取自大图自己的档位表，保证菜单里选得出来的值滚轮也滚得到
         for (int percent : ViewerPanel.defaultZoomChoices()) {
             JRadioButtonMenuItem item =
-                    new JRadioButtonMenuItem(percent + "%", percent == mainPanel.defaultZoomPercent());
+                    new JRadioButtonMenuItem(percent + "%",
+                            !mainPanel.defaultFitToWindow()
+                                    && percent == mainPanel.defaultZoomPercent());
             item.setForeground(Theme.TEXT);
             item.setBackground(Theme.PANEL);
             item.addActionListener(e -> {

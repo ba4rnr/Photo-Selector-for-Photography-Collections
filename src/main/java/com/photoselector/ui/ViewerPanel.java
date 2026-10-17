@@ -90,13 +90,11 @@ final class ViewerPanel extends JPanel {
     private final ThumbnailLoader loader;
 
     /**
-     * 打开一张照片时的默认放大倍率。
+     * 固定倍率模式下的默认比例（新照片默认是“适应窗口”，这是备用固定档）。
      *
-     * <p>用一个固定比例而不是"适应窗口"，是为了让不同的照片都按同一个倍率显示——
-     * 你的照片多在 6000 像素上下，18% 大约是 1080 像素，正好一屏宽。
-     * 连着翻几张时看到的比例一致，方便横向比较。
+     * <p>固定模式用同一个真实像素比例；若选“适应窗口”，则由查看区大小现算。
      *
-     * <p>可在「查看 → 默认放大倍率」里改；改完立刻按新倍率显示当前这张，不必翻页。
+     * <p>可在「查看 → 默认缩放」里切换“适应窗口”和固定档位；选择会记住。
      */
     private double defaultScale = 0.18;
 
@@ -137,8 +135,8 @@ final class ViewerPanel extends JPanel {
     /** 当前照片的虚拟编辑；由 {@link #setEdits} 从中间商那边灌进来。 */
     private EditState edits = EditState.NONE;
 
-    /** 是不是"适应窗口"。默认不是——默认按 {@link #defaultScale} 显示。 */
-    private boolean fitToWindow;
+    /** 是不是"适应窗口"。新照片默认适应窗口；固定倍率是用户主动选择的另一种模式。 */
+    private boolean fitToWindow = true;
 
     /** 非适应窗口时用的比例。 */
     private double customScale = defaultScale;
@@ -418,6 +416,21 @@ final class ViewerPanel extends JPanel {
         this.defaultScale = Math.max(0.01, Math.min(MAX_SCALE, scale));
         fitToWindow = false;
         customScale = this.defaultScale;
+        resetView();
+        repaint();
+        onZoomChanged.run();
+    }
+
+    /**
+     * 应用启动时保存的默认缩放方式。
+     *
+     * <p>和 {@link #setDefaultScale} 的区别：这里只配置“以后怎么打开”，
+     * 不会因为启动时读了一次偏好文件就把默认 Fit 模式关掉。
+     */
+    void applyStartupZoom(boolean fit, double scale) {
+        this.defaultScale = Math.max(0.01, Math.min(MAX_SCALE, scale));
+        this.customScale = this.defaultScale;
+        this.fitToWindow = fit;
         resetView();
         repaint();
         onZoomChanged.run();

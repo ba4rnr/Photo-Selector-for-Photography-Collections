@@ -708,12 +708,27 @@ public final class MainPanel extends JPanel {
         viewer.setOnZoomChanged(listener);
     }
 
-    /** 改"打开一张照片时的默认放大倍率"（「查看 → 默认放大倍率」用），立刻生效。 */
+    /** 改成固定倍率模式，并记住作为以后打开照片的默认方式。 */
     public void setDefaultZoomPercent(int percent) {
         viewer.setDefaultScale(percent / 100.0);
     }
 
-    /** 当前的默认放大倍率（百分比）。 */
+    /** 以后打开每张照片都默认适应窗口；当前这张也立刻切过去。 */
+    public void setDefaultFitToWindow() {
+        viewer.fitToWindow();
+    }
+
+    /** 当前是否默认/正处于适应窗口；菜单勾选用。 */
+    public boolean defaultFitToWindow() {
+        return viewer.isFitToWindow();
+    }
+
+    /** 启动时应用保存的“适应 / 固定倍率”偏好；只配置状态，不重复写偏好文件。 */
+    void applyStartupZoom(boolean fit, int percent) {
+        viewer.applyStartupZoom(fit, percent / 100.0);
+    }
+
+    /** 固定倍率模式下的默认放大倍率（百分比）。 */
     public int defaultZoomPercent() {
         return (int) Math.round(viewer.defaultScale() * 100);
     }

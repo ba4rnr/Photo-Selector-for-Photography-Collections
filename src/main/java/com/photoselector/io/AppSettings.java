@@ -22,6 +22,9 @@ public final class AppSettings {
     /** 默认放大倍率（百分比）。 */
     private static final String KEY_DEFAULT_ZOOM = "viewer.defaultZoomPercent";
 
+    /** 打开照片时是否默认适应窗口。 */
+    private static final String KEY_DEFAULT_FIT = "viewer.defaultFitToWindow";
+
     private static final String KEY_WINDOW_X = "window.x";
     private static final String KEY_WINDOW_Y = "window.y";
     private static final String KEY_WINDOW_WIDTH = "window.width";
@@ -79,6 +82,20 @@ public final class AppSettings {
     public void setDefaultZoomPercent(int percent) {
         Properties properties = readProperties();
         properties.setProperty(KEY_DEFAULT_ZOOM, Integer.toString(percent));
+        properties.setProperty(KEY_DEFAULT_FIT, "false");
+        writeProperties(properties);
+    }
+
+    /** 打开每张照片时默认是否适应窗口；老配置没有这一项时按新的出厂行为用 true。 */
+    public boolean defaultFitToWindow() {
+        String raw = readProperties().getProperty(KEY_DEFAULT_FIT);
+        return raw == null || Boolean.parseBoolean(raw);
+    }
+
+    /** 记下“默认适应窗口”开关。 */
+    public void setDefaultFitToWindow(boolean fit) {
+        Properties properties = readProperties();
+        properties.setProperty(KEY_DEFAULT_FIT, Boolean.toString(fit));
         writeProperties(properties);
     }
 

@@ -156,9 +156,7 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
-        // 默认不是"适应窗口"：照片按固定倍率显示，连着翻几张时比例一致，方便横向比较
-        assertTrue(!viewer.isFitToWindow(), "默认不该是适应窗口");
-        assertEquals(18, viewer.zoomPercent(), "默认放大倍率是 18%");
+        assertTrue(viewer.isFitToWindow(), "新照片默认应当适应窗口");
 
         SwingUtilities.invokeAndWait(viewer::actualSize);
         assertTrue(!viewer.isFitToWindow());
@@ -183,7 +181,7 @@ class ViewerPanelTest {
             viewer.showPhoto(first);
         });
         waitUntil(viewer::hasImage, "第一张");
-        assertEquals(18, viewer.zoomPercent(), "出厂默认是 18%");
+        assertTrue(viewer.isFitToWindow(), "未改设置时默认适应窗口");
 
         // 改成 50%：眼前这张立刻跟着变，不用翻页
         SwingUtilities.invokeAndWait(() -> viewer.setDefaultScale(0.5));
@@ -385,6 +383,7 @@ class ViewerPanelTest {
         });
         waitUntil(viewer::hasImage, "原图");
 
+        SwingUtilities.invokeAndWait(() -> viewer.setDefaultScale(0.18));
         assertEquals(18, viewer.zoomPercent(), "起点是默认那一档");
 
         // 一路往上滚：档位要够密，但 100、200、300、400 这些整百档必须都恰好踩得到
@@ -417,6 +416,28 @@ class ViewerPanelTest {
         int fitted = viewer.zoomPercent();
         viewer.zoomStep(1);
         assertTrue(viewer.zoomPercent() > fitted, "往上滚应当比适应出来的比例大");
+        loader.shutdown();
+    }
+
+    @Test
+    void 默认适应窗口的4000乘6000画幅在720乘1080查看区正好是18百分比() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        // 等比缩小 10 倍，保持 4:6 画幅；查看区也等比取 72×108，
+        // 数学结果与 4000×6000 / 720×1080 完全相同，同时避免测试占近百 MB。
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("4000x6000.jpg"),
+                400, 600);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(72 + 24, 108 + 26 + 24);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        assertTrue(viewer.isFitToWindow());
+        assertEquals(18, viewer.zoomPercent(),
+                "4:6 画幅在 720×1080 有效查看区中适应结果应为 18%");
         loader.shutdown();
     }
 
