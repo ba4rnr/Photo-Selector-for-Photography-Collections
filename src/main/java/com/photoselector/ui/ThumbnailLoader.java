@@ -94,6 +94,9 @@ final class ThumbnailLoader {
 
         submit(key, task, () -> {
             try {
+                if (!hasCurrentWaiter(task)) {
+                    return; // 排队期间已经换了一轮，别再白解码
+                }
                 BufferedImage image = service.thumbnail(photo, maxHeight);
                 deliver(task, image);
             } catch (RuntimeException e) {
@@ -123,6 +126,9 @@ final class ThumbnailLoader {
 
         submit(key, task, () -> {
             try {
+                if (!hasCurrentWaiter(task)) {
+                    return;
+                }
                 BufferedImage image = ImageSource.open(photo).loadFull();
                 deliver(task, image);
             } catch (RuntimeException e) {
@@ -157,6 +163,16 @@ final class ThumbnailLoader {
         task.completed = true;
         // 按值删除：restart 清空后可能有同键的新任务，别把新任务误删。
         inFlight.remove(key, task);
+    }
+
+    private boolean hasCurrentWaiter(InFlight task) {
+        long current = session.get();
+        for (Pending pending : task.listeners) {
+            if (pending.session() == current) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

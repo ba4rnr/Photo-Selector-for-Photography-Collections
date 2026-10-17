@@ -27,6 +27,7 @@ public final class PhotoFiles {
         try (Stream<Path> entries = Files.list(folder)) {
             return entries
                     .filter(Files::isRegularFile)
+                    .filter(path -> !Saver.isTemporaryFile(path))
                     .filter(ImageSource::isSupported)
                     .sorted()
                     .toList();

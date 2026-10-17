@@ -36,6 +36,8 @@ class JpegImageSourceTest {
 
         assertEquals(640, image.getWidth());
         assertEquals(480, image.getHeight());
+        assertEquals(BufferedImage.TYPE_INT_RGB, image.getType(),
+                "大图也统一成一种像素格式，界面绘制性能才稳定");
     }
 
     @Test

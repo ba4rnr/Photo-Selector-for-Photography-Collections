@@ -222,6 +222,28 @@ class ImageEditTest {
         panel.shutdown();
     }
 
+    @Test
+    void 保存后大图切到最终文件_下一轮编辑不会落到旧路径() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        Path source = panel.viewerForTest().photo();
+        panel.addToTarget(source);
+        SwingUtilities.invokeAndWait(() -> panel.rotateCurrentPhoto(true));
+
+        SwingUtilities.invokeAndWait(panel::save);
+        Path finalPhoto = panel.targetPanelForTest().session().targetFolder().resolve("020.jpg");
+        waitUntil(() -> finalPhoto.equals(panel.viewerForTest().photo())
+                        && panel.viewerForTest().hasImage(), "保存后的大图重新载入");
+
+        assertTrue(panel.viewerForTest().edits().isNone(),
+                "已经烧进文件的编辑不能继续挂在虚拟编辑上");
+        SwingUtilities.invokeAndWait(() -> panel.rotateCurrentPhoto(true));
+        assertTrue(!panel.targetPanelForTest().session().editsOf(finalPhoto).isNone(),
+                "保存后的下一次编辑必须记在最终文件路径上");
+        assertTrue(panel.targetPanelForTest().session().editsOf(source).isNone(),
+                "不能继续编辑保存前的旧路径");
+        panel.shutdown();
+    }
+
     private static void waitUntil(BooleanSupplier condition, String what) throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;
         while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {

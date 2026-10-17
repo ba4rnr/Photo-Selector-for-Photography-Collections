@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.Origin;
+import com.photoselector.core.EditState;
 import com.photoselector.core.NumberingRule;
 import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
@@ -138,6 +139,31 @@ class TargetPanelTest {
         assertEquals(notAFolder, failed.get());
         assertNull(panel.targetPanelForTest().session(),
                 "读失败时不能建一个假的空中间商");
+        panel.shutdown();
+    }
+
+    @Test
+    void 保存中断残留不会被当成照片_并会提醒用户() throws Exception {
+        Theme.install();
+        Path source = Files.createDirectories(tempDir.resolve("素材"));
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        TestImages.writeJpeg(target.resolve("正常.jpg"), 300, 200);
+        Path residual = TestImages.writeJpeg(
+                target.resolve("__renaming_123_0.jpg"), 300, 200);
+
+        MainPanel panel = new MainPanel(tempDir.resolve("cache"));
+        panel.setOnWorkspaceChanged(workspace -> { });
+        java.util.concurrent.atomic.AtomicReference<java.util.List<Path>> warned =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        panel.setOnSaveResiduals(warned::set);
+        SwingUtilities.invokeAndWait(() ->
+                panel.applyWorkspace(new Workspace(source, Set.of(), target)));
+
+        waitUntil(() -> panel.targetPanelForTest().session() != null
+                && warned.get() != null, "目标序列与残留提醒");
+        assertEquals(1, panel.targetPanelForTest().entryCount(),
+                "临时文件不能冒充正常照片");
+        assertTrue(warned.get().contains(residual), "应当明确告诉用户哪个临时文件还留着");
         panel.shutdown();
     }
 
@@ -417,6 +443,36 @@ class TargetPanelTest {
         assertTrue(Math.abs(emptyBand - panelColor) < 8,
                 "照片没占满的那一条应当是面板的深灰，不该比面板底色深一截"
                         + "（空处亮度 " + emptyBand + "，面板底色 " + panelColor + "）");
+
+        loader.shutdown();
+    }
+
+    @Test
+    void 编辑变化后目标缩略图会跟着旋转() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("成片"));
+        Path portrait = TestImages.writeJpeg(folder.resolve("竖.jpg"), 600, 900);
+        Session session = new Session(folder, NumberingRule.DEFAULT);
+        session.seedExisting(java.util.List.of(portrait));
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(360, 500);
+            panel.setSession(session);
+            layoutTree(panel);
+        });
+        waitUntil(() -> panel.isLoaded(portrait), "原始缩略图");
+        assertTrue(panel.thumbnailOf(portrait).getHeight()
+                        > panel.thumbnailOf(portrait).getWidth(),
+                "前置条件：缩略图原本是竖的");
+
+        session.setEdits(portrait, EditState.NONE.rotate(1));
+        SwingUtilities.invokeAndWait(() -> panel.reloadThumbnail(portrait));
+        waitUntil(() -> panel.thumbnailOf(portrait) != null
+                        && panel.thumbnailOf(portrait).getWidth()
+                                > panel.thumbnailOf(portrait).getHeight(),
+                "编辑后的横缩略图");
 
         loader.shutdown();
     }

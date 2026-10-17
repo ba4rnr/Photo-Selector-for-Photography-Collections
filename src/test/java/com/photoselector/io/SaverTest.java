@@ -74,6 +74,12 @@ class SaverTest {
 
         // 最终顺序也要报出来，调用方据此重建中间商
         assertEquals(List.of(target.resolve("010.jpg"), target.resolve("020.jpg")), result.finalOrder());
+        assertEquals(target.resolve("010.jpg").toAbsolutePath().normalize(),
+                result.savedLocations().get(oldB.toAbsolutePath().normalize()),
+                "改名后的旧文件也要能从旧路径找到新路径");
+        assertEquals(target.resolve("020.jpg").toAbsolutePath().normalize(),
+                result.savedLocations().get(fresh.toAbsolutePath().normalize()),
+                "复制进来的素材要知道自己最终落在哪里");
     }
 
     @Test

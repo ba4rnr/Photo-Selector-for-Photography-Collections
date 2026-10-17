@@ -8,7 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -51,6 +53,10 @@ public final class Saver {
 
     /** 待删除文件的临时前缀。同理，一眼看得出这些是"说好要删但还没删"的。 */
     private static final String TRASHED_PREFIX = "__trashed_";
+
+    /** 正在复制 / 写图的临时前缀；这些只是半成品，不会被扫描成照片。 */
+    private static final String COPYING_PREFIX = "__copying_";
+    private static final String WRITING_PREFIX = "__writing_";
 
     /**
      * 一条要处理的条目。
@@ -105,10 +111,12 @@ public final class Saver {
 
     /** 一次保存的结果。 */
     public record Result(int copied, int renamed, int rewritten, int deleted,
-                         List<Path> finalOrder, List<Path> failedSources, List<String> problems) {
+                         List<Path> finalOrder, Map<Path, Path> savedLocations,
+                         List<Path> failedSources, List<String> problems) {
 
         public Result {
             finalOrder = List.copyOf(finalOrder);
+            savedLocations = Map.copyOf(savedLocations);
             failedSources = List.copyOf(failedSources);
             problems = List.copyOf(problems);
         }
@@ -158,8 +166,29 @@ public final class Saver {
         int rewritten = copied.rewritten() + rewriteMovedEntries(editedMoves, problems);
         int deleted = deleteMovedAside(toDelete, problems);
 
+        List<Path> finalOrder = collectFinalOrder(plan, finals, failedSources);
         return new Result(copied.copied(), renamed, rewritten, deleted,
-                collectFinalOrder(plan, finals, failedSources), failedSources, problems);
+                finalOrder, collectSavedLocations(plan, finals, failedSources),
+                failedSources, problems);
+    }
+
+    /** 这个名字是不是保存过程留下的内部临时文件。 */
+    public static boolean isTemporaryFile(Path file) {
+        String name = file.getFileName().toString();
+        return name.startsWith(RENAMING_PREFIX)
+                || name.startsWith(TRASHED_PREFIX)
+                || name.startsWith(COPYING_PREFIX)
+                || name.startsWith(WRITING_PREFIX);
+    }
+
+    /** 列出目标文件夹里残留的保存临时文件；用于启动时提醒，不自动删除。 */
+    public static List<Path> residualFiles(Path folder) throws IOException {
+        try (var entries = Files.list(folder)) {
+            return entries.filter(Files::isRegularFile)
+                    .filter(Saver::isTemporaryFile)
+                    .sorted()
+                    .toList();
+        }
     }
 
     /**
@@ -327,13 +356,38 @@ public final class Saver {
     }
 
     /**
+     * 记下“保存前来源 → 保存后真实文件”的对应关系。
+     *
+     * <p>界面保存后需要把大图和选中项切到最终文件；只靠最终顺序列表无法知道
+     * 当前看的那张复制去了哪里，尤其是它从素材目录被复制成 `010.jpg` 时。
+     */
+    private static Map<Path, Path> collectSavedLocations(Plan plan, List<Path> finals,
+                                                         List<Path> failedSources) {
+        Map<Path, Path> locations = new LinkedHashMap<>();
+        for (int i = 0; i < plan.items().size(); i++) {
+            Path source = plan.items().get(i).source();
+            if (failedSources.contains(source)) {
+                continue;
+            }
+            Path finalPath = finals.get(i);
+            Path actual = Files.exists(finalPath) ? finalPath
+                    : Files.exists(source) ? source : null;
+            if (actual != null) {
+                locations.put(source.toAbsolutePath().normalize(),
+                        actual.toAbsolutePath().normalize());
+            }
+        }
+        return locations;
+    }
+
+    /**
      * 没编辑的照片：先复制到同目录临时文件，成功后再原子改名。
      *
      * <p>直接往最终名字复制的旧写法，在磁盘满或读写出错时会留下半截 JPG；
      * 这个半截文件还会被后续的“文件存在就算成功”误认。临时文件把失败挡在正式名字之外。
      */
     private static void copyAtomically(Path source, Path target) throws IOException {
-        Path temp = Files.createTempFile(target.getParent(), "__copying_", ".tmp");
+        Path temp = Files.createTempFile(target.getParent(), COPYING_PREFIX, ".tmp");
         try {
             Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING,
                     StandardCopyOption.COPY_ATTRIBUTES);
@@ -355,7 +409,7 @@ public final class Saver {
         List<byte[]> metadata = JpegMetadataSegments.from(
                 source, result.getWidth(), result.getHeight());
 
-        Path temp = Files.createTempFile(target.getParent(), "__writing_", ".tmp");
+        Path temp = Files.createTempFile(target.getParent(), WRITING_PREFIX, ".tmp");
         try {
             writeJpeg(result, temp, metadata);
             moveAtomically(temp, target);

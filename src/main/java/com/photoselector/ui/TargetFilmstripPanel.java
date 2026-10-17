@@ -26,6 +26,7 @@ import javax.swing.JViewport;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Origin;
+import com.photoselector.core.PhotoTransforms;
 import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
 import com.photoselector.ui.theme.Painters;
@@ -109,6 +110,15 @@ final class TargetFilmstripPanel extends JPanel {
     void reloadThumbnails() {
         thumbnails.clear();
         refresh();
+    }
+
+    void reloadThumbnail(Path photo) {
+        if (photo != null && thumbnails.remove(photo) != null) {
+            repaint();
+        }
+        if (photo != null) {
+            SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+        }
     }
 
     void setOnPhotoChosen(Consumer<Path> listener) {
@@ -214,7 +224,9 @@ final class TargetFilmstripPanel extends JPanel {
             keep.add(photo);
             if (!thumbnails.containsKey(photo)) {
                 loader.load(photo, THUMBNAIL_HEIGHT, image -> {
-                    thumbnails.put(photo, image);
+                    BufferedImage display = session == null ? image
+                            : PhotoTransforms.apply(image, session.editsOf(photo));
+                    thumbnails.put(photo, display);
                     repaint();
                 });
             }
@@ -287,6 +299,10 @@ final class TargetFilmstripPanel extends JPanel {
 
     boolean isLoaded(Path photo) {
         return thumbnails.containsKey(photo);
+    }
+
+    BufferedImage thumbnailOf(Path photo) {
+        return thumbnails.get(photo);
     }
 
     int viewPositionXForTest() {

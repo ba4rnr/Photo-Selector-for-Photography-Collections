@@ -109,6 +109,7 @@ final class ViewerPanel extends JPanel {
     private BufferedImage orientedImage;
     private boolean loading;
     private boolean failed;
+    private boolean deferredLoad;
 
     /**
      * 原图请求的代次。每换一次照片就加一，迟到的旧解码结果据此丢掉。
@@ -250,6 +251,7 @@ final class ViewerPanel extends JPanel {
     void showPhoto(Path newPhoto) {
         long request = ++loadVersion;
         this.photo = newPhoto;
+        this.deferredLoad = false;
         this.image = null;
         this.orientedImage = null;
         this.rawImage = null;
@@ -262,6 +264,31 @@ final class ViewerPanel extends JPanel {
         if (newPhoto != null) {
             loader.loadFull(newPhoto, loaded -> onLoaded(newPhoto, request, loaded));
         }
+    }
+
+    /**
+     * 只记下“当前照片是谁”，暂不解码。
+     *
+     * <p>整理模式的大图区不可见，那里点缩略图只需要选中状态和编辑对象；
+     * 等真正切回浏览模式再调用 {@link #showPhoto(Path)} 解码原图。
+     */
+    void selectPhotoDeferred(Path newPhoto) {
+        ++loadVersion;
+        this.photo = newPhoto;
+        this.image = null;
+        this.orientedImage = null;
+        this.rawImage = null;
+        this.failed = false;
+        this.loading = newPhoto != null;
+        this.deferredLoad = newPhoto != null;
+        this.edits = EditState.NONE;
+        resetView();
+        repaint();
+    }
+
+    /** 当前照片是否只是被选中、还没有真正读取原图。 */
+    boolean isLoadDeferred() {
+        return deferredLoad;
     }
 
     /**
@@ -480,6 +507,7 @@ final class ViewerPanel extends JPanel {
             return;
         }
         loading = false;
+        deferredLoad = false;
         failed = loaded == null;
         rawImage = loaded;
         rebuildImageFromEdits();

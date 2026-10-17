@@ -60,6 +60,7 @@ public final class MainFrame extends JFrame {
                 this::changeDefaultZoom, this::refreshHistoryStates));
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnTargetFolderError(this::targetFolderFailed);
+        mainPanel.setOnSaveResiduals(this::showSaveResiduals);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
         mainPanel.setOnSaveFinished(this::saveFinished);
 
@@ -265,6 +266,20 @@ public final class MainFrame extends JFrame {
                 "读不了或无法监听目标文件夹：\n" + folder
                         + "\n\n请检查目录是否存在、是否有读取权限。",
                 "目标文件夹", JOptionPane.ERROR_MESSAGE);
+    }
+
+    private void showSaveResiduals(java.util.List<Path> files) {
+        String names = files.stream().limit(8)
+                .map(path -> "· " + path.getFileName())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        if (files.size() > 8) {
+            names += "\n· …还有 " + (files.size() - 8) + " 个";
+        }
+        JOptionPane.showMessageDialog(this,
+                "发现上次保存中断留下的临时文件，已暂时排除在照片列表之外：\n\n"
+                        + names
+                        + "\n\n它们没有自动删除，请确认内容后手工处理。",
+                "保存残留", JOptionPane.WARNING_MESSAGE);
     }
 
     private static JMenu menu(String text) {

@@ -76,6 +76,7 @@ class SourceTreePanelTest {
         SwingUtilities.invokeAndWait(() -> panel.setRoot(library));
 
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) panel.tree().getModel().getRoot();
+        waitUntil(() -> root.getChildCount() == 3, "根目录后台加载");
         assertEquals(List.of("095_2026_0929", "096_2026_1001", "说明.txt"), childNames(root));
     }
 
@@ -87,6 +88,7 @@ class SourceTreePanelTest {
         SwingUtilities.invokeAndWait(() -> panel.setRoot(library));
 
         DefaultMutableTreeNode root = (DefaultMutableTreeNode) panel.tree().getModel().getRoot();
+        waitUntil(() -> root.getChildCount() == 3, "根目录后台加载");
         DefaultMutableTreeNode shoot = child(root, "095_2026_0929");
 
         // 展开之前，里面只放了一个占位节点——子项还没去读
@@ -96,6 +98,7 @@ class SourceTreePanelTest {
 
         // 展开它，占位换成真正的文件
         SwingUtilities.invokeAndWait(() -> panel.tree().expandPath(new TreePath(shoot.getPath())));
+        waitUntil(() -> shoot.getChildCount() == 2, "子文件夹后台加载");
         assertEquals(List.of("L1000001.JPG", "L1000002.JPG"), childNames(shoot));
     }
 
@@ -176,6 +179,13 @@ class SourceTreePanelTest {
         SourceTreePanel panel = new SourceTreePanel();
         SwingUtilities.invokeAndWait(() -> {
             panel.setRoot(root);
+        });
+        DefaultMutableTreeNode rootNode =
+                (DefaultMutableTreeNode) panel.tree().getModel().getRoot();
+        waitUntil(() -> rootNode.getChildCount() == 1
+                        && !SourceTreePanel.nodeOf(rootNode.getChildAt(0)).isPlaceholder(),
+                "根目录后台加载");
+        SwingUtilities.invokeAndWait(() -> {
             panel.setSize(180, 300);
             layoutTree(panel);
         });
@@ -216,6 +226,15 @@ class SourceTreePanelTest {
             }
         }
         return count;
+    }
+
+    private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(condition.getAsBoolean(), "等不到：" + what);
     }
 
     /** 离屏布局。 */

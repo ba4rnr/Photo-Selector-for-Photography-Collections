@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.NumberingRule;
+import com.photoselector.core.EditState;
 import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
 import com.photoselector.io.ThumbnailService;
@@ -59,6 +60,14 @@ class TargetFilmstripPanelTest {
         waitUntil(() -> strip.loadedCount() >= 4, "首屏缩略图");
         assertTrue(strip.loadedCount() < photos.size(),
                 "30 张不该一次性全部解码，底部条也要虚拟化");
+        Path first = photos.getFirst();
+        waitUntil(() -> strip.isLoaded(first), "第一张缩略图");
+        session.setEdits(first, EditState.NONE.rotate(1));
+        SwingUtilities.invokeAndWait(() -> strip.reloadThumbnail(first));
+        waitUntil(() -> strip.thumbnailOf(first) != null
+                        && strip.thumbnailOf(first).getHeight()
+                                > strip.thumbnailOf(first).getWidth(),
+                "底栏缩略图也应用虚拟编辑");
 
         Path last = photos.getLast();
         SwingUtilities.invokeAndWait(() -> strip.selectPhoto(last));
@@ -142,6 +151,8 @@ class TargetFilmstripPanelTest {
         assertEquals(expected, strip.selectedPhoto());
         assertEquals(expected, panel.arrangePanelForTest().selectedPhoto());
         assertEquals(expected, panel.viewerForTest().photo());
+        assertTrue(panel.viewerForTest().isLoadDeferred(),
+                "整理模式只记选中项，不应立刻解码隐藏的大图");
         panel.shutdown();
     }
 

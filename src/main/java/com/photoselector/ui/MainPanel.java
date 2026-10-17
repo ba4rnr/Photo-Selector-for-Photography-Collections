@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -133,6 +134,9 @@ public final class MainPanel extends JPanel {
 
     /** 目标文件夹读失败时通知外部；不能静默把它当成空文件夹。 */
     private Consumer<Path> onTargetFolderError = folder -> { };
+
+    /** 上次保存中断留下的临时文件；只提醒，不擅自删除。 */
+    private Consumer<List<Path>> onSaveResiduals = files -> { };
 
     /** 扫描出来的全部组；剔除哪些由目录树的勾选状态决定。 */
     private List<PhotoGroup> scannedGroups = List.of();
@@ -347,6 +351,9 @@ public final class MainPanel extends JPanel {
         rightCards.show(rightArea, next.name());
         bottomCards.show(bottomArea, next.name());
         toolBar.setMode(next);
+        if (next == ViewMode.BROWSE && viewer.isLoadDeferred()) {
+            showPhotoInViewer(arrangePanel.selectedPhoto());
+        }
         // 按钮上的字跟着状态变；刚露出来的那一块也要去取自己的缩略图
         boolean expanded = next == ViewMode.ARRANGE;
         targetPanel.setExpanded(expanded);
@@ -461,6 +468,7 @@ public final class MainPanel extends JPanel {
             Session session = targetPanel.session();
             if (session.setEdits(photo, session.editsOf(photo).rotate(clockwise ? 1 : -1))) {
                 viewer.setEdits(session.editsOf(photo));
+                refreshEditedThumbnail(photo);
                 historyChanged();
             }
         });
@@ -472,6 +480,7 @@ public final class MainPanel extends JPanel {
             Session session = targetPanel.session();
             if (session.setEdits(photo, session.editsOf(photo).flipHorizontal())) {
                 viewer.setEdits(session.editsOf(photo));
+                refreshEditedThumbnail(photo);
                 historyChanged();
             }
         });
@@ -483,6 +492,7 @@ public final class MainPanel extends JPanel {
             Session session = targetPanel.session();
             if (session.setEdits(photo, session.editsOf(photo).flipVertically())) {
                 viewer.setEdits(session.editsOf(photo));
+                refreshEditedThumbnail(photo);
                 historyChanged();
             }
         });
@@ -494,6 +504,7 @@ public final class MainPanel extends JPanel {
             Session session = targetPanel.session();
             if (session.clearEdits(photo)) {
                 viewer.setEdits(EditState.NONE);
+                refreshEditedThumbnail(photo);
                 historyChanged();
             }
         });
@@ -513,6 +524,7 @@ public final class MainPanel extends JPanel {
             EditState next = session.editsOf(photo).withCrop(crop);
             if (session.setEdits(photo, next)) {
                 viewer.setEdits(next);
+                refreshEditedThumbnail(photo);
                 historyChanged();
             }
         });
@@ -545,16 +557,24 @@ public final class MainPanel extends JPanel {
 
     /** 中间整理网格点中一张：大图状态和底部目标带一起跟上。 */
     private void arrangePhotoChosen(Path photo) {
-        showPhotoInViewer(photo);
+        showPhotoDeferredInViewer(photo);
         targetFilmstrip.selectPhoto(photo);
     }
 
     /** 底栏目标照片带点中一张：选中中间网格里的同一张，并滚到它。 */
     private void chooseFromTargetStrip(Path photo) {
-        showPhotoInViewer(photo);
+        showPhotoDeferredInViewer(photo);
         targetPanel.selectPhoto(photo);
         arrangePanel.selectPhoto(photo);
         targetFilmstrip.selectPhoto(photo);
+    }
+
+    /** 整理模式选图：只更新当前对象，不在隐藏的大图区解码全尺寸原图。 */
+    private void showPhotoDeferredInViewer(Path photo) {
+        viewer.selectPhotoDeferred(photo);
+        Session session = targetPanel.session();
+        viewer.setEdits(session == null ? EditState.NONE : session.editsOf(photo));
+        historyChanged();
     }
 
     /** 大图的当前比例（百分比），菜单里显示用。 */
@@ -626,13 +646,16 @@ public final class MainPanel extends JPanel {
         }
         scanPool.submit(() -> {
             List<Path> existing = List.of();
+            List<Path> residuals = List.of();
             IOException readError = null;
             try {
+                residuals = Saver.residualFiles(target);
                 existing = PhotoFiles.imagesIn(target);
             } catch (IOException e) {
                 readError = e;
             }
             List<Path> files = existing;
+            List<Path> leftovers = residuals;
             IOException failure = readError;
             SwingUtilities.invokeLater(() -> {
                 if (shutDown || myRound != targetLoadRound) {
@@ -654,6 +677,9 @@ public final class MainPanel extends JPanel {
                 arrangePanel.setSession(session);
                 trashPanel.setSession(session);
                 targetFilmstrip.setSession(session);
+                if (!leftovers.isEmpty()) {
+                    onSaveResiduals.accept(leftovers);
+                }
                 try {
                     targetWatcher.watch(target);
                 } catch (IOException e) {
@@ -676,6 +702,10 @@ public final class MainPanel extends JPanel {
     /** 目标文件夹读取失败的提示方式。 */
     public void setOnTargetFolderError(Consumer<Path> listener) {
         this.onTargetFolderError = listener == null ? folder -> { } : listener;
+    }
+
+    public void setOnSaveResiduals(Consumer<List<Path>> listener) {
+        this.onSaveResiduals = listener == null ? files -> { } : listener;
     }
 
     /** 监听线程说目标文件夹变了；真正读目录仍然回后台扫描池。 */
@@ -861,9 +891,18 @@ public final class MainPanel extends JPanel {
         }
         if (session.indexOf(photo) < 0) {
             viewer.setEdits(EditState.NONE);
+            refreshEditedThumbnail(photo);
             return;
         }
         viewer.setEdits(session.editsOf(photo));
+        refreshEditedThumbnail(photo);
+    }
+
+    /** 某张照片的虚拟编辑变了：让三条目标缩略图视图只重取这一张。 */
+    private void refreshEditedThumbnail(Path photo) {
+        targetPanel.reloadThumbnail(photo);
+        arrangePanel.reloadThumbnail(photo);
+        targetFilmstrip.reloadThumbnail(photo);
     }
 
     /**
@@ -1009,12 +1048,12 @@ public final class MainPanel extends JPanel {
     public boolean save() {
         Session session = targetPanel.session();
         if (session == null) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(),
                     List.of(), List.of("还没有选目标文件夹，没有可以保存的改动。")));
             return false;
         }
         if (session.isEmpty()) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(),
                     List.of(), List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
             return false;
         }
@@ -1025,7 +1064,7 @@ public final class MainPanel extends JPanel {
         try {
             plan = Saver.Plan.from(session);
         } catch (RuntimeException e) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(), List.of(),
                     List.of("保存没能开始：" + e.getMessage())));
             return false;
         }
@@ -1033,14 +1072,29 @@ public final class MainPanel extends JPanel {
         savePool.submit(() -> {
             Saver.Result result = new Saver().save(plan);
             SwingUtilities.invokeLater(() -> {
+                Path shownBeforeSave = viewer.photo();
                 saving = false; // 中间商马上要重建，此刻起放行——重建之后磁盘就是新的基准
                 // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
                 session.seedExisting(result.finalOrder());
                 // 没复制成功的那几条放回末尾，别让用户再去素材条里挑一遍
                 result.failedSources().forEach(session::add);
+                targetPanel.reloadThumbnails();
+                arrangePanel.reloadThumbnails();
+                targetFilmstrip.reloadThumbnails();
                 targetPanel.refresh();
                 arrangePanel.refresh();
                 targetFilmstrip.refresh();
+                if (shownBeforeSave != null) {
+                    Path finalPhoto = result.savedLocations().get(
+                            shownBeforeSave.toAbsolutePath().normalize());
+                    if (finalPhoto != null && Files.isRegularFile(finalPhoto)) {
+                        targetPanel.selectPhoto(finalPhoto);
+                        arrangePanel.selectPhoto(finalPhoto);
+                        targetFilmstrip.selectPhoto(finalPhoto);
+                        // 重新读保存后的文件，编辑状态已经在 seedExisting 里清空了。
+                        showPhotoInViewer(finalPhoto);
+                    }
+                }
                 handleSaveFinished(result);
             });
         });
@@ -1309,6 +1363,7 @@ public final class MainPanel extends JPanel {
         }
         shutDown = true;
         targetWatcher.close();
+        sourceTree.shutdown();
         thumbnailLoader.shutdown();
         targetLoader.shutdown(); // 之前漏了这只，关窗口后它的线程还活着、还攥着文件
         scanPool.shutdownNow();

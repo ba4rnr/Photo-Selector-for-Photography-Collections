@@ -79,7 +79,7 @@ public final class JpegImageSource implements ImageSource {
             }
             // 相机竖拍的照片像素是横着存的，靠 EXIF 那句"显示时转 90 度"。
             // 在这儿摆正，界面拿到的就永远是"看着是对的"那一版。
-            return ExifOrientation.apply(image, orientation());
+            return toRgb(ExifOrientation.apply(image, orientation()));
         } catch (IOException e) {
             throw new UncheckedIOException("解码失败：" + file, e);
         }

@@ -15,6 +15,8 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -22,6 +24,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTree;
+import javax.swing.SwingUtilities;
 import javax.swing.event.TreeExpansionEvent;
 import javax.swing.event.TreeWillExpandListener;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -74,6 +77,13 @@ final class SourceTreePanel extends JPanel {
 
     /** 被剔除的文件夹。空集合表示全部纳入。 */
     private final Set<Path> excluded = new HashSet<>();
+    private final ExecutorService listingPool = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "tree-lister");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final Set<DefaultMutableTreeNode> loadingNodes = new HashSet<>();
+    private long generation;
 
     private Consumer<Path> onFolderChosen = folder -> { };
 
@@ -129,6 +139,8 @@ final class SourceTreePanel extends JPanel {
 
     /** 换一个根文件夹。之前勾掉的和展开的状态都作废。 */
     void setRoot(Path folder) {
+        generation++;
+        loadingNodes.clear();
         excluded.clear();
         DefaultMutableTreeNode root = new DefaultMutableTreeNode(new Node(folder, true));
         root.add(new DefaultMutableTreeNode(Node.placeholder()));
@@ -228,18 +240,37 @@ final class SourceTreePanel extends JPanel {
         if (payload == null || !payload.folder() || !hasOnlyPlaceholder(node)) {
             return;
         }
-        node.removeAllChildren();
-        for (Path child : listChildren(payload.path())) {
-            boolean isFolder = Files.isDirectory(child);
-            DefaultMutableTreeNode childNode = new DefaultMutableTreeNode(new Node(child, isFolder));
-            if (isFolder) {
-                // 给文件夹塞个占位子节点，它才长得像"可以展开"，
-                // 真正的子项等用户展开时再去读
-                childNode.add(new DefaultMutableTreeNode(Node.placeholder()));
-            }
-            node.add(childNode);
+        if (!loadingNodes.add(node)) {
+            return; // 同一个节点已经有人在读
         }
-        model.nodeStructureChanged(node);
+        long myGeneration = generation;
+        listingPool.submit(() -> {
+            List<Path> children = listChildren(payload.path());
+            SwingUtilities.invokeLater(() -> {
+                loadingNodes.remove(node);
+                if (myGeneration != generation || !hasOnlyPlaceholder(node)) {
+                    return;
+                }
+                node.removeAllChildren();
+                for (Path child : children) {
+                    boolean isFolder = Files.isDirectory(child);
+                    DefaultMutableTreeNode childNode =
+                            new DefaultMutableTreeNode(new Node(child, isFolder));
+                    if (isFolder) {
+                        // 给文件夹塞个占位子节点，它才长得像"可以展开"，
+                        // 真正的子项等用户展开时再去读
+                        childNode.add(new DefaultMutableTreeNode(Node.placeholder()));
+                    }
+                    node.add(childNode);
+                }
+                model.nodeStructureChanged(node);
+            });
+        });
+    }
+
+    void shutdown() {
+        generation++;
+        listingPool.shutdownNow();
     }
 
     private static boolean hasOnlyPlaceholder(DefaultMutableTreeNode node) {

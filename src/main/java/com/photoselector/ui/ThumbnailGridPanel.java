@@ -22,6 +22,7 @@ import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Session;
+import com.photoselector.core.PhotoTransforms;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.Theme;
 
@@ -242,6 +243,16 @@ abstract class ThumbnailGridPanel extends JPanel {
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+    }
+
+    /** 只让某一张的缩略图失效，例如它刚被旋转、裁切或重置。 */
+    void reloadThumbnail(Path photo) {
+        if (photo != null && thumbnails.remove(photo) != null) {
+            repaint();
+        }
+        if (photo != null) {
+            SwingUtilities.invokeLater(this::requestVisibleThumbnails);
+        }
     }
 
     /** 面板内容变过之后通知外部。 */
@@ -524,7 +535,9 @@ abstract class ThumbnailGridPanel extends JPanel {
     }
 
     private void onThumbnail(Path source, BufferedImage image) {
-        thumbnails.put(source, image);
+        BufferedImage display = session == null ? image
+                : PhotoTransforms.apply(image, session.editsOf(source));
+        thumbnails.put(source, display);
         repaint();
     }
 
