@@ -10,6 +10,7 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
@@ -18,11 +19,15 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import javax.swing.AbstractAction;
+import javax.swing.JComponent;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JViewport;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Origin;
@@ -54,11 +59,16 @@ final class TargetFilmstripPanel extends JPanel {
     private Session session;
     private Path selectedPhoto;
     private Consumer<Path> onPhotoChosen = photo -> { };
+    private BiConsumer<Path, Integer> onReorder = (photo, slot) -> { };
+    private Point dragStart;
+    private Path draggingPhoto;
+    private int dropIndex = -1;
 
     TargetFilmstripPanel(ThumbnailLoader loader) {
         this.loader = loader;
         setBackground(Theme.PANEL);
         setOpaque(true);
+        setFocusable(true);
 
         addComponentListener(new ComponentAdapter() {
             @Override
@@ -66,7 +76,7 @@ final class TargetFilmstripPanel extends JPanel {
                 requestVisibleThumbnails();
             }
         });
-        addMouseListener(new MouseAdapter() {
+        MouseAdapter mouse = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 if (!SwingUtilities.isLeftMouseButton(e)) {
@@ -74,10 +84,63 @@ final class TargetFilmstripPanel extends JPanel {
                 }
                 int index = indexAt(e.getX(), e.getY());
                 if (index >= 0) {
+                    requestFocusInWindow();
                     Path photo = session.entryAt(index).source();
                     selectPhoto(photo);
                     onPhotoChosen.accept(photo);
+                    dragStart = e.getPoint();
+                    draggingPhoto = photo;
                 }
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (dragStart == null || draggingPhoto == null
+                        || e.getPoint().distance(dragStart) <= 5) {
+                    return;
+                }
+                dropIndex = dropIndexAt(e.getX());
+                DragOut.showGhost(TargetFilmstripPanel.this, e.getPoint(),
+                        thumbnails.get(draggingPhoto));
+                repaint();
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                Path moved = draggingPhoto;
+                int slot = dropIndex;
+                boolean dragged = dragStart != null
+                        && e.getPoint().distance(dragStart) > 5;
+                dragStart = null;
+                draggingPhoto = null;
+                dropIndex = -1;
+                DragOut.hideGhost(TargetFilmstripPanel.this);
+                repaint();
+                if (dragged && moved != null && slot >= 0) {
+                    onReorder.accept(moved, slot);
+                }
+            }
+        };
+        addMouseListener(mouse);
+        addMouseMotionListener(mouse);
+        bindArrowKeys();
+    }
+
+    private void bindArrowKeys() {
+        getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "target-strip-previous");
+        getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "target-strip-next");
+        getActionMap().put("target-strip-previous", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                moveSelection(-1);
+            }
+        });
+        getActionMap().put("target-strip-next", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                moveSelection(1);
             }
         });
     }
@@ -125,6 +188,10 @@ final class TargetFilmstripPanel extends JPanel {
         this.onPhotoChosen = listener == null ? photo -> { } : listener;
     }
 
+    void setOnReorder(BiConsumer<Path, Integer> listener) {
+        this.onReorder = listener == null ? (photo, slot) -> { } : listener;
+    }
+
     void selectPhoto(Path photo) {
         selectedPhoto = photo;
         if (photo != null) {
@@ -135,6 +202,52 @@ final class TargetFilmstripPanel extends JPanel {
 
     Path selectedPhoto() {
         return selectedPhoto;
+    }
+
+    /** 用键盘在目标照片带里前后选择。 */
+    private void moveSelection(int delta) {
+        if (session == null || count() == 0) {
+            return;
+        }
+        int current = selectedPhoto == null ? -1 : session.indexOf(selectedPhoto);
+        int next = current < 0 ? (delta >= 0 ? 0 : count() - 1)
+                : Math.max(0, Math.min(count() - 1, current + delta));
+        if (next == current) {
+            return;
+        }
+        Path photo = session.entryAt(next).source();
+        selectPhoto(photo);
+        onPhotoChosen.accept(photo);
+    }
+
+    private int dropIndexAt(int x) {
+        if (count() == 0) {
+            return 0;
+        }
+        int relative = x - PAD;
+        if (relative <= 0) {
+            return 0;
+        }
+        int index = relative / cellWidth();
+        int within = relative % cellWidth();
+        if (index >= count()) {
+            return count();
+        }
+        return within < THUMBNAIL_HEIGHT / 2 ? index : index + 1;
+    }
+
+    private Rectangle dropHintRect() {
+        if (dropIndex < 0 || count() == 0) {
+            return null;
+        }
+        int x;
+        if (dropIndex >= count()) {
+            Rectangle last = cellRect(count() - 1);
+            x = last.x + last.width + GAP / 2;
+        } else {
+            x = cellRect(dropIndex).x - GAP / 2;
+        }
+        return new Rectangle(x - 1, PAD, 3, THUMBNAIL_HEIGHT);
     }
 
     /** 装进横向滚动面板；滚动或视口变宽时重新请求可见缩略图。 */
@@ -266,6 +379,10 @@ final class TargetFilmstripPanel extends JPanel {
             g2.drawString(TextStyles.end(name, metrics, THUMBNAIL_HEIGHT),
                     cell.x, cell.y + cell.height + 14);
         }
+        Rectangle dropLine = dropHintRect();
+        if (dropLine != null) {
+            Painters.dropLine(g2, dropLine);
+        }
         g2.dispose();
     }
 
@@ -307,5 +424,9 @@ final class TargetFilmstripPanel extends JPanel {
 
     int viewPositionXForTest() {
         return getParent() instanceof JViewport viewport ? viewport.getViewPosition().x : -1;
+    }
+
+    Rectangle dropHintRectForTest() {
+        return dropHintRect();
     }
 }

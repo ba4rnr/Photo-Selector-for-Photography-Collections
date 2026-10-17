@@ -147,6 +147,13 @@ final class ViewerPanel extends JPanel {
     private boolean cropMode;
     private Point cropDragStart;
     private CropRect cropPreview;
+    private CropRect cropOriginal;
+    private CropGrab cropGrab;
+
+    /** 裁切框当前抓住的是内部、某条边，还是某个角。 */
+    private enum CropGrab {
+        NEW, MOVE, NW, N, NE, E, SE, S, SW, W
+    }
 
     /** 三分网格只是查看辅助，不进入编辑历史。 */
     private boolean gridVisible;
@@ -184,8 +191,11 @@ final class ViewerPanel extends JPanel {
                 } else if (chip == 1) {
                     actualSize();
                 } else if (cropMode && imageDrawRect().contains(e.getPoint())) {
-                    cropDragStart = clampToImage(e.getPoint());
-                    cropPreview = null;
+                    Point pressed = clampToImage(e.getPoint());
+                    cropDragStart = pressed;
+                    cropOriginal = edits.crop();
+                    cropGrab = cropGrabAt(pressed);
+                    cropPreview = cropGrab == CropGrab.NEW ? null : cropOriginal;
                     repaint();
                 } else if (canPan()) {
                     dragStart = e.getPoint();
@@ -198,7 +208,9 @@ final class ViewerPanel extends JPanel {
             @Override
             public void mouseDragged(MouseEvent e) {
                 if (cropDragStart != null) {
-                    cropPreview = normalizedCrop(cropDragStart, e.getPoint());
+                    cropPreview = cropGrab == CropGrab.NEW
+                            ? normalizedCrop(cropDragStart, e.getPoint())
+                            : adjustedCrop(cropDragStart, e.getPoint());
                     repaint();
                     return;
                 }
@@ -212,9 +224,13 @@ final class ViewerPanel extends JPanel {
             @Override
             public void mouseReleased(MouseEvent e) {
                 if (cropDragStart != null) {
-                    CropRect selected = normalizedCrop(cropDragStart, e.getPoint());
+                    CropRect selected = cropGrab == CropGrab.NEW
+                            ? normalizedCrop(cropDragStart, e.getPoint())
+                            : adjustedCrop(cropDragStart, e.getPoint());
                     cropDragStart = null;
                     cropPreview = null;
+                    cropOriginal = null;
+                    cropGrab = null;
                     if (selected != null) {
                         onCropCommitted.accept(selected);
                     }
@@ -257,6 +273,8 @@ final class ViewerPanel extends JPanel {
         this.rawImage = null;
         this.cropDragStart = null;
         this.cropPreview = null;
+        this.cropOriginal = null;
+        this.cropGrab = null;
         this.failed = false;
         this.loading = newPhoto != null;
         resetView(); // 换片把位置收回中间；缩放比例保留，方便连着看一堆细节
@@ -598,6 +616,8 @@ final class ViewerPanel extends JPanel {
             cropMode = nextCropMode;
             cropDragStart = null;
             cropPreview = null;
+            cropOriginal = null;
+            cropGrab = null;
             // 裁切要尽量看到完整画面，进入时自动适应窗口。
             fitToWindow();
         }
@@ -844,6 +864,86 @@ final class ViewerPanel extends JPanel {
                 (bottom - top) / (double) image.height);
     }
 
+    /** 判断按下的位置是在移动已有选框、抓边角缩放，还是重新画一个。 */
+    private CropGrab cropGrabAt(Point point) {
+        if (cropOriginal == null) {
+            return CropGrab.NEW;
+        }
+        Rectangle r = cropScreenRect(cropOriginal);
+        int tolerance = 8;
+        boolean left = Math.abs(point.x - r.x) <= tolerance;
+        boolean right = Math.abs(point.x - (r.x + r.width)) <= tolerance;
+        boolean top = Math.abs(point.y - r.y) <= tolerance;
+        boolean bottom = Math.abs(point.y - (r.y + r.height)) <= tolerance;
+        boolean acrossX = point.x >= r.x - tolerance && point.x <= r.x + r.width + tolerance;
+        boolean acrossY = point.y >= r.y - tolerance && point.y <= r.y + r.height + tolerance;
+
+        if (left && top) return CropGrab.NW;
+        if (right && top) return CropGrab.NE;
+        if (left && bottom) return CropGrab.SW;
+        if (right && bottom) return CropGrab.SE;
+        if (top && acrossX) return CropGrab.N;
+        if (bottom && acrossX) return CropGrab.S;
+        if (left && acrossY) return CropGrab.W;
+        if (right && acrossY) return CropGrab.E;
+        return r.contains(point) ? CropGrab.MOVE : CropGrab.NEW;
+    }
+
+    /** 移动 / 缩放已有选框，并保证四个边始终留在图片里。 */
+    private CropRect adjustedCrop(Point start, Point end) {
+        Rectangle image = imageDrawRect();
+        if (cropOriginal == null || image.width <= 0 || image.height <= 0) {
+            return null;
+        }
+        Point a = clampToImage(start);
+        Point b = clampToImage(end);
+        double dx = (b.x - a.x) / (double) image.width;
+        double dy = (b.y - a.y) / (double) image.height;
+        double left = cropOriginal.x();
+        double top = cropOriginal.y();
+        double right = left + cropOriginal.width();
+        double bottom = top + cropOriginal.height();
+        double minWidth = Math.min(0.5, 6.0 / image.width);
+        double minHeight = Math.min(0.5, 6.0 / image.height);
+
+        switch (cropGrab) {
+            case MOVE -> {
+                left = clamp(left + dx, 0, 1 - cropOriginal.width());
+                top = clamp(top + dy, 0, 1 - cropOriginal.height());
+                right = left + cropOriginal.width();
+                bottom = top + cropOriginal.height();
+            }
+            case NW -> {
+                left = clamp(left + dx, 0, right - minWidth);
+                top = clamp(top + dy, 0, bottom - minHeight);
+            }
+            case N -> top = clamp(top + dy, 0, bottom - minHeight);
+            case NE -> {
+                right = clamp(right + dx, left + minWidth, 1);
+                top = clamp(top + dy, 0, bottom - minHeight);
+            }
+            case E -> right = clamp(right + dx, left + minWidth, 1);
+            case SE -> {
+                right = clamp(right + dx, left + minWidth, 1);
+                bottom = clamp(bottom + dy, top + minHeight, 1);
+            }
+            case S -> bottom = clamp(bottom + dy, top + minHeight, 1);
+            case SW -> {
+                left = clamp(left + dx, 0, right - minWidth);
+                bottom = clamp(bottom + dy, top + minHeight, 1);
+            }
+            case W -> left = clamp(left + dx, 0, right - minWidth);
+            default -> {
+                return cropOriginal;
+            }
+        }
+        return new CropRect(left, top, right - left, bottom - top);
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private Rectangle cropScreenRect(CropRect crop) {
         Rectangle image = imageDrawRect();
         int left = image.x + (int) Math.round(crop.x() * image.width);
@@ -884,7 +984,27 @@ final class ViewerPanel extends JPanel {
         border.setStroke(new java.awt.BasicStroke(1f));
         border.drawRect(selected.x, selected.y,
                 Math.max(0, selected.width - 1), Math.max(0, selected.height - 1));
+        paintCropHandles(border, selected);
         border.dispose();
+    }
+
+    /** 四角和四边中点的小方块：告诉用户这里可以抓住缩放。 */
+    private static void paintCropHandles(Graphics2D g, Rectangle crop) {
+        int size = 7;
+        int half = size / 2;
+        int midX = crop.x + crop.width / 2;
+        int midY = crop.y + crop.height / 2;
+        int right = crop.x + crop.width;
+        int bottom = crop.y + crop.height;
+        int[][] handles = {
+            {crop.x, crop.y}, {midX, crop.y}, {right, crop.y},
+            {crop.x, midY}, {right, midY},
+            {crop.x, bottom}, {midX, bottom}, {right, bottom}
+        };
+        g.setColor(Theme.TEXT);
+        for (int[] handle : handles) {
+            g.fillRect(handle[0] - half, handle[1] - half, size, size);
+        }
     }
 
     /** 图片绘制矩形；给裁切 / 网格测试用。 */

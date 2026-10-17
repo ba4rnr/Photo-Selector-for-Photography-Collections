@@ -278,6 +278,55 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 已有裁切框可以移动和从右下角缩放() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 400, 300);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+        CropRect initial = new CropRect(0.25, 0.25, 0.5, 0.5);
+        AtomicReference<CropRect> result = new AtomicReference<>();
+        viewer.setOnCropCommitted(result::set);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setEdits(EditState.NONE.withCrop(initial));
+            viewer.setCursorTool(CursorTool.CROP);
+        });
+        Rectangle image = viewer.imageDrawRectForTest();
+        Rectangle crop = screenRect(initial, image);
+
+        Point center = new Point(crop.x + crop.width / 2, crop.y + crop.height / 2);
+        Point movedCenter = new Point(center.x + 40, center.y);
+        SwingUtilities.invokeAndWait(() -> {
+            sendMouse(viewer, center, MouseEvent.MOUSE_PRESSED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, movedCenter, MouseEvent.MOUSE_DRAGGED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, movedCenter, MouseEvent.MOUSE_RELEASED, 0);
+        });
+        CropRect moved = result.get();
+        assertTrue(moved != null && moved.x() > initial.x(), "框内拖动应当移动选框");
+        assertEquals(initial.width(), moved.width(), 0.02, "移动不改变选框宽度");
+
+        SwingUtilities.invokeAndWait(() -> viewer.setEdits(EditState.NONE.withCrop(moved)));
+        Rectangle movedScreen = screenRect(moved, image);
+        Point corner = new Point(movedScreen.x + movedScreen.width,
+                movedScreen.y + movedScreen.height);
+        Point enlarged = new Point(corner.x + 30, corner.y + 20);
+        SwingUtilities.invokeAndWait(() -> {
+            sendMouse(viewer, corner, MouseEvent.MOUSE_PRESSED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, enlarged, MouseEvent.MOUSE_DRAGGED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, enlarged, MouseEvent.MOUSE_RELEASED, 0);
+        });
+        CropRect resized = result.get();
+        assertTrue(resized.width() > moved.width(), "抓右下角外拖应当变宽");
+        assertTrue(resized.height() > moved.height(), "抓右下角外拖应当变高");
+        loader.shutdown();
+    }
+
+    @Test
     void 滚轮在整百倍率之间跳() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
@@ -470,5 +519,13 @@ class ViewerPanelTest {
         int button = id == MouseEvent.MOUSE_DRAGGED ? MouseEvent.NOBUTTON : MouseEvent.BUTTON1;
         viewer.dispatchEvent(new MouseEvent(viewer, id, System.currentTimeMillis(), modifiers,
                 point.x, point.y, id == MouseEvent.MOUSE_PRESSED ? 1 : 0, false, button));
+    }
+
+    private static Rectangle screenRect(CropRect crop, Rectangle image) {
+        int left = image.x + (int) Math.round(crop.x() * image.width);
+        int top = image.y + (int) Math.round(crop.y() * image.height);
+        int right = image.x + (int) Math.round((crop.x() + crop.width()) * image.width);
+        int bottom = image.y + (int) Math.round((crop.y() + crop.height()) * image.height);
+        return new Rectangle(left, top, right - left, bottom - top);
     }
 }

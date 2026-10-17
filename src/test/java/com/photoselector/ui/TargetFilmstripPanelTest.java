@@ -156,6 +156,70 @@ class TargetFilmstripPanelTest {
         panel.shutdown();
     }
 
+    @Test
+    void 底栏拖动会给出白线落点并请求重排() throws Exception {
+        Theme.install();
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        List<Path> photos = List.of(
+                TestImages.writeJpeg(target.resolve("a.jpg"), 300, 200),
+                TestImages.writeJpeg(target.resolve("b.jpg"), 300, 200),
+                TestImages.writeJpeg(target.resolve("c.jpg"), 300, 200));
+        Session session = new Session(target, NumberingRule.DEFAULT);
+        session.seedExisting(photos);
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetFilmstripPanel strip = new TargetFilmstripPanel(loader);
+        JScrollPane scroll = strip.wrapInScrollPane();
+        AtomicReference<Path> moved = new AtomicReference<>();
+        AtomicReference<Integer> slot = new AtomicReference<>();
+        strip.setOnReorder((photo, index) -> {
+            moved.set(photo);
+            slot.set(index);
+        });
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(600, TargetFilmstripPanel.preferredHeight());
+            strip.setSession(session);
+            layoutTree(scroll);
+        });
+
+        int fromX = strip.cellXForTest(0) + 20;
+        int toX = strip.cellXForTest(2) + 100;
+        SwingUtilities.invokeAndWait(() -> {
+            strip.dispatchEvent(mouse(strip, MouseEvent.MOUSE_PRESSED, fromX, 30));
+            strip.dispatchEvent(mouse(strip, MouseEvent.MOUSE_DRAGGED, toX, 30));
+        });
+        assertTrue(strip.dropHintRectForTest() != null, "拖动时应当出现白线落点");
+        SwingUtilities.invokeAndWait(() ->
+                strip.dispatchEvent(mouse(strip, MouseEvent.MOUSE_RELEASED, toX, 30)));
+
+        assertEquals(photos.get(0), moved.get());
+        assertEquals(3, slot.get(), "拖到第三张右半边之后就是插到末尾");
+        loader.shutdown();
+    }
+
+    @Test
+    void 底栏左右键可以切换当前照片() throws Exception {
+        Theme.install();
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        List<Path> photos = List.of(
+                TestImages.writeJpeg(target.resolve("a.jpg"), 300, 200),
+                TestImages.writeJpeg(target.resolve("b.jpg"), 300, 200));
+        Session session = new Session(target, NumberingRule.DEFAULT);
+        session.seedExisting(photos);
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetFilmstripPanel strip = new TargetFilmstripPanel(loader);
+        strip.setSession(session);
+        AtomicReference<Path> chosen = new AtomicReference<>();
+        strip.setOnPhotoChosen(chosen::set);
+        strip.selectPhoto(photos.get(0));
+
+        strip.getActionMap().get("target-strip-next")
+                .actionPerformed(new java.awt.event.ActionEvent(strip, 0, "next"));
+
+        assertEquals(photos.get(1), strip.selectedPhoto());
+        assertEquals(photos.get(1), chosen.get());
+        loader.shutdown();
+    }
+
     private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
             throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;
@@ -172,5 +236,12 @@ class TargetFilmstripPanelTest {
                 layoutTree(nested);
             }
         }
+    }
+
+    private static MouseEvent mouse(Component source, int id, int x, int y) {
+        int button = id == MouseEvent.MOUSE_DRAGGED ? MouseEvent.NOBUTTON : MouseEvent.BUTTON1;
+        int modifiers = id == MouseEvent.MOUSE_RELEASED ? 0 : MouseEvent.BUTTON1_DOWN_MASK;
+        return new MouseEvent(source, id, System.currentTimeMillis(),
+                modifiers, x, y, id == MouseEvent.MOUSE_PRESSED ? 1 : 0, false, button);
     }
 }

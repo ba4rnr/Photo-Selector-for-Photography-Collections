@@ -239,6 +239,7 @@ public final class MainPanel extends JPanel {
         });
         arrangePanel.setOnPhotoChosen(this::arrangePhotoChosen);
         targetFilmstrip.setOnPhotoChosen(this::chooseFromTargetStrip);
+        targetFilmstrip.setOnReorder(this::reorder);
 
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张

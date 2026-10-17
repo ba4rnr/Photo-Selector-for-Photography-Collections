@@ -317,7 +317,7 @@ final class DragOut {
 
     // ─────────────────────────── 跟着鼠标的那张图 ───────────────────────────
 
-    private static void showGhost(JComponent source, Point pointInSource, BufferedImage image) {
+    static void showGhost(JComponent source, Point pointInSource, BufferedImage image) {
         JRootPane root = SwingUtilities.getRootPane(source);
         if (root == null) {
             return; // 还没挂到窗口上（离屏渲染），没有玻璃板可用
@@ -326,7 +326,7 @@ final class DragOut {
         layer.show(image, toWindow(source, pointInSource, root));
     }
 
-    private static void hideGhost(JComponent source) {
+    static void hideGhost(JComponent source) {
         JRootPane root = SwingUtilities.getRootPane(source);
         if (root != null && root.getGlassPane() instanceof GhostLayer layer) {
             layer.hideGhost();
