@@ -160,14 +160,17 @@ public final class Icons {
     }
 
     /**
-     * 旋转：逆时针的圆弧箭头，中间一个加号（参照 C1 的图标）。
+     * 旋转：逆时针的圆弧箭头，中间一个加号，右下角带一个下拉小三角（参照 C1）。
      *
-     * <p>弧不画满一圈，缺口留在左上，箭头从缺口处指回起点——"转一下"的意思
-     * 一眼能看出来；中间的加号是 C1 用来区分"旋转"和别的弧线图标的记号。
-     * 下拉小三角等做旋转菜单时再加。
+     * <p>缺口留在左上，箭头从缺口处指进去——"转一下"的意思一眼能看出来；
+     * 中间的加号把它和别的弧线图标区分开；右下角那个小三角是按钮上
+     * "这里还挂着菜单"的记号。光标只画工具本身的形状，不带这个小三角。
      */
     public static Icon rotate() {
-        return stroke(Icons::paintRotate);
+        return stroke(g -> {
+            paintRotate(g);
+            paintRotateMenuCaret(g);
+        });
     }
 
     /** 翻转：中轴两侧的镜像三角。 */
@@ -393,10 +396,26 @@ public final class Icons {
     }
 
     private static void paintRotate(Graphics2D g) {
-        g.draw(new Arc2D.Double(2.6, 2.6, 12.8, 12.8, -40, 300, Arc2D.OPEN));
-        arrowHead(g, 4.4, 4.6, -1, -0.35, 3.2);
-        g.draw(new Line2D.Double(9, 6.6, 9, 11.4));
-        g.draw(new Line2D.Double(6.6, 9, 11.4, 9));
+        // 圆心 (8.4, 8.4)、半径 5.1：弧从 195° 逆时针绕到 135°，缺口留在左侧；
+        // 末端压一枚实心三角箭头——C1 那个箭头是实心的，18 像素下比 V 形干净
+        g.draw(new Arc2D.Double(3.3, 3.3, 10.2, 10.2, 195, 300, Arc2D.OPEN));
+        double headRad = Math.toRadians(135);
+        double x = 8.4 + 5.1 * Math.cos(headRad);
+        double y = 8.4 - 5.1 * Math.sin(headRad);
+        solidArrowHead(g, x, y, -Math.sin(headRad), -Math.cos(headRad), 3.2, 1.7);
+        // 中间的加号：和圆环同心，别贴着圈
+        g.draw(new Line2D.Double(8.4, 6.5, 8.4, 10.3));
+        g.draw(new Line2D.Double(6.5, 8.4, 10.3, 8.4));
+    }
+
+    /** 旋转按钮右下角的下拉小三角；光标不画它。 */
+    private static void paintRotateMenuCaret(Graphics2D g) {
+        Path2D caret = new Path2D.Double();
+        caret.moveTo(13.4, 12.9);
+        caret.lineTo(16.4, 12.9);
+        caret.lineTo(14.9, 14.7);
+        caret.closePath();
+        g.fill(caret);
     }
 
     private static void paintFlip(Graphics2D g) {
@@ -489,6 +508,29 @@ public final class Icons {
                 x - length * Math.cos(angle - spread), y - length * Math.sin(angle - spread)));
         g.draw(new Line2D.Double(x, y,
                 x - length * Math.cos(angle + spread), y - length * Math.sin(angle + spread)));
+    }
+
+    /**
+     * 实心三角箭头：尖端在 (x,y)，往后按 (dx,dy) 的方向铺开。
+     *
+     * <p>旋转图标那种绕着圆周的箭头用它——V 形在 18 像素下会和圆弧糊成一团。
+     */
+    private static void solidArrowHead(Graphics2D g, double x, double y, double dx, double dy,
+                                       double length, double halfWidth) {
+        double norm = Math.hypot(dx, dy);
+        if (norm == 0) {
+            return;
+        }
+        double ux = dx / norm;
+        double uy = dy / norm;
+        double px = -uy;
+        double py = ux;
+        Path2D head = new Path2D.Double();
+        head.moveTo(x, y);
+        head.lineTo(x - length * ux + halfWidth * px, y - length * uy + halfWidth * py);
+        head.lineTo(x - length * ux - halfWidth * px, y - length * uy - halfWidth * py);
+        head.closePath();
+        g.fill(head);
     }
 
     /** 一根手指：两条竖线加一个圆头，底边不封口，好和手掌连成一体。 */
