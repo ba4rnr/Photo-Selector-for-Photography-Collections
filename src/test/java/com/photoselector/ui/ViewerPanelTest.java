@@ -1,6 +1,7 @@
 package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Component;
@@ -35,6 +36,51 @@ class ViewerPanelTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void 预读取前后邻居_跳到远处时丢掉不再相邻的缓存() throws Exception {
+        Theme.install();
+        Path folder = Files.createDirectories(tempDir.resolve("素材"));
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            photos.add(TestImages.writeJpeg(folder.resolve("p" + i + ".jpg"), 400, 300));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 450);
+            viewer.showPhoto(photos.get(2), photos.get(1), photos.get(3));
+        });
+
+        waitUntil(() -> viewer.hasImage() && viewer.cachedImageCountForTest() == 3,
+                "当前照片和前后邻居预读取完成");
+        assertTrue(viewer.isCachedForTest(photos.get(1)));
+        assertTrue(viewer.isCachedForTest(photos.get(2)));
+        assertTrue(viewer.isCachedForTest(photos.get(3)));
+
+        // 向右一张：新窗口是 C/D/E，原来的 B 立刻出局，C 仍可复用。
+        SwingUtilities.invokeAndWait(() ->
+                viewer.showPhoto(photos.get(3), photos.get(2), photos.get(4)));
+        assertFalse(viewer.isCachedForTest(photos.get(1)),
+                "滑到下一张后，旧上一张已经不在新的三张窗口里");
+        assertTrue(viewer.isCachedForTest(photos.get(2)), "新的上一张应当仍复用缓存");
+        assertTrue(viewer.hasImage(), "相邻张命中预读取时应当直接上屏，不用再等解码");
+
+        // 直接点到很远的 G：新邻居只有 F，旧的 C/D/E 必须全部销毁。
+        SwingUtilities.invokeAndWait(() ->
+                viewer.showPhoto(photos.get(6), photos.get(5), null));
+        assertFalse(viewer.hasImage(), "没预读过的远照片应当先清掉旧画面，等新图回来");
+        assertFalse(viewer.isCachedForTest(photos.get(2)));
+        assertFalse(viewer.isCachedForTest(photos.get(3)));
+        assertFalse(viewer.isCachedForTest(photos.get(4)));
+        waitUntil(() -> viewer.hasImage() && viewer.cachedImageCountForTest() == 2
+                        && loader.inFlightCount() == 0,
+                "新照片和唯一邻居读取完成");
+        assertTrue(viewer.isCachedForTest(photos.get(5)));
+        assertTrue(viewer.isCachedForTest(photos.get(6)));
+        loader.shutdown();
+    }
 
     @Test
     void 选中一张素材之后大图会显示它的原图() throws Exception {

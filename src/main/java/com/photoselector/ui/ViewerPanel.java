@@ -14,13 +14,17 @@ import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
 import java.awt.geom.Area;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
-import com.photoselector.io.ImageSource;
 import com.photoselector.core.CropRect;
 import com.photoselector.core.EditState;
 import com.photoselector.core.PhotoTransforms;
@@ -43,7 +47,9 @@ import com.photoselector.ui.theme.Theme;
  * <p>平移偏移会被<b>夹住</b>：最多拖到图片边缘与窗口边缘对齐，再拖也拖不动。
  * 图片比窗口小的那个方向直接固定居中——否则能把照片拖出视野，只剩一片黑。
  *
- * <p>同一时刻只留一张原图。24MP 解出来是九十多兆，留着上一张纯属浪费内存。
+ * <p>原图缓存只保留“当前张 + 浏览顺序里的上一张和下一张”。方向键连续过片时，
+ * 相邻照片已经解好，可以直接上屏；一旦跳到不相邻的照片，旧邻居会立即从缓存移除，
+ * 尚未完成的预读取也会取消，避免好几张已解码的大图长期占着内存。
  */
 @SuppressWarnings("serial")
 final class ViewerPanel extends JPanel {
@@ -110,6 +116,15 @@ final class ViewerPanel extends JPanel {
     private boolean loading;
     private boolean failed;
     private boolean deferredLoad;
+
+    /** 当前照片和前后邻居的原图；只按规范化路径保存，最多三张。 */
+    private final Map<Path, BufferedImage> fullImageCache = new HashMap<>();
+
+    /** 正在后台读取的邻居；换片时只取消已经不再属于新邻居集合的任务。 */
+    private final Map<Path, ThumbnailLoader.LoadHandle> prefetchLoads = new HashMap<>();
+    private Path previousPrefetch;
+    private Path nextPrefetch;
+    private ThumbnailLoader.LoadHandle currentLoad = ThumbnailLoader.LoadHandle.NONE;
 
     /**
      * 原图请求的代次。每换一次照片就加一，迟到的旧解码结果据此丢掉。
@@ -263,24 +278,58 @@ final class ViewerPanel extends JPanel {
 
     // ─────────────────────────── 对外接口 ───────────────────────────
 
-    /** 换一张要看的大图；传 null 表示什么都不看。 */
+    /** 换一张要看的大图；不提供邻居时不会预读取。传 null 表示什么都不看。 */
     void showPhoto(Path newPhoto) {
+        showPhoto(newPhoto, null, null);
+    }
+
+    /**
+     * 换一张大图，同时告诉视图它在浏览顺序里的前后邻居。
+     *
+     * <p>缓存和预读取都以这三张为界：当前张、上一张、下一张。新照片如果正好在旧邻居里，
+     * 可以直接复用已经解好的原图；如果是一次跨得很远的点选，旧缓存会在方法返回前清掉。
+     *
+     * @param newPhoto 当前照片
+     * @param previous 浏览顺序里的上一张，没有就传 null
+     * @param next     浏览顺序里的下一张，没有就传 null
+     */
+    void showPhoto(Path newPhoto, Path previous, Path next) {
         long request = ++loadVersion;
-        this.photo = newPhoto;
+        cancelCurrentLoad();
+        this.photo = normalize(newPhoto);
         this.deferredLoad = false;
         this.image = null;
         this.orientedImage = null;
         this.rawImage = null;
+        this.edits = EditState.NONE;
         this.cropDragStart = null;
         this.cropPreview = null;
         this.cropOriginal = null;
         this.cropGrab = null;
         this.failed = false;
-        this.loading = newPhoto != null;
+        this.loading = this.photo != null;
+
+        previousPrefetch = neighbor(previous, this.photo);
+        nextPrefetch = neighbor(next, this.photo);
+        retainOnlyCurrentAndNeighbors();
         resetView(); // 换片把位置收回中间；缩放比例保留，方便连着看一堆细节
         repaint();
-        if (newPhoto != null) {
-            loader.loadFull(newPhoto, loaded -> onLoaded(newPhoto, request, loaded));
+
+        if (this.photo == null) {
+            return;
+        }
+
+        BufferedImage cached = fullImageCache.get(this.photo);
+        if (cached != null) {
+            loading = false;
+            rawImage = cached;
+            rebuildImageFromEdits();
+            prefetch(previousPrefetch);
+            prefetch(nextPrefetch);
+        } else {
+            Path requested = this.photo;
+            currentLoad = loader.loadFull(requested,
+                    loaded -> onLoaded(requested, request, loaded));
         }
     }
 
@@ -292,7 +341,11 @@ final class ViewerPanel extends JPanel {
      */
     void selectPhotoDeferred(Path newPhoto) {
         ++loadVersion;
-        this.photo = newPhoto;
+        cancelCurrentLoad();
+        clearFullImageCache();
+        previousPrefetch = null;
+        nextPrefetch = null;
+        this.photo = normalize(newPhoto);
         this.image = null;
         this.orientedImage = null;
         this.rawImage = null;
@@ -505,6 +558,24 @@ final class ViewerPanel extends JPanel {
         return image != null;
     }
 
+    /** 丢掉当前图和邻居的原图缓存，下一次显示会重新读磁盘。保存或外部改动后使用。 */
+    void clearFullImageCache() {
+        for (ThumbnailLoader.LoadHandle handle : prefetchLoads.values()) {
+            handle.cancel();
+        }
+        prefetchLoads.clear();
+        fullImageCache.clear();
+    }
+
+    /** 当前缓存了几张原图；正常情况下最多是当前张 + 前后两张。 */
+    int cachedImageCountForTest() {
+        return fullImageCache.size();
+    }
+
+    boolean isCachedForTest(Path candidate) {
+        return fullImageCache.containsKey(normalize(candidate));
+    }
+
     /** 当前显示比例（百分比）。表头和测试用。 */
     int zoomPercent() {
         if (displayImage() == null) {
@@ -524,13 +595,87 @@ final class ViewerPanel extends JPanel {
         if (request != loadVersion || !Objects.equals(requested, photo)) {
             return;
         }
+        currentLoad = ThumbnailLoader.LoadHandle.NONE;
         loading = false;
         deferredLoad = false;
         failed = loaded == null;
         rawImage = loaded;
+        if (loaded != null) {
+            fullImageCache.put(normalize(requested), loaded);
+        }
         rebuildImageFromEdits();
+        // 当前这张先上屏，再去读前后两张；别让预读取抢在用户真正要看的那张前面。
+        prefetch(previousPrefetch);
+        prefetch(nextPrefetch);
         resetView();
         repaint();
+    }
+
+    private static Path normalize(Path path) {
+        return path == null ? null : path.toAbsolutePath().normalize();
+    }
+
+    /** 邻居不能就是当前照片本身；其余路径统一规范化，免得同一文件出现两份缓存。 */
+    private static Path neighbor(Path candidate, Path current) {
+        Path normalized = normalize(candidate);
+        return normalized == null || normalized.equals(current) ? null : normalized;
+    }
+
+    /**
+     * 只留下当前照片与它现在的前后邻居。
+     *
+     * <p>这一步发生在换片当下，而不是等后台解码完：跳到远处照片时，
+     * 旧图占的内存会立刻释放，旧预取任务也会马上取消。
+     */
+    private void retainOnlyCurrentAndNeighbors() {
+        Set<Path> keep = new HashSet<>();
+        if (photo != null) {
+            keep.add(photo);
+        }
+        if (previousPrefetch != null) {
+            keep.add(previousPrefetch);
+        }
+        if (nextPrefetch != null) {
+            keep.add(nextPrefetch);
+        }
+
+        fullImageCache.keySet().removeIf(path -> !keep.contains(path));
+        Iterator<Map.Entry<Path, ThumbnailLoader.LoadHandle>> loads =
+                prefetchLoads.entrySet().iterator();
+        while (loads.hasNext()) {
+            Map.Entry<Path, ThumbnailLoader.LoadHandle> entry = loads.next();
+            if (!keep.contains(entry.getKey())) {
+                entry.getValue().cancel();
+                loads.remove();
+            }
+        }
+    }
+
+    /** 后台读一张邻居原图；已有缓存或已经在路上就不重复请求。 */
+    private void prefetch(Path candidate) {
+        if (candidate == null || candidate.equals(photo)
+                || fullImageCache.containsKey(candidate)
+                || prefetchLoads.containsKey(candidate)) {
+            return;
+        }
+        ThumbnailLoader.LoadHandle handle = loader.loadFull(candidate,
+                loaded -> onPrefetched(candidate, loaded));
+        prefetchLoads.put(candidate, handle);
+    }
+
+    /** 邻居读完后只进内存，不换屏；它必须仍属于当前照片的前后两张。 */
+    private void onPrefetched(Path requested, BufferedImage loaded) {
+        prefetchLoads.remove(requested);
+        if (loaded == null || photo == null
+                || !(requested.equals(previousPrefetch) || requested.equals(nextPrefetch))) {
+            return;
+        }
+        fullImageCache.put(requested, loaded);
+    }
+
+    private void cancelCurrentLoad() {
+        currentLoad.cancel();
+        currentLoad = ThumbnailLoader.LoadHandle.NONE;
     }
 
     /** 当前原图请求的代次；给回归测试构造“迟到的旧结果”用。 */

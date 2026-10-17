@@ -558,11 +558,35 @@ public final class MainPanel extends JPanel {
     /** 大图换片时把这张照片已有的编辑一起灌进去；所有入口都走这里。 */
     private void showPhotoInViewer(Path photo) {
         rememberViewedPhoto(photo);
-        viewer.showPhoto(photo);
+        FilmstripPanel.Neighbors neighbors = neighborsForViewer(photo);
+        viewer.showPhoto(photo, neighbors.previous(), neighbors.next());
         Session session = targetPanel.session();
         viewer.setEdits(session == null ? EditState.NONE : session.editsOf(photo));
         // 选中的照片换了，"能不能编辑"也跟着变：旋转 / 翻转 / 重置要跟着亮 / 灰
         historyChanged();
+    }
+
+    /**
+     * 大图该预读取哪两张。
+     *
+     * <p>素材照片按底部素材条的真实顺序取邻居——收起的分组也按方向键的实际行为跳过；
+     * 只在目标文件夹里出现、不在素材条里的照片，则按目标序列取前后张。
+     */
+    private FilmstripPanel.Neighbors neighborsForViewer(Path photo) {
+        if (photo == null) {
+            return FilmstripPanel.Neighbors.NONE;
+        }
+        if (filmstrip.containsPhoto(photo)) {
+            return filmstrip.neighborsOf(photo);
+        }
+        Session session = targetPanel.session();
+        int index = session == null ? -1 : session.indexOf(photo);
+        if (index < 0) {
+            return FilmstripPanel.Neighbors.NONE;
+        }
+        return new FilmstripPanel.Neighbors(
+                index > 0 ? session.entryAt(index - 1).source() : null,
+                index + 1 < session.size() ? session.entryAt(index + 1).source() : null);
     }
 
     /** 中间整理网格点中一张：大图状态和底部目标带一起跟上。 */
@@ -645,6 +669,7 @@ public final class MainPanel extends JPanel {
      */
     public void applyWorkspace(Workspace newWorkspace) {
         this.workspace = newWorkspace;
+        viewer.clearFullImageCache(); // 新工作区的路径与邻居顺序都换了，旧原图不能再复用
         pendingRestorePhoto = newWorkspace.lastViewedPhoto();
         sourceLoadFinished = false;
         targetLoadFinished = false;
@@ -850,6 +875,8 @@ public final class MainPanel extends JPanel {
 
     /** 把扫描到的磁盘现状合进当前中间商，并刷新所有相关视图。 */
     private void applyExternalTargetFiles(Path target, List<Path> files) {
+        // 目标文件可能被外部程序原地替换；缓存里即使路径没变，像素也未必还是旧的。
+        viewer.clearFullImageCache();
         Session session = targetPanel.session();
         Path targetRoot = target.toAbsolutePath().normalize();
         if (session == null
@@ -1157,6 +1184,8 @@ public final class MainPanel extends JPanel {
                 targetPanel.refresh();
                 arrangePanel.refresh();
                 targetFilmstrip.refresh();
+                // 保存可能改名、改写像素，旧缓存里的“同一路径”已经不代表同一张图。
+                viewer.clearFullImageCache();
                 if (shownBeforeSave != null) {
                     Path finalPhoto = result.savedLocations().get(
                             shownBeforeSave.toAbsolutePath().normalize());

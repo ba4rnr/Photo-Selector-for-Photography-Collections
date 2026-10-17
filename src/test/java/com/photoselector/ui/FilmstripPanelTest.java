@@ -465,7 +465,13 @@ class FilmstripPanelTest {
                 middle.x + 30, 8, 1, false, MouseEvent.BUTTON1)));
         assertTrue(filmstrip.isCollapsed(groups.get(1).folder()));
 
-        filmstrip.setCurrentPhoto(groups.get(0).photos().get(0));
+        Path first = groups.get(0).photos().get(0);
+        Path third = groups.get(2).photos().get(0);
+        FilmstripPanel.Neighbors neighbors = filmstrip.neighborsOf(first);
+        assertEquals(third, neighbors.next(), "预读取也要跳过已收起组");
+        assertEquals(null, neighbors.previous(), "第一张前面没有邻居");
+
+        filmstrip.setCurrentPhoto(first);
         filmstrip.moveCurrent(1);
 
         assertEquals(groups.get(2).photos().get(0), filmstrip.currentPhoto(),

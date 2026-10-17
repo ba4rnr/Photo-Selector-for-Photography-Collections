@@ -28,8 +28,8 @@ import com.photoselector.io.ThumbnailService;
  * <p>另外两件容易做错、这里顺手处理掉的事：
  * <ul>
  *   <li><b>去重</b>。滚动时同一个格子会被反复请求，同一张图已经在路上就不必再排一次队。</li>
- *   <li><b>作废</b>。换了文件夹之后，上一轮排队的请求结果必须全部丢掉，
- *       否则新文件夹的画面会被旧图一张张刷回来。</li>
+ *   <li><b>作废</b>。素材条换文件夹后，上一轮排队中的缩略图结果必须全部丢掉，
+ *       否则新文件夹的画面会被旧图一张张刷回来。大图有独立轮次和取消句柄，不受影响。</li>
  * </ul>
  */
 final class ThumbnailLoader {
@@ -37,21 +37,54 @@ final class ThumbnailLoader {
     private final ThumbnailService service;
     private final ExecutorService pool;
 
+    /** 一次原图请求的取消句柄。预读取被换片淘汰时用它停止后续解码和回调。 */
+    interface LoadHandle {
+        void cancel();
+
+        LoadHandle NONE = () -> { };
+    }
+
     /** 一次等待中的请求，以及所有等这张图的回调。 */
-    private record Pending(long session, Consumer<BufferedImage> callback) {
+    private static final class Pending {
+        final long session;
+        final Consumer<BufferedImage> callback;
+        final boolean full;
+        volatile boolean cancelled;
+
+        Pending(long session, Consumer<BufferedImage> callback, boolean full) {
+            this.session = session;
+            this.callback = callback;
+            this.full = full;
+        }
+
+        boolean active(long currentThumbnailSession, long currentFullSession) {
+            long current = full ? currentFullSession : currentThumbnailSession;
+            return !cancelled && session == current;
+        }
     }
 
     /** 正在排队或正在解的一张图；同一张图的多个调用者共享一次解码。 */
     private static final class InFlight {
         final List<Pending> listeners = new CopyOnWriteArrayList<>();
+        final boolean full;
         volatile boolean completed;
+
+        InFlight(boolean full) {
+            this.full = full;
+        }
     }
 
     /** 正在排队或正在解的图（键是路径 + 目标高度）。 */
     private final Map<String, InFlight> inFlight = new ConcurrentHashMap<>();
 
-    /** 当前是第几轮。每次换文件夹就加一，旧一轮的回调自然全部失效。 */
-    private final AtomicLong session = new AtomicLong();
+    /**
+     * 缩略图与大图各有一条轮次线。
+     *
+     * <p>素材条换一组缩略图时只该作废缩略图请求；正在看的大图和预读取与那次筛选无关，
+     * 不能一起被静默取消。
+     */
+    private final AtomicLong thumbnailSession = new AtomicLong();
+    private final AtomicLong fullSession = new AtomicLong();
 
     /** 是不是已经关掉了。关掉之后不再收新的请求。 */
     private final AtomicBoolean shutdown = new AtomicBoolean();
@@ -67,10 +100,10 @@ final class ThumbnailLoader {
         });
     }
 
-    /** 开始新一轮（比如换了文件夹）。之前排队的请求，结果一律作废。 */
+    /** 开始缩略图的新一轮（比如换了文件夹）。之前排队的缩略图结果一律作废。 */
     void restart() {
-        session.incrementAndGet();
-        inFlight.clear();
+        thumbnailSession.incrementAndGet();
+        inFlight.entrySet().removeIf(entry -> !entry.getValue().full);
     }
 
     /**
@@ -85,9 +118,9 @@ final class ThumbnailLoader {
             // 直接忽略：不忽略的话 submit 会抛 RejectedExecutionException
             return;
         }
-        long mySession = session.get();
+        long mySession = thumbnailSession.get();
         String key = photo.toAbsolutePath() + "|" + maxHeight;
-        InFlight task = join(key, new Pending(mySession, onReady));
+        InFlight task = join(key, new Pending(mySession, onReady, false));
         if (task == null) {
             return; // 已经并进前一个请求，回调会在那一次完成时统一调用
         }
@@ -112,16 +145,20 @@ final class ThumbnailLoader {
      *
      * <p>比缩略图慢得多（24MP 的 JPEG 要几百毫秒），所以同样丢给线程池。
      * 读不出来时回调收到 {@code null}——大图视图据此显示"读不出来"，而不是一直转圈。
+     *
+     * @return 取消句柄；预读取不再需要时可撤掉自己的回调，尚未开始的任务会直接跳过
      */
-    void loadFull(Path photo, Consumer<BufferedImage> onReady) {
+    LoadHandle loadFull(Path photo, Consumer<BufferedImage> onReady) {
         if (shutdown.get()) {
-            return;
+            return LoadHandle.NONE;
         }
-        long mySession = session.get();
+        long mySession = fullSession.get();
         String key = photo.toAbsolutePath() + "|full";
-        InFlight task = join(key, new Pending(mySession, onReady));
+        Pending pending = new Pending(mySession, onReady, true);
+        InFlight task = join(key, pending);
+        LoadHandle handle = () -> cancel(key, pending);
         if (task == null) {
-            return;
+            return handle;
         }
 
         submit(key, task, () -> {
@@ -137,6 +174,7 @@ final class ThumbnailLoader {
                 complete(key, task);
             }
         });
+        return handle;
     }
 
     /**
@@ -148,7 +186,7 @@ final class ThumbnailLoader {
         java.util.concurrent.atomic.AtomicBoolean owner = new java.util.concurrent.atomic.AtomicBoolean();
         InFlight task = inFlight.compute(key, (ignored, existing) -> {
             if (existing == null || existing.completed) {
-                InFlight fresh = new InFlight();
+                InFlight fresh = new InFlight(pending.full);
                 fresh.listeners.add(pending);
                 owner.set(true);
                 return fresh;
@@ -165,10 +203,19 @@ final class ThumbnailLoader {
         inFlight.remove(key, task);
     }
 
+    private void cancel(String key, Pending pending) {
+        pending.cancelled = true;
+        InFlight task = inFlight.get(key);
+        if (task != null) {
+            task.listeners.remove(pending);
+        }
+    }
+
     private boolean hasCurrentWaiter(InFlight task) {
-        long current = session.get();
+        long thumbnails = thumbnailSession.get();
+        long full = fullSession.get();
         for (Pending pending : task.listeners) {
-            if (pending.session() == current) {
+            if (pending.active(thumbnails, full)) {
                 return true;
             }
         }
@@ -197,10 +244,11 @@ final class ThumbnailLoader {
      */
     private void deliver(InFlight task, BufferedImage image) {
         SwingUtilities.invokeLater(() -> {
-            long current = session.get();
+            long thumbnails = thumbnailSession.get();
+            long full = fullSession.get();
             for (Pending pending : task.listeners) {
-                if (pending.session() == current) {
-                    pending.callback().accept(image);
+                if (pending.active(thumbnails, full)) {
+                    pending.callback.accept(image);
                 }
             }
         });

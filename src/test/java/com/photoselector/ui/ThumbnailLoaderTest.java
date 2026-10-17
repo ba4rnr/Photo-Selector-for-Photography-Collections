@@ -127,4 +127,36 @@ class ThumbnailLoaderTest {
         assertEquals(2, callbacks.get());
         loader.shutdown();
     }
+
+    @Test
+    void 取消的预读取不回调_同一张的有效请求仍会完成() throws Exception {
+        Path photo = TestImages.writeJpeg(tempDir.resolve("prefetch.jpg"), 900, 600);
+        ThumbnailLoader loader = newLoader();
+
+        AtomicInteger cancelledCallbacks = new AtomicInteger();
+        ThumbnailLoader.LoadHandle stale = loader.loadFull(photo,
+                image -> cancelledCallbacks.incrementAndGet());
+        stale.cancel();
+
+        CountDownLatch active = new CountDownLatch(1);
+        loader.loadFull(photo, image -> active.countDown());
+        assertTrue(active.await(30, TimeUnit.SECONDS), "仍被需要的请求应当正常完成");
+        Thread.sleep(200);
+        assertEquals(0, cancelledCallbacks.get(), "已经取消的预读取不能再回调");
+        loader.shutdown();
+    }
+
+    @Test
+    void 素材条换一轮缩略图不会误伤正在读的大图() throws Exception {
+        Path photo = TestImages.writeJpeg(tempDir.resolve("full.jpg"), 900, 600);
+        ThumbnailLoader loader = newLoader();
+
+        CountDownLatch fullDone = new CountDownLatch(1);
+        loader.loadFull(photo, image -> fullDone.countDown());
+        loader.restart();
+
+        assertTrue(fullDone.await(30, TimeUnit.SECONDS),
+                "缩略图换轮次不应取消当前大图或它的预读取");
+        loader.shutdown();
+    }
 }

@@ -94,6 +94,11 @@ final class FilmstripPanel extends JPanel {
         }
     }
 
+    /** 当前照片在可见浏览序列里的前后邻居；到头或找不到时对应项是 null。 */
+    record Neighbors(Path previous, Path next) {
+        static final Neighbors NONE = new Neighbors(null, null);
+    }
+
     private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
     private final Set<Path> collapsed = new HashSet<>();
 
@@ -327,12 +332,7 @@ final class FilmstripPanel extends JPanel {
      * <p>跨组连续：走到一组的最后一张，再往右就进下一组的第一张。
      */
     void moveCurrent(int delta) {
-        List<Path> flat = new ArrayList<>();
-        for (PhotoGroup group : groups) {
-            if (!collapsed.contains(group.folder())) {
-                flat.addAll(group.photos());
-            }
-        }
+        List<Path> flat = visiblePhotos();
         if (flat.isEmpty()) {
             return;
         }
@@ -343,6 +343,40 @@ final class FilmstripPanel extends JPanel {
         }
         setCurrentPhoto(flat.get(next));
         scrollToPhoto(flat.get(next));
+    }
+
+    /**
+     * 某张照片在“左右方向键实际会走过”的序列里的前后邻居。
+     *
+     * <p>已经收起的组不参与，和 {@link #moveCurrent(int)} 使用同一套顺序；
+     * 照片不在当前可见序列里时返回两个 null。
+     */
+    Neighbors neighborsOf(Path photo) {
+        if (photo == null) {
+            return Neighbors.NONE;
+        }
+        List<Path> flat = visiblePhotos();
+        Path wanted = photo.toAbsolutePath().normalize();
+        for (int i = 0; i < flat.size(); i++) {
+            if (!flat.get(i).toAbsolutePath().normalize().equals(wanted)) {
+                continue;
+            }
+            return new Neighbors(
+                    i > 0 ? flat.get(i - 1) : null,
+                    i + 1 < flat.size() ? flat.get(i + 1) : null);
+        }
+        return Neighbors.NONE;
+    }
+
+    /** 按当前折叠状态铺平所有可见照片，顺序就是方向键的过片顺序。 */
+    private List<Path> visiblePhotos() {
+        List<Path> flat = new ArrayList<>();
+        for (PhotoGroup group : groups) {
+            if (!collapsed.contains(group.folder())) {
+                flat.addAll(group.photos());
+            }
+        }
+        return flat;
     }
 
     /** 把某张照片所在的那一格滚进视野。 */
