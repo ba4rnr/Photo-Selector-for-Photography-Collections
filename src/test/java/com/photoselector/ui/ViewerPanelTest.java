@@ -421,6 +421,32 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 从适应窗口向下滚可以回到默认的18百分比() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 1200, 800);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        viewer.fitToWindow();
+        SwingUtilities.invokeAndWait(() -> {
+            for (int i = 0; i < 20 && viewer.zoomPercent() > 5; i++) {
+                viewer.zoomStep(-1);
+                if (viewer.zoomPercent() == 18) {
+                    break;
+                }
+            }
+        });
+        assertEquals(18, viewer.zoomPercent(), "滚轮档位里必须有默认的 18%");
+        loader.shutdown();
+    }
+
+    @Test
     void 滚轮缩放以鼠标所指的那一点为基准() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
