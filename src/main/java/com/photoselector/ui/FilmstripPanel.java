@@ -38,6 +38,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.JViewport;
 
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.ui.theme.Painters;
+import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -563,7 +565,7 @@ final class FilmstripPanel extends JPanel {
         g.setFont(Theme.FONT_SMALL);
         g.setColor(box.collapsed() ? Theme.TEXT : Theme.TEXT_MUTED);
         FontMetrics metrics = g.getFontMetrics();
-        g.drawString(shorten(headerText(group), metrics, box.width() - PAD * 2 - 24),
+        g.drawString(TextStyles.end(headerText(group), metrics, box.width() - PAD * 2 - 24),
                 box.x() + PAD + 18, 16);
 
         if (box.collapsed()) {
@@ -633,33 +635,14 @@ final class FilmstripPanel extends JPanel {
         BufferedImage image = thumbnails.get(photo);
         boolean current = photo.equals(currentPhoto);
 
-        // 当前选中用一块更亮的底色标出来。
-        // 特意不用细边框：一像素的线在缩放显示下左右宽度会不一样。
-        if (current) {
-            g.setColor(Theme.HIGHLIGHT);
-            g.fillRect(x - 2, y - 2, boxWidth + 4, thumbnailHeight + 4);
-        }
-
-        if (image == null) {
-            // 还没解出来：先占个位，图到了再重画。
-            // 底色用面板自己的深灰，别用 CANVAS——那是一格近黑的框，和周围对不上
-            g.setColor(Theme.PANEL);
-            g.fillRect(x, y, boxWidth, thumbnailHeight);
-            g.setColor(Theme.BORDER);
-            g.drawRect(x, y, boxWidth - 1, thumbnailHeight - 1);
-        } else {
-            double scale = Math.min((double) boxWidth / image.getWidth(),
-                    (double) thumbnailHeight / image.getHeight());
-            int width = Math.max(1, (int) Math.round(image.getWidth() * scale));
-            int height = Math.max(1, (int) Math.round(image.getHeight() * scale));
-            g.drawImage(image, x + (boxWidth - width) / 2, y + (thumbnailHeight - height) / 2,
-                    width, height, null);
-        }
+        // 高亮底、占位框、等比居中都走组件库：和目标栏、垃圾桶是同一个画法
+        Painters.thumbnailCell(g, new Rectangle(x, y, boxWidth, thumbnailHeight),
+                image, current, null, false);
 
         g.setColor(current ? Theme.TEXT : Theme.TEXT_MUTED);
         g.setFont(Theme.FONT_SMALL);
         FontMetrics metrics = g.getFontMetrics();
-        g.drawString(shorten(photo.getFileName().toString(), metrics, boxWidth),
+        g.drawString(TextStyles.end(photo.getFileName().toString(), metrics, boxWidth),
                 x, y + thumbnailHeight + 13);
     }
 
@@ -693,17 +676,5 @@ final class FilmstripPanel extends JPanel {
         g2.dispose();
     }
 
-    /** 文字太长就截断成"前面…"，保证一行放得下。 */
-    private static String shorten(String text, FontMetrics metrics, int maxWidth) {
-        if (metrics.stringWidth(text) <= maxWidth) {
-            return text;
-        }
-        String ellipsis = "…";
-        int end = text.length();
-        while (end > 1 && metrics.stringWidth(text.substring(0, end) + ellipsis) > maxWidth) {
-            end--;
-        }
-        return text.substring(0, end) + ellipsis;
-    }
 }
 

@@ -19,6 +19,8 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.io.ImageSource;
 import com.photoselector.core.EditState;
+import com.photoselector.ui.theme.Painters;
+import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -613,11 +615,7 @@ final class ViewerPanel extends JPanel {
     /** 一个小圆角块：当前生效的那个用亮一点的底色。 */
     private void paintChip(Graphics2D g, Rectangle bounds, String label, FontMetrics metrics,
                            boolean active) {
-        g.setColor(active ? Theme.HIGHLIGHT : Theme.PANEL);
-        g.fillRoundRect(bounds.x, bounds.y, bounds.width, bounds.height, 7, 7);
-        g.setColor(active ? Theme.TEXT : Theme.TEXT_MUTED);
-        g.drawString(label, bounds.x + (bounds.width - metrics.stringWidth(label)) / 2,
-                bounds.y + bounds.height / 2 + metrics.getAscent() / 2 - 1);
+        Painters.chip(g, bounds, metrics, label, active, false);
     }
 
     private void paintImageArea(Graphics2D g) {
@@ -674,17 +672,6 @@ final class ViewerPanel extends JPanel {
      * <p>路径两头的信息量最大——开头是盘符、结尾是文件夹名，中间的层级最不重要。
      */
     static String shortenMiddle(String text, FontMetrics metrics, int maxWidth) {
-        if (metrics.stringWidth(text) <= maxWidth) {
-            return text;
-        }
-        String ellipsis = "…";
-        int keep = text.length();
-        while (keep > 2 && metrics.stringWidth(
-                text.substring(0, keep / 2) + ellipsis + text.substring(text.length() - keep / 2))
-                > maxWidth) {
-            keep--;
-        }
-        int half = Math.max(1, keep / 2);
-        return text.substring(0, half) + ellipsis + text.substring(text.length() - half);
+        return TextStyles.middle(text, metrics, maxWidth);
     }
 }

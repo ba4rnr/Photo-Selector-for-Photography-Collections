@@ -25,6 +25,8 @@ import javax.swing.SwingUtilities;
 import com.photoselector.core.Origin;
 import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
+import com.photoselector.ui.theme.Painters;
+import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -518,7 +520,7 @@ final class TargetPanel extends JPanel {
         g.setColor(Theme.TEXT_MUTED);
         g.drawString(label, PADDING, baseline);
         g.setColor(Theme.TEXT);
-        g.drawString(shortenMiddle(path, metrics, rightEdge - countWidth - pathX), pathX, baseline);
+        g.drawString(TextStyles.middle(path, metrics, rightEdge - countWidth - pathX), pathX, baseline);
         if (showCount) {
             g.setColor(Theme.TEXT_MUTED);
             g.drawString(count, rightEdge - countWidth + GAP, baseline);
@@ -541,14 +543,13 @@ final class TargetPanel extends JPanel {
         int height = 20;
         int x = getWidth() - PADDING - Math.max(width, HEADER_BUTTON_SPACE - 12);
         int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
-        expandButtonBounds = new Rectangle(x, y, width, height);
-
-        g.setColor(Theme.HIGHLIGHT);
-        g.fillRoundRect(x, y, width, height, 7, 7);
-
-        // 小三角：展开时指向右（意思是"推出去"），收起时指向左
-        int arrowX = x + 9;
-        int arrowY = y + height / 2;
+        // 胶囊底由组件库统一画（和别的面板上的按钮同一套观感）；
+        // 这里只负责在它左边加一枚小三角。命中判断用的矩形也从同一处来。
+        int fullWidth = metrics.stringWidth("  " + label) + 26;
+        expandButtonBounds = new Rectangle(x, y, fullWidth, height);
+        Painters.chip(g, expandButtonBounds, metrics, "  " + label, true, false);
+        int arrowX = expandButtonBounds.x + 9;
+        int arrowY = expandButtonBounds.y + height / 2;
         g.setColor(Theme.TEXT_MUTED);
         if (expanded) {
             g.fillPolygon(new int[] {arrowX, arrowX, arrowX + 6},
@@ -557,9 +558,6 @@ final class TargetPanel extends JPanel {
             g.fillPolygon(new int[] {arrowX + 6, arrowX + 6, arrowX},
                     new int[] {arrowY - 5, arrowY + 5, arrowY}, 3);
         }
-
-        g.setColor(Theme.TEXT);
-        g.drawString(label, arrowX + 14, arrowY + metrics.getAscent() / 2 - 1);
     }
 
     /** 只画看得见的那几行。 */
@@ -585,26 +583,10 @@ final class TargetPanel extends JPanel {
         Path source = entry.source();
         BufferedImage image = thumbnails.get(source);
 
-        // 点中的那一格给一块更亮的底色——不然点下去除了大图换图，看不出发生了什么
-        if (index == chosenIndex) {
-            g.setColor(Theme.HIGHLIGHT);
-            g.fillRect(x - 2, y - 2, boxWidth + 4, thumbnailHeight + 4);
-        }
-        // 这里不铺底色：照片区就用面板自己的深灰。
-        // 原来铺的是 CANVAS（近黑）——横照片上下、竖照片左右空出来的那一条
-        // 就会变成一格黑框，看着像画错了（用户原话：应当是深灰，不是黑）。
-
-        if (image == null) {
-            g.setColor(Theme.BORDER);
-            g.drawRect(x, y, boxWidth - 1, thumbnailHeight - 1);
-        } else {
-            double scale = Math.min((double) boxWidth / image.getWidth(),
-                    (double) thumbnailHeight / image.getHeight());
-            int width = Math.max(1, (int) Math.round(image.getWidth() * scale));
-            int height = Math.max(1, (int) Math.round(image.getHeight() * scale));
-            g.drawImage(image, x + (boxWidth - width) / 2, y + (thumbnailHeight - height) / 2,
-                    width, height, null);
-        }
+        // 高亮底、占位框、等比居中——这一套规矩在组件库里（Painters.thumbnailCell），
+        // 和素材条、垃圾桶用的是同一个画法
+        Rectangle cell = new Rectangle(x, y, boxWidth, thumbnailHeight);
+        Painters.thumbnailCell(g, cell, image, index == chosenIndex, null, false);
 
         // 名字用编号规则按位置现算，而不是文件现在叫什么。
         // 已有的用普通色、新挑进来的用暖橙——一眼看出哪些还没落到磁盘上。
@@ -621,7 +603,7 @@ final class TargetPanel extends JPanel {
                 : "在下方素材条里点中一张照片，按空格键加入这里";
         FontMetrics metrics = g.getFontMetrics();
         for (String line : hint.split("\n")) {
-            g.drawString(shorten(line, metrics, getWidth() - PADDING * 2), PADDING,
+            g.drawString(TextStyles.end(line, metrics, getWidth() - PADDING * 2), PADDING,
                     HEADER_HEIGHT + metrics.getAscent() + 6);
         }
     }
@@ -670,35 +652,8 @@ final class TargetPanel extends JPanel {
      * <p>尾部最有用——认出"这是哪个文件夹"靠的就是最后一段，所以头最多只占
      * 三分之一的宽度，剩下的尽量都留给尾部。
      */
+    /** 路径太长就在中间截断。组件库里的通用实现，保留这个方法名给旧测试用。 */
     static String shortenMiddle(String text, FontMetrics metrics, int maxWidth) {
-        if (metrics.stringWidth(text) <= maxWidth) {
-            return text;
-        }
-        String ellipsis = "…";
-        int headMax = Math.max(1, maxWidth / 3);
-        int headEnd = 1;
-        while (headEnd < text.length()
-                && metrics.stringWidth(text.substring(0, headEnd + 1) + ellipsis) <= headMax) {
-            headEnd++;
-        }
-        int tailStart = text.length() - 1;
-        while (tailStart > headEnd
-                && metrics.stringWidth(text.substring(0, headEnd) + ellipsis
-                        + text.substring(tailStart - 1)) <= maxWidth) {
-            tailStart--;
-        }
-        return text.substring(0, headEnd) + ellipsis + text.substring(tailStart);
-    }
-
-    /** 文字太长就截断成"前面…"。 */
-    private static String shorten(String text, FontMetrics metrics, int maxWidth) {
-        if (metrics.stringWidth(text) <= maxWidth) {
-            return text;
-        }
-        int end = text.length();
-        while (end > 1 && metrics.stringWidth(text.substring(0, end) + "…") > maxWidth) {
-            end--;
-        }
-        return text.substring(0, end) + "…";
+        return TextStyles.middle(text, metrics, maxWidth);
     }
 }

@@ -24,6 +24,8 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Session;
 import com.photoselector.core.TrashedItem;
+import com.photoselector.ui.theme.Painters;
+import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -317,23 +319,9 @@ final class TrashPanel extends JPanel {
         BufferedImage image = thumbnails.get(photo);
         boolean current = photo.equals(chosen);
 
-        if (current) {
-            g.setColor(Theme.HIGHLIGHT);
-            g.fillRect(x - 2, y - 2, BOX_WIDTH + 4, BOX_WIDTH + 4);
-        }
-        if (image == null) {
-            g.setColor(Theme.PANEL);
-            g.fillRect(x, y, BOX_WIDTH, BOX_WIDTH);
-            g.setColor(Theme.BORDER);
-            g.drawRect(x, y, BOX_WIDTH - 1, BOX_WIDTH - 1);
-        } else {
-            double scale = Math.min((double) BOX_WIDTH / image.getWidth(),
-                    (double) BOX_WIDTH / image.getHeight());
-            int width = Math.max(1, (int) Math.round(image.getWidth() * scale));
-            int height = Math.max(1, (int) Math.round(image.getHeight() * scale));
-            g.drawImage(image, x + (BOX_WIDTH - width) / 2, y + (BOX_WIDTH - height) / 2,
-                    width, height, null);
-        }
+        // 高亮底、占位框、等比居中都走组件库，和目标栏、素材条同一套画法
+        Rectangle cell = new Rectangle(x, y, BOX_WIDTH, BOX_WIDTH);
+        Painters.thumbnailCell(g, cell, image, current, null, false);
 
         // 名字那一行：原来的编号 + 文件名——一眼看清"扔掉的是哪一张"
         g.setFont(Theme.FONT_SMALL);
@@ -343,7 +331,7 @@ final class TrashPanel extends JPanel {
         // 编号不存条目里（见 TargetEntry 的注释），所以按记下的原位置现算。
         String was = session.numbering().nameFor(item.originalIndex());
         String label = was + "  " + photo.getFileName();
-        g.drawString(shorten(label, metrics, BOX_WIDTH), x, y + BOX_WIDTH + 13);
+        g.drawString(TextStyles.end(label, metrics, BOX_WIDTH), x, y + BOX_WIDTH + 13);
     }
 
     /** 拖动时标出落点的白线。 */
@@ -352,8 +340,7 @@ final class TrashPanel extends JPanel {
             return;
         }
         Rectangle line = dropHintRect();
-        g.setColor(Theme.DIVIDER_HINT);
-        g.fillRect(line.x, line.y, line.width, line.height);
+        Painters.dropLine(g, line);
     }
 
     private Rectangle dropHintRect() {
@@ -372,19 +359,6 @@ final class TrashPanel extends JPanel {
     /** 那条白线现在画在哪。给测试用。 */
     Rectangle dropHintRectForTest() {
         return dropHintRect();
-    }
-
-    private static String shorten(String text, FontMetrics metrics, int maxWidth) {
-        if (metrics.stringWidth(text) <= maxWidth) {
-            return text;
-        }
-        String ellipsis = "…";
-        int width = maxWidth - metrics.stringWidth(ellipsis);
-        int end = text.length();
-        while (end > 1 && metrics.stringWidth(text.substring(0, end)) > width) {
-            end--;
-        }
-        return text.substring(0, end) + ellipsis;
     }
 
     // ─────────────────────────── 取图 ───────────────────────────
