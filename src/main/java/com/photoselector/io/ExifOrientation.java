@@ -173,6 +173,54 @@ public final class ExifOrientation {
         return 1;
     }
 
+    /**
+     * 把 TIFF 块里的方向标记改成指定值。
+     *
+     * <p>保存重写时像素已经被摆正，元数据里的方向必须同步改回 1；
+     * 否则看图软件会再转一次，出现“保存后反而倒了”的现象。
+     *
+     * @param tiff 从 "Exif\0\0" 之后开始的 TIFF 数据
+     * @return 找到并改写成功返回 true；没有方向标记或结构损坏返回 false
+     */
+    static boolean setOrientation(byte[] tiff, int orientation) {
+        try {
+            boolean little;
+            if (tiff[0] == 'I' && tiff[1] == 'I') {
+                little = true;
+            } else if (tiff[0] == 'M' && tiff[1] == 'M') {
+                little = false;
+            } else {
+                return false;
+            }
+            if (u16(tiff, 2, little) != 42) {
+                return false;
+            }
+            int ifdOffset = u32(tiff, 4, little);
+            if (ifdOffset < 8 || ifdOffset + 2 > tiff.length) {
+                return false;
+            }
+            int count = u16(tiff, ifdOffset, little);
+            for (int i = 0; i < count; i++) {
+                int entry = ifdOffset + 2 + i * 12;
+                if (entry + 12 > tiff.length) {
+                    return false;
+                }
+                if (u16(tiff, entry, little) != TAG_ORIENTATION) {
+                    continue;
+                }
+                // 类型 3 = SHORT，数量 1；方向值就写在 4 字节 value 区的前两个字节。
+                if (u16(tiff, entry + 2, little) != 3 || u32(tiff, entry + 4, little) < 1) {
+                    return false;
+                }
+                writeU16(tiff, entry + 8, orientation, little);
+                return true;
+            }
+        } catch (EOFException | ArrayIndexOutOfBoundsException e) {
+            return false;
+        }
+        return false;
+    }
+
     private static int u16(byte[] data, int at, boolean little) throws EOFException {
         if (at + 2 > data.length) {
             throw new EOFException("EXIF 段落不完整");
@@ -191,5 +239,19 @@ public final class ExifOrientation {
                         | (data[at + 1] & 0xFF) << 8 | (data[at] & 0xFF)
                 : (data[at] & 0xFF) << 24 | (data[at + 1] & 0xFF) << 16
                         | (data[at + 2] & 0xFF) << 8 | (data[at + 3] & 0xFF);
+    }
+
+    private static void writeU16(byte[] data, int at, int value, boolean little)
+            throws EOFException {
+        if (at + 2 > data.length) {
+            throw new EOFException("EXIF 段落不完整");
+        }
+        if (little) {
+            data[at] = (byte) value;
+            data[at + 1] = (byte) (value >> 8);
+        } else {
+            data[at] = (byte) (value >> 8);
+            data[at + 1] = (byte) value;
+        }
     }
 }

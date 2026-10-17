@@ -5,9 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.color.ColorSpace;
+import java.awt.color.ICC_Profile;
 import java.awt.image.BufferedImage;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -187,5 +191,80 @@ class SaverTest {
         BufferedImage saved = ImageIO.read(target.resolve("010.jpg").toFile());
         assertEquals(200, saved.getWidth());
         assertEquals(300, saved.getHeight());
+    }
+
+    @Test
+    void 重写编辑时保留EXIF_XMP_ICC和IPTC() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path source = TestImages.writeJpegWithOrientation(
+                tempDir.resolve("带元数据.jpg"), 300, 200, 6);
+        assertEquals(6, ExifOrientation.read(source), "前置条件：源图带方向 6");
+
+        byte[] xmp = concat(
+                "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.US_ASCII),
+                "<x:xmpmeta tiff:Orientation=\"6\">photo-selector-metadata</x:xmpmeta>"
+                        .getBytes(StandardCharsets.UTF_8));
+        byte[] icc = concat(
+                concat("ICC_PROFILE\0".getBytes(StandardCharsets.US_ASCII),
+                        new byte[] {1, 1}),
+                ICC_Profile.getInstance(ColorSpace.CS_sRGB).getData());
+        byte[] iptc = concat(
+                "Photoshop 3.0\0".getBytes(StandardCharsets.US_ASCII),
+                new byte[] {0x1C, 0x02, 0x05, 0x00, 0x03, 'I', 'P', 'T', 'C'});
+        TestImages.insertAppSegment(source, 0xE1, xmp);
+        TestImages.insertAppSegment(source, 0xE2, icc);
+        TestImages.insertAppSegment(source, 0xED, iptc);
+
+        Session session = sessionFor(target);
+        session.add(source);
+        session.setEdits(source, EditState.NONE.rotate(1));
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+        Path saved = target.resolve("010.jpg");
+        assertEquals(1, ExifOrientation.read(saved),
+                "像素已经摆正，EXIF 方向必须改成 1，避免看图软件再转一次");
+
+        List<byte[]> segments = JpegMetadataSegments.from(saved);
+        assertTrue(containsText(segments, 0xE1, "Ab"),
+                "EXIF 里方向以外的字段（Make）也应当保留");
+        assertTrue(containsText(segments, 0xE1, "photo-selector-metadata"),
+                "XMP 内容应当保留");
+        assertTrue(containsText(segments, 0xE1, "tiff:Orientation=\"1\""),
+                "XMP 里记录的旧方向也要归一成 1");
+        assertFalse(containsText(segments, 0xE1, "tiff:Orientation=\"6\""));
+        assertTrue(containsSegment(segments, 0xE2, icc), "ICC 应当原样保留");
+        assertTrue(containsSegment(segments, 0xED, iptc), "IPTC 应当原样保留");
+    }
+
+    private static boolean containsSegment(List<byte[]> segments, int marker, byte[] payload) {
+        for (byte[] segment : segments) {
+            if ((segment[1] & 0xFF) == marker
+                    && Arrays.equals(Arrays.copyOfRange(segment, 4, segment.length), payload)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsText(List<byte[]> segments, int marker, String text) {
+        byte[] wanted = text.getBytes(StandardCharsets.US_ASCII);
+        for (byte[] segment : segments) {
+            if ((segment[1] & 0xFF) != marker) {
+                continue;
+            }
+            for (int i = 4; i + wanted.length <= segment.length; i++) {
+                if (Arrays.equals(Arrays.copyOfRange(segment, i, i + wanted.length), wanted)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static byte[] concat(byte[] first, byte[] second) {
+        byte[] result = Arrays.copyOf(first, first.length + second.length);
+        System.arraycopy(second, 0, result, first.length, second.length);
+        return result;
     }
 }

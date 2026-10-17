@@ -190,12 +190,33 @@ abstract class ThumbnailGridPanel extends JPanel {
         }
     }
 
+    /** 取消当前点选；照片被外部删除、位置已经不存在时用。 */
+    void clearSelection() {
+        if (chosenIndex != -1) {
+            chosenIndex = -1;
+            repaint();
+        }
+    }
+
     /** 内容变了（挑入、撤销、挪动、丢垃圾桶）之后调用：重新取图并重画。 */
     void refresh() {
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
         onChanged.run();
+    }
+
+    /**
+     * 外部文件内容变了：清掉手里的缩略图再重新取。
+     *
+     * <p>普通 {@link #refresh()} 会保留已有缩略图，因为多数操作只改顺序；
+     * 但外部替换了同名文件时，保留旧图就会一直显示旧内容。
+     */
+    void reloadThumbnails() {
+        thumbnails.clear();
+        updatePreferredSize();
+        repaint();
+        SwingUtilities.invokeLater(this::requestVisibleThumbnails);
     }
 
     /** 面板内容变过之后通知外部。 */

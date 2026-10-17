@@ -5,10 +5,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 中间商：本程序的抽象核心（见《软件设计》3.3）。
@@ -214,6 +216,51 @@ public final class Session {
         }
         // 铺底之后，中间商和磁盘是同一份东西；把这一刻记成新的比较基线。
         baseline = snapshot();
+    }
+
+    /**
+     * 按磁盘现状对账，但保留用户已经做出的待保存改动。
+     *
+     * <p>适合运行期间外部增删改名时调用：已经不在磁盘上的原有条目移除，
+     * 新出现的文件追加到末尾，待复制条目和已有编辑不动。外部变化不是用户动作，
+     * 所以对账成功后清空撤销 / 重做历史；新的磁盘内容会成为新的比较基线。
+     *
+     * @return 序列或垃圾桶是否真的被外部变化改动
+     */
+    public boolean reconcileExisting(List<Path> existingFiles) {
+        List<Path> diskFiles = new ArrayList<>(existingFiles.size());
+        Set<Path> onDisk = new HashSet<>();
+        for (Path file : existingFiles) {
+            Path normalized = file.toAbsolutePath().normalize();
+            diskFiles.add(normalized);
+            onDisk.add(normalized);
+        }
+
+        boolean changed = sequence.removeIf(entry ->
+                entry.origin() == Origin.EXISTING && !onDisk.contains(entry.source()));
+        changed |= trash.removeIf(item ->
+                item.entry().origin() == Origin.EXISTING
+                        && !onDisk.contains(item.entry().source()));
+
+        for (Path file : diskFiles) {
+            if (!contains(file)) {
+                sequence.add(new TargetEntry(file, Origin.EXISTING));
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            // 外部改名 / 删除后，旧撤销动作里的位置已经不可信，不能继续重放。
+            undoStack.clear();
+            redoStack.clear();
+        }
+
+        List<TargetEntry> diskEntries = new ArrayList<>(diskFiles.size());
+        for (Path file : diskFiles) {
+            diskEntries.add(new TargetEntry(file, Origin.EXISTING));
+        }
+        baseline = new Snapshot(diskEntries, List.of(), Map.of());
+        return changed;
     }
 
     /**

@@ -142,6 +142,34 @@ class TargetPanelTest {
     }
 
     @Test
+    void 运行期间外部新增和删除照片_目标网格会跟着更新() throws Exception {
+        Theme.install();
+        Path source = Files.createDirectories(tempDir.resolve("素材"));
+        Files.createDirectories(source.resolve("001_拍摄"));
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        TestImages.writeJpeg(target.resolve("原有.jpg"), 300, 200);
+
+        MainPanel panel = new MainPanel(tempDir.resolve("cache"));
+        panel.setOnWorkspaceChanged(workspace -> { });
+        SwingUtilities.invokeAndWait(() ->
+                panel.applyWorkspace(new Workspace(source, Set.of(), target)));
+        waitUntil(() -> panel.targetPanelForTest().session() != null, "目标文件夹读进来");
+        TargetPanel targetPanel = panel.targetPanelForTest();
+        assertEquals(1, targetPanel.entryCount());
+
+        Path external = TestImages.writeJpeg(target.resolve("外部新增.jpg"), 300, 200);
+        waitUntil(() -> targetPanel.entryCount() == 2
+                        && targetPanel.session().indexOf(external) >= 0,
+                "外部新增的照片进入中间商");
+
+        Files.delete(external);
+        waitUntil(() -> targetPanel.entryCount() == 1
+                        && targetPanel.session().indexOf(external) < 0,
+                "外部删除的照片从中间商消失");
+        panel.shutdown();
+    }
+
+    @Test
     void 目标文件夹里的照片多了之后可以上下滚动() throws Exception {
         Theme.install();
 

@@ -260,7 +260,7 @@ public final class MainFrame extends JFrame {
     /** 目标文件夹读不了时明确报错，并保持中间商为空。 */
     private void targetFolderFailed(Path folder) {
         JOptionPane.showMessageDialog(this,
-                "读不了目标文件夹：\n" + folder
+                "读不了或无法监听目标文件夹：\n" + folder
                         + "\n\n请检查目录是否存在、是否有读取权限。",
                 "目标文件夹", JOptionPane.ERROR_MESSAGE);
     }

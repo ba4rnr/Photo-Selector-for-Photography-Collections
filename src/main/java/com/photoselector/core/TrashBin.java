@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * 垃圾桶：一份"被移除条目"的引用清单（指针），不是文件的存放处。
@@ -65,6 +66,11 @@ public final class TrashBin {
      */
     public void insert(int index, TrashedItem item) {
         items.add(Math.max(0, Math.min(index, items.size())), Objects.requireNonNull(item));
+    }
+
+    /** 删掉满足条件的条目；外部文件已经消失时，用它对账垃圾桶里的旧指针。 */
+    public boolean removeIf(Predicate<TrashedItem> condition) {
+        return items.removeIf(condition);
     }
 
     /**

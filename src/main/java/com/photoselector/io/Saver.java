@@ -1,6 +1,7 @@
 package com.photoselector.io;
 
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -347,12 +348,14 @@ public final class Saver {
     /** 解码、套编辑、以较高质量写成新 JPG，再原子改名到最终位置。 */
     private static void writeEditedAtomically(Path source, Path target, EditState edits)
             throws IOException {
+        // 先把元数据段读出来再解码。新文件写完后原样注入，只把方向改成 1。
+        List<byte[]> metadata = JpegMetadataSegments.from(source);
         BufferedImage original = ImageSource.open(source).loadFull();
         BufferedImage result = PhotoTransforms.apply(original, edits);
 
         Path temp = Files.createTempFile(target.getParent(), "__writing_", ".tmp");
         try {
-            writeJpeg(result, temp);
+            writeJpeg(result, temp, metadata);
             moveAtomically(temp, target);
             temp = null;
         } finally {
@@ -366,11 +369,14 @@ public final class Saver {
      * 用 0.95 质量写 JPG。
      *
      * <p>{@code ImageIO.write} 的默认质量偏低，经过一次旋转就可能肉眼看出损失；
-     * 这里显式指定压缩参数。像素已经按 EXIF 摆正，所以新文件不再写方向标记。
+     * 这里显式指定压缩参数。编码完成后把原文件的 EXIF / XMP / ICC / IPTC 段原样带回，
+     * 其中 EXIF 方向已在 {@link JpegMetadataSegments#from} 里改成 1。
      */
-    private static void writeJpeg(BufferedImage image, Path file) throws IOException {
+    private static void writeJpeg(BufferedImage image, Path file, List<byte[]> metadata)
+            throws IOException {
+        ByteArrayOutputStream encoded = new ByteArrayOutputStream();
         ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
-        try (ImageOutputStream output = ImageIO.createImageOutputStream(file.toFile())) {
+        try (ImageOutputStream output = ImageIO.createImageOutputStream(encoded)) {
             writer.setOutput(output);
             ImageWriteParam param = writer.getDefaultWriteParam();
             param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
@@ -379,6 +385,7 @@ public final class Saver {
         } finally {
             writer.dispose();
         }
+        Files.write(file, JpegMetadataSegments.inject(encoded.toByteArray(), metadata));
     }
 
     /** 同目录内优先原子改名；个别文件系统不支持时退回普通改名。 */

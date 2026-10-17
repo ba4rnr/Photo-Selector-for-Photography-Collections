@@ -8,11 +8,13 @@ import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -30,6 +32,7 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.Saver;
+import com.photoselector.io.TargetFolderWatcher;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
 import com.photoselector.core.EditState;
@@ -117,6 +120,13 @@ public final class MainPanel extends JPanel {
         return thread;
     });
 
+    /** 目标文件夹的外部改动监听；换工作区或退出时跟着换 / 关。 */
+    private final TargetFolderWatcher targetWatcher;
+
+    /** 外部刷新正在跑；期间又来事件就记一笔，跑完再补一次。 */
+    private boolean refreshingTargetExternally;
+    private boolean pendingTargetRefresh;
+
     /** 某个文件夹被打开时通知外部（参数是文件夹和张数，张数为 -1 表示读失败）。 */
     private BiConsumer<Path, Integer> onFolderOpened = (folder, count) -> { };
 
@@ -163,6 +173,9 @@ public final class MainPanel extends JPanel {
      */
     private boolean saving;
 
+    /** 窗口已经进入关闭收尾；迟到的监听 / 扫描回调不能再碰界面或线程池。 */
+    private volatile boolean shutDown;
+
     /**
      * 保存跑完之后要接着做的事（退出程序、切到新工作区）；没有就是 null。
      *
@@ -195,6 +208,8 @@ public final class MainPanel extends JPanel {
     MainPanel(Path thumbnailCacheDir) {
         super(new BorderLayout());
         setBackground(Theme.PANEL);
+        targetWatcher = new TargetFolderWatcher(folder ->
+                SwingUtilities.invokeLater(() -> externalTargetChanged(folder)));
 
         ThumbnailService thumbnailService = new ThumbnailService(thumbnailCacheDir);
         thumbnailLoader = new ThumbnailLoader(thumbnailService);
@@ -549,6 +564,9 @@ public final class MainPanel extends JPanel {
      */
     private void openTargetFolder(Path target) {
         long myRound = ++targetLoadRound; // 换目标文件夹 = 开新的一轮，旧结果作废
+        stopTargetWatcher();
+        refreshingTargetExternally = false;
+        pendingTargetRefresh = false;
         if (target == null) {
             targetPanel.setSession(null);
             arrangePanel.setSession(null);
@@ -566,7 +584,7 @@ public final class MainPanel extends JPanel {
             List<Path> files = existing;
             IOException failure = readError;
             SwingUtilities.invokeLater(() -> {
-                if (myRound != targetLoadRound) {
+                if (shutDown || myRound != targetLoadRound) {
                     return; // 这一轮已经过期：用户换过目标文件夹了
                 }
                 if (failure != null) {
@@ -583,13 +601,142 @@ public final class MainPanel extends JPanel {
                 targetPanel.setSession(session);
                 arrangePanel.setSession(session);
                 trashPanel.setSession(session);
+                try {
+                    targetWatcher.watch(target);
+                } catch (IOException e) {
+                    // 初次读目录成功、但系统不允许注册监听：界面仍可用，
+                    // 只是外部变化不会自动跟进，必须明确告诉用户。
+                    onTargetFolderError.accept(target);
+                }
             });
         });
+    }
+
+    private void stopTargetWatcher() {
+        try {
+            targetWatcher.watch(null);
+        } catch (IOException impossible) {
+            // watch(null) 不注册目录，不会真的抛
+        }
     }
 
     /** 目标文件夹读取失败的提示方式。 */
     public void setOnTargetFolderError(Consumer<Path> listener) {
         this.onTargetFolderError = listener == null ? folder -> { } : listener;
+    }
+
+    /** 监听线程说目标文件夹变了；真正读目录仍然回后台扫描池。 */
+    private void externalTargetChanged(Path folder) {
+        if (shutDown || workspace == null || workspace.targetFolder() == null
+                || !folder.toAbsolutePath().normalize()
+                        .equals(workspace.targetFolder().toAbsolutePath().normalize())) {
+            return; // 旧监听器的迟到通知
+        }
+        if (saving) {
+            pendingTargetRefresh = true;
+            return;
+        }
+        refreshTargetFromDisk(folder);
+    }
+
+    /**
+     * 外部变化后的对账：只重读目标文件夹，不推倒整个工作区。
+     *
+     * <p>界面线程不碰磁盘；扫描结果回来要再核对一次目标目录和保存状态，
+     * 防止用户在这期间已经换了工作区，或者正在执行一次保存。
+     */
+    private void refreshTargetFromDisk(Path target) {
+        if (shutDown) {
+            return;
+        }
+        if (refreshingTargetExternally) {
+            pendingTargetRefresh = true;
+            return;
+        }
+        refreshingTargetExternally = true;
+        long round = targetLoadRound;
+        try {
+            scanPool.submit(() -> {
+                List<Path> files = List.of();
+                IOException failure = null;
+                try {
+                    files = PhotoFiles.imagesIn(target);
+                } catch (IOException e) {
+                    failure = e;
+                }
+
+                List<Path> scanned = files;
+                IOException error = failure;
+                SwingUtilities.invokeLater(() -> {
+                    refreshingTargetExternally = false;
+                    if (shutDown || round != targetLoadRound) {
+                        return; // 已经换过目标文件夹
+                    }
+                    if (saving) {
+                        pendingTargetRefresh = true;
+                        return;
+                    }
+                    if (error != null) {
+                        onTargetFolderError.accept(target);
+                    } else {
+                        applyExternalTargetFiles(target, scanned);
+                    }
+                    if (pendingTargetRefresh) {
+                        pendingTargetRefresh = false;
+                        refreshTargetFromDisk(target);
+                    }
+                });
+            });
+        } catch (RejectedExecutionException e) {
+            refreshingTargetExternally = false; // 正在关窗口，扫描池已经不收任务
+        }
+    }
+
+    /** 把扫描到的磁盘现状合进当前中间商，并刷新所有相关视图。 */
+    private void applyExternalTargetFiles(Path target, List<Path> files) {
+        Session session = targetPanel.session();
+        Path targetRoot = target.toAbsolutePath().normalize();
+        if (session == null
+                || !targetRoot.equals(session.targetFolder().toAbsolutePath().normalize())) {
+            return;
+        }
+        Path targetSelection = targetPanel.selectedPhoto();
+        Path arrangeSelection = arrangePanel.selectedPhoto();
+
+        if (session.isDirty()) {
+            // 有没保存的挑片 / 排序 / 编辑：保留它们，只把外部增删并进来。
+            session.reconcileExisting(files);
+        } else {
+            // 本来就干净：直接按磁盘顺序重建最忠实。
+            session.seedExisting(files);
+        }
+        restoreSelection(targetPanel, targetSelection, session);
+        restoreSelection(arrangePanel, arrangeSelection, session);
+
+        targetPanel.reloadThumbnails();
+        arrangePanel.reloadThumbnails();
+        trashPanel.reloadThumbnails();
+        targetPanel.refresh();
+        arrangePanel.refresh();
+        trashPanel.refresh();
+        historyChanged();
+
+        Path showing = viewer.photo();
+        if (showing != null
+                && targetRoot.equals(showing.toAbsolutePath().normalize().getParent())) {
+            // 同名文件可能被外部替换，必须重读；删掉了就清空大图。
+            showPhotoInViewer(Files.isRegularFile(showing) ? showing : null);
+        }
+    }
+
+    /** 外部对账后尽量让点选仍指向原来那张；它被删了就清空。 */
+    private static void restoreSelection(TargetPanel panel, Path photo, Session session) {
+        int index = photo == null ? -1 : session.indexOf(photo);
+        if (index >= 0) {
+            panel.moveSelectionTo(index);
+        } else {
+            panel.clearSelection();
+        }
     }
 
     /** 空格：把素材条里点中的那张照片加入目标序列。 */
@@ -852,12 +999,27 @@ public final class MainPanel extends JPanel {
             // 处理磁盘问题后再决定重试还是放弃。
             afterSave = null;
             closing = false;
+            resumePendingExternalRefresh();
             return;
         }
         Runnable next = afterSave;
         afterSave = null;
         if (next != null) {
             next.run();
+        } else {
+            resumePendingExternalRefresh();
+        }
+    }
+
+    /** 保存期间攒下的外部变化，在保存收尾后补做一次对账。 */
+    private void resumePendingExternalRefresh() {
+        if (!pendingTargetRefresh) {
+            return;
+        }
+        pendingTargetRefresh = false;
+        Session session = targetPanel.session();
+        if (session != null) {
+            refreshTargetFromDisk(session.targetFolder());
         }
     }
 
@@ -1074,6 +1236,11 @@ public final class MainPanel extends JPanel {
 
     /** 关窗口时收掉后台取图的线程池。 */
     public void shutdown() {
+        if (shutDown) {
+            return;
+        }
+        shutDown = true;
+        targetWatcher.close();
         thumbnailLoader.shutdown();
         targetLoader.shutdown(); // 之前漏了这只，关窗口后它的线程还活着、还攥着文件
         scanPool.shutdownNow();

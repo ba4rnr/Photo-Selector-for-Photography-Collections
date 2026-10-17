@@ -423,4 +423,25 @@ class SessionTest {
         session.undo();
         assertFalse(session.isDirty(), "撤销编辑之后同样应当回到基线");
     }
+
+    @Test
+    void 外部变化对账_保留待复制条目并移除已经消失的原有文件() {
+        Session session = newSession();
+        Path oldA = Path.of("target", "A.jpg");
+        Path oldB = Path.of("target", "B.jpg");
+        Path externalNew = Path.of("target", "C.jpg");
+        session.seedExisting(List.of(oldA, oldB));
+        session.add(PHOTO_A); // 用户自己挑进来的，外部对账不能弄丢
+
+        assertTrue(session.reconcileExisting(List.of(oldA, externalNew)));
+
+        assertEquals(List.of(oldA.toAbsolutePath().normalize(),
+                        PHOTO_A.toAbsolutePath().normalize(),
+                        externalNew.toAbsolutePath().normalize()),
+                session.entries().stream().map(TargetEntry::source).toList(),
+                "原有 A 保留、消失的 B 移除、外部新增 C 追加、待复制照片不动");
+        assertTrue(session.entries().stream().anyMatch(entry -> entry.origin() == Origin.PENDING));
+        assertTrue(session.isDirty(), "仍有用户待保存的改动");
+        assertFalse(session.canUndo(), "外部变化之后旧撤销位置已经不可信，应当清空历史");
+    }
 }
