@@ -120,6 +120,9 @@ public final class MainPanel extends JPanel {
     /** 某个文件夹被打开时通知外部（参数是文件夹和张数，张数为 -1 表示读失败）。 */
     private BiConsumer<Path, Integer> onFolderOpened = (folder, count) -> { };
 
+    /** 目标文件夹读失败时通知外部；不能静默把它当成空文件夹。 */
+    private Consumer<Path> onTargetFolderError = folder -> { };
+
     /** 扫描出来的全部组；剔除哪些由目录树的勾选状态决定。 */
     private List<PhotoGroup> scannedGroups = List.of();
 
@@ -208,9 +211,9 @@ public final class MainPanel extends JPanel {
         targetPanel.setOnToggleExpanded(this::toggleMode);
         arrangePanel.setOnToggleExpanded(this::toggleMode);
         viewer = new ViewerPanel(thumbnailLoader);
-        // 点目标文件夹里的某张，大图就换成它
-        targetPanel.setOnPhotoChosen(viewer::showPhoto);
-        arrangePanel.setOnPhotoChosen(viewer::showPhoto);
+        // 点目标文件夹里的某张，大图就换成它，并套用这张已有的虚拟编辑。
+        targetPanel.setOnPhotoChosen(this::showPhotoInViewer);
+        arrangePanel.setOnPhotoChosen(this::showPhotoInViewer);
 
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
@@ -242,10 +245,18 @@ public final class MainPanel extends JPanel {
         // 旋转 / 翻转是"点一下马上生效"的工具：选中它的同时也对当前这张做一次。
         toolBar.setOnToolChanged(tool -> {
             viewer.setCursorTool(tool);
+            boolean action = false;
             if (tool == CursorTool.ROTATE) {
                 rotateCurrentPhoto(true);
+                action = true;
             } else if (tool == CursorTool.FLIP) {
                 flipCurrentPhotoHorizontally();
+                action = true;
+            }
+            if (action) {
+                // 动作型工具做完就回到"选择"：否则主视图停在既不能拖出、
+                // 也不能平移的状态，看起来像突然失灵。
+                toolBar.selectTool(CursorTool.SELECT);
             }
         });
         // 撤销 / 重做是这块面板自己的逻辑，接线也放在这儿：谁拿到面板，
@@ -273,13 +284,7 @@ public final class MainPanel extends JPanel {
         sourceTree.setOnInclusionChanged(this::inclusionChanged);
         // 素材条里点中一张，中间的大图就换成它；顺手把这张的虚拟编辑灌进去
         filmstrip.setOnCurrentPhotoChanged(photo -> {
-            viewer.showPhoto(photo);
-            Session session = targetPanel.session();
-            if (session != null) {
-                viewer.setEdits(session.editsOf(photo));
-            }
-            // 选中的照片换了，"能不能编辑"也跟着变：旋转 / 翻转 / 重置要跟着亮 / 灰
-            historyChanged();
+            showPhotoInViewer(photo);
         });
         bindKeys();
 
@@ -423,8 +428,10 @@ public final class MainPanel extends JPanel {
     public void rotateCurrentPhoto(boolean clockwise) {
         editingPhoto().ifPresent(photo -> {
             Session session = targetPanel.session();
-            session.setEdits(photo, session.editsOf(photo).rotate(clockwise ? 1 : -1));
-            viewer.setEdits(session.editsOf(photo));
+            if (session.setEdits(photo, session.editsOf(photo).rotate(clockwise ? 1 : -1))) {
+                viewer.setEdits(session.editsOf(photo));
+                historyChanged();
+            }
         });
     }
 
@@ -432,8 +439,10 @@ public final class MainPanel extends JPanel {
     public void flipCurrentPhotoHorizontally() {
         editingPhoto().ifPresent(photo -> {
             Session session = targetPanel.session();
-            session.setEdits(photo, session.editsOf(photo).flipHorizontal());
-            viewer.setEdits(session.editsOf(photo));
+            if (session.setEdits(photo, session.editsOf(photo).flipHorizontal())) {
+                viewer.setEdits(session.editsOf(photo));
+                historyChanged();
+            }
         });
     }
 
@@ -441,8 +450,10 @@ public final class MainPanel extends JPanel {
     public void flipCurrentPhotoVertically() {
         editingPhoto().ifPresent(photo -> {
             Session session = targetPanel.session();
-            session.setEdits(photo, session.editsOf(photo).flipVertically());
-            viewer.setEdits(session.editsOf(photo));
+            if (session.setEdits(photo, session.editsOf(photo).flipVertically())) {
+                viewer.setEdits(session.editsOf(photo));
+                historyChanged();
+            }
         });
     }
 
@@ -450,8 +461,10 @@ public final class MainPanel extends JPanel {
     public void resetCurrentPhotoEdits() {
         editingPhoto().ifPresent(photo -> {
             Session session = targetPanel.session();
-            session.clearEdits(photo);
-            viewer.setEdits(EditState.NONE);
+            if (session.clearEdits(photo)) {
+                viewer.setEdits(EditState.NONE);
+                historyChanged();
+            }
         });
     }
 
@@ -460,19 +473,23 @@ public final class MainPanel extends JPanel {
         return editingPhoto().isPresent();
     }
 
-    /** 当前正在看的那张（跟素材条的"当前照片"是同一个）。 */
+    /** 当前正在看的那张；大图显示谁，编辑就落到谁身上。 */
     private java.util.Optional<Path> editingPhoto() {
         Session session = targetPanel.session();
-        Path photo = filmstrip.currentPhoto();
-        if (photo == null) {
-            // 从目标栏点中的那张也可能不在素材条里（比如别的批次挑进去的），
-            // 那就以目标栏的选中项为准——反正编辑跟着"眼前这一张"走
-            photo = targetPanel.selectedPhoto();
-        }
+        Path photo = viewer.photo();
         if (session == null || photo == null) {
             return java.util.Optional.empty();
         }
         return java.util.Optional.of(photo);
+    }
+
+    /** 大图换片时把这张照片已有的编辑一起灌进去；所有入口都走这里。 */
+    private void showPhotoInViewer(Path photo) {
+        viewer.showPhoto(photo);
+        Session session = targetPanel.session();
+        viewer.setEdits(session == null ? EditState.NONE : session.editsOf(photo));
+        // 选中的照片换了，"能不能编辑"也跟着变：旋转 / 翻转 / 重置要跟着亮 / 灰
+        historyChanged();
     }
 
     /** 大图的当前比例（百分比），菜单里显示用。 */
@@ -540,15 +557,26 @@ public final class MainPanel extends JPanel {
         }
         scanPool.submit(() -> {
             List<Path> existing = List.of();
+            IOException readError = null;
             try {
                 existing = PhotoFiles.imagesIn(target);
-            } catch (IOException ignored) {
-                // 读不了就当空的：中间商照常建起来，挑进去的照片不受影响
+            } catch (IOException e) {
+                readError = e;
             }
             List<Path> files = existing;
+            IOException failure = readError;
             SwingUtilities.invokeLater(() -> {
                 if (myRound != targetLoadRound) {
                     return; // 这一轮已经过期：用户换过目标文件夹了
+                }
+                if (failure != null) {
+                    // 读失败和“真的空目录”是两回事。前者不能建空中间商，
+                    // 否则用户会以为目标文件夹里什么都没有，甚至继续往不可用的目录保存。
+                    targetPanel.setSession(null);
+                    arrangePanel.setSession(null);
+                    trashPanel.setSession(null);
+                    onTargetFolderError.accept(target);
+                    return;
                 }
                 Session session = new Session(target, NumberingRule.DEFAULT);
                 session.seedExisting(files);
@@ -557,6 +585,11 @@ public final class MainPanel extends JPanel {
                 trashPanel.setSession(session);
             });
         });
+    }
+
+    /** 目标文件夹读取失败的提示方式。 */
+    public void setOnTargetFolderError(Consumer<Path> listener) {
+        this.onTargetFolderError = listener == null ? folder -> { } : listener;
     }
 
     /** 空格：把素材条里点中的那张照片加入目标序列。 */
@@ -722,10 +755,16 @@ public final class MainPanel extends JPanel {
         if (index < 0) {
             return; // 不在目标序列里，没什么可扔的
         }
+        boolean showingIt = photo.equals(viewer.photo());
         session.trash(index);
         targetPanel.refresh();
         arrangePanel.refresh();
         trashPanel.refresh();
+        if (showingIt) {
+            Path next = session.isEmpty() ? null
+                    : session.entryAt(Math.min(index, session.size() - 1)).source();
+            showPhotoInViewer(next);
+        }
     }
 
     /**
@@ -761,12 +800,12 @@ public final class MainPanel extends JPanel {
     public boolean save() {
         Session session = targetPanel.session();
         if (session == null) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(),
                     List.of(), List.of("还没有选目标文件夹，没有可以保存的改动。")));
             return false;
         }
         if (session.isEmpty()) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(),
                     List.of(), List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
             return false;
         }
@@ -777,7 +816,7 @@ public final class MainPanel extends JPanel {
         try {
             plan = Saver.Plan.from(session);
         } catch (RuntimeException e) {
-            onSaveFinished.accept(new Saver.Result(0, 0, 0, List.of(), List.of(),
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), List.of(),
                     List.of("保存没能开始：" + e.getMessage())));
             return false;
         }
@@ -806,8 +845,15 @@ public final class MainPanel extends JPanel {
     /** 保存结束时的内部收尾：如果之前排了"保存完要接着做的事"，就接着做。 */
     private void handleSaveFinished(Saver.Result result) {
         // 先交给外部：它可能会弹个"哪几张没成"的报告。
-        // 关窗口 / 换工作区走的那次不弹——由外部看 isClosingAfterSave() 决定（见 MainFrame）。
         onSaveFinished.accept(result);
+        if (result.hasProblems()) {
+            // 有失败时不能继续退出或切工作区：待复制条目刚才虽然放回了中间商，
+            // 一旦窗口关掉，这份挑选结果仍然会丢。先留在原处，让用户看到报告、
+            // 处理磁盘问题后再决定重试还是放弃。
+            afterSave = null;
+            closing = false;
+            return;
+        }
         Runnable next = afterSave;
         afterSave = null;
         if (next != null) {

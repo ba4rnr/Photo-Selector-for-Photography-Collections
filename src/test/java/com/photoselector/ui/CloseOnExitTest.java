@@ -72,6 +72,29 @@ class CloseOnExitTest {
     }
 
     @Test
+    void 保存失败时不退出_改动仍留在中间商里() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(true);
+        Files.delete(panel.photoToAdd); // 保存前源文件被外部删掉，复制必然失败
+
+        AtomicInteger exits = new AtomicInteger();
+        panel.main.setOnExit(exits::incrementAndGet);
+        panel.main.setConfirmSaveOnClose(owner -> JOptionPane.YES_OPTION);
+
+        SwingUtilities.invokeAndWait(panel.main::requestClose);
+        assertTrue(panel.main.isClosingAfterSave(), "刚开始时仍在等这次保存");
+
+        waitUntil(() -> !panel.main.isClosingAfterSave(), "保存失败后取消退出");
+
+        assertEquals(0, exits.get(), "保存有失败时窗口必须留着");
+        assertTrue(panel.main.isDirty(), "失败的那张应当放回中间商，等用户处理后重试");
+        assertTrue(panel.main.targetPanelForTest().session().entries().stream()
+                        .anyMatch(entry -> entry.source().equals(panel.photoToAdd)),
+                "没复制成功的照片不能被悄悄丢掉");
+        panel.main.shutdown();
+    }
+
+    @Test
     void 选不保存就原样退出_中间商的改动不落盘() throws Exception {
         Theme.install();
         Panel panel = new Panel(true);

@@ -1,4 +1,4 @@
-package com.photoselector.ui;
+package com.photoselector.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import java.awt.image.BufferedImage;
 
 import org.junit.jupiter.api.Test;
-
-import com.photoselector.core.EditState;
 
 /**
  * 把编辑状态画到像素上：宽高、四角的位置都要对得上。

@@ -59,6 +59,7 @@ public final class MainFrame extends JFrame {
         setJMenuBar(createMenuBar(mainPanel, this::chooseWorkspace, mainPanel::requestClose,
                 this::changeDefaultZoom, this::refreshHistoryStates));
         mainPanel.setOnFolderOpened(this::folderOpened);
+        mainPanel.setOnTargetFolderError(this::targetFolderFailed);
         mainPanel.setOnWorkspaceChanged(workspaceStore::save);
         mainPanel.setOnSaveFinished(this::saveFinished);
 
@@ -226,9 +227,9 @@ public final class MainFrame extends JFrame {
 
     /** 保存结束了：把做了什么、以及没做成什么告诉用户。 */
     private void saveFinished(Saver.Result result) {
-        if (mainPanel.isClosingAfterSave()) {
-            // 关窗口走的那次保存：程序马上就走，对话框只会闪一下，不如不弹——
-            // 没做成的那几张已经在回调里放回中间商，下次打开还在
+        if (mainPanel.isClosingAfterSave() && !result.hasProblems()) {
+            // 成功保存后马上退出：不用弹一个只会闪一下的完成提示。
+            // 有失败时必须弹，而且 MainPanel 会取消本次退出，让用户先处理。
             return;
         }
         String text = result.summary();
@@ -236,8 +237,6 @@ public final class MainFrame extends JFrame {
             text += "\n\n有 " + result.problems().size() + " 处没能完成：\n· "
                     + String.join("\n· ", result.problems());
         }
-        // 为什么这里不额外判断"是不是关窗口时触发的"：那种情况下窗口马上就要 dispose，
-        // 模态对话框会自己收起来，用户顶多看到它闪一下——不值得为它多养一个状态。
         JOptionPane.showMessageDialog(this, text, "保存",
                 result.hasProblems() ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
     }
@@ -258,6 +257,14 @@ public final class MainFrame extends JFrame {
         setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
     }
 
+    /** 目标文件夹读不了时明确报错，并保持中间商为空。 */
+    private void targetFolderFailed(Path folder) {
+        JOptionPane.showMessageDialog(this,
+                "读不了目标文件夹：\n" + folder
+                        + "\n\n请检查目录是否存在、是否有读取权限。",
+                "目标文件夹", JOptionPane.ERROR_MESSAGE);
+    }
+
     private static JMenu menu(String text) {
         JMenu menu = new JMenu(text);
         menu.setForeground(Theme.TEXT);
@@ -272,7 +279,7 @@ public final class MainFrame extends JFrame {
         JMenuItem item = new JMenuItem(text);
         item.addActionListener(e -> {
             action.run();
-            mainPanel.toolBar().setActiveToolForTest(CursorTool.SELECT);
+            mainPanel.toolBar().selectTool(CursorTool.SELECT);
         });
         return item;
     }

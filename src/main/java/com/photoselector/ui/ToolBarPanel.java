@@ -118,9 +118,14 @@ final class ToolBarPanel extends JPanel {
         this.onToolChanged = listener == null ? tool -> { } : listener;
     }
 
-    /** 直接选中某个工具。给测试用，等价于点了那个按钮。 */
-    void setActiveToolForTest(CursorTool tool) {
+    /** 用代码选中某个工具，等价于点了那个按钮。 */
+    void selectTool(CursorTool tool) {
         activate(cursorTools.get(tool.ordinal()), tool);
+    }
+
+    /** 兼容旧测试名；行为和 {@link #selectTool} 完全相同。 */
+    void setActiveToolForTest(CursorTool tool) {
+        selectTool(tool);
     }
 
     /** 取某个工具的按钮（中组那一排）。给测试用。 */

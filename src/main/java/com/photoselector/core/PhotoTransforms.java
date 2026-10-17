@@ -1,20 +1,18 @@
-package com.photoselector.ui;
+package com.photoselector.core;
 
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 
-import com.photoselector.core.EditState;
-
 /**
  * 把"虚拟编辑"画到像素上：顺时针转 90° 的整数倍，再按需上下翻。
  *
  * <p>分成独立的一个类，是为了"画面怎么变"这件事只有一处定义——
- * 大图现在用它；将来保存时把编辑烧进 JPG，也用它生成同一张结果图。
+ * 大图和保存重写都用它生成同一张结果图。
  * 两处各写一份的话，早晚会出现"屏幕上和存下来不一样"。
  */
-final class PhotoTransforms {
+public final class PhotoTransforms {
 
     private PhotoTransforms() {
     }
@@ -25,7 +23,7 @@ final class PhotoTransforms {
      * <p>用仿射变换一次画完，而不是分几步先转再翻：少一次中间图，
      * 像素只经过一次重采样，画质损失最小。
      */
-    static BufferedImage apply(BufferedImage source, EditState edits) {
+    public static BufferedImage apply(BufferedImage source, EditState edits) {
         if (source == null || edits == null || edits.isNone()) {
             return source;
         }

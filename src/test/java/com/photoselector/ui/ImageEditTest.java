@@ -4,6 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Dimension;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
@@ -33,6 +37,7 @@ class ImageEditTest {
         Path shots = Files.createDirectories(source.resolve("001_拍摄"));
         TestImages.writeJpeg(shots.resolve("p0.jpg"), 300, 200);
         Path target = Files.createDirectories(tempDir.resolve("成片"));
+        TestImages.writeJpeg(target.resolve("旧.jpg"), 300, 200);
 
         MainPanel panel = new MainPanel(tempDir.resolve("cache"));
         panel.setOnWorkspaceChanged(workspace -> { });
@@ -61,7 +66,10 @@ class ImageEditTest {
         assertEquals(before.height, after.width, "转 90° 后宽高互换");
         assertEquals(before.width, after.height);
         assertEquals(1, viewer.edits().quarters());
-        assertEquals(CursorTool.ROTATE, panel.toolBar().activeTool(), "按钮进入旋转状态");
+        assertEquals(CursorTool.SELECT, panel.toolBar().activeTool(),
+                "动作完成后应当回到选择，主视图还能继续拖照片");
+        assertTrue(panel.toolBar().undoButton().isEnabled(),
+                "旋转压入历史后，撤销按钮应当立刻可用");
         panel.shutdown();
     }
 
@@ -139,11 +147,57 @@ class ImageEditTest {
         panel.shutdown();
     }
 
+    @Test
+    void 点右栏照片后_编辑的是眼前这一张() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        TargetPanel target = panel.targetPanelForTest();
+        Path sourcePhoto = panel.filmstripForTest().currentPhoto();
+
+        SwingUtilities.invokeAndWait(() -> {
+            target.setSize(360, 480);
+            layoutTree(target);
+        });
+        paint(target);
+        Point firstCell = new Point(30, 60);
+        assertTrue(target.indexAt(firstCell) >= 0, "目标栏第一张应当可点");
+        Path targetPhoto = target.session().entryAt(target.indexAt(firstCell)).source();
+
+        SwingUtilities.invokeAndWait(() -> target.dispatchEvent(new MouseEvent(target,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                firstCell.x, firstCell.y, 1, false, MouseEvent.BUTTON1)));
+        waitUntil(() -> targetPhoto.equals(panel.viewerForTest().photo()), "大图切到目标照片");
+
+        SwingUtilities.invokeAndWait(() -> panel.rotateCurrentPhoto(true));
+
+        assertTrue(!target.session().editsOf(targetPhoto).isNone(),
+                "旋转应当记在大图正在看的这张目标照片上");
+        assertTrue(target.session().editsOf(sourcePhoto).isNone(),
+                "素材条里上一张不能被误编辑");
+        panel.shutdown();
+    }
+
     private static void waitUntil(BooleanSupplier condition, String what) throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;
         while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
             Thread.sleep(30);
         }
         assertTrue(condition.getAsBoolean(), "等不到：" + what);
+    }
+
+    private static void paint(javax.swing.JComponent component) {
+        BufferedImage image = new BufferedImage(Math.max(1, component.getWidth()),
+                Math.max(1, component.getHeight()), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        component.paint(g);
+        g.dispose();
+    }
+
+    private static void layoutTree(java.awt.Container container) {
+        container.doLayout();
+        for (java.awt.Component child : container.getComponents()) {
+            if (child instanceof java.awt.Container nested) {
+                layoutTree(nested);
+            }
+        }
     }
 }

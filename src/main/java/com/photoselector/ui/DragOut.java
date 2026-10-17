@@ -86,10 +86,14 @@ final class DragOut {
             private final DropTarget[] hinted = new DropTarget[MAX_HINTS];
             private int hintedCount;
             private boolean hintedTrash;
+            private Path ghostPhoto;
+            private BufferedImage ghostImage;
 
             @Override
             public void mousePressed(MouseEvent e) {
                 pressedAt = SwingUtilities.isLeftMouseButton(e) ? e.getPoint() : null;
+                ghostPhoto = null;
+                ghostImage = null;
             }
 
             @Override
@@ -102,7 +106,13 @@ final class DragOut {
                     return;
                 }
                 showHint(dragging, e.getPoint());
-                showGhost(source, e.getPoint(), ghost.apply(dragging));
+                // 整次拖动只缩一次图。大图那边缩的是全尺寸原图，
+                // 每个 mouseDragged 都重做一遍会明显拖慢界面线程。
+                if (!dragging.equals(ghostPhoto)) {
+                    ghostPhoto = dragging;
+                    ghostImage = ghost.apply(dragging);
+                }
+                showGhost(source, e.getPoint(), ghostImage);
             }
 
             @Override
@@ -118,6 +128,8 @@ final class DragOut {
                 boolean overTrash = dragging != null
                         && resolveViewer(source, e.getPoint(), onTrashed != null) != null;
                 clearHint();
+                ghostPhoto = null;
+                ghostImage = null;
                 if (start == null || !SwingUtilities.isLeftMouseButton(e)
                         || e.getPoint().distance(start) <= THRESHOLD || !enabled.getAsBoolean()
                         || dragging == null) {
@@ -433,10 +445,14 @@ final class DragOut {
 
             private Point pressedAt;
             private TargetPanel hinted;
+            private Path ghostPhoto;
+            private BufferedImage ghostImage;
 
             @Override
             public void mousePressed(MouseEvent e) {
                 pressedAt = SwingUtilities.isLeftMouseButton(e) ? e.getPoint() : null;
+                ghostPhoto = null;
+                ghostImage = null;
             }
 
             @Override
@@ -449,7 +465,11 @@ final class DragOut {
                     return;
                 }
                 showHint(dragging, e.getPoint());
-                showGhost(source, e.getPoint(), ghost.apply(dragging));
+                if (!dragging.equals(ghostPhoto)) {
+                    ghostPhoto = dragging;
+                    ghostImage = ghost.apply(dragging);
+                }
+                showGhost(source, e.getPoint(), ghostImage);
             }
 
             @Override
@@ -462,6 +482,8 @@ final class DragOut {
                 int index = panel == null
                         ? -1 : panel.dropIndexAt(toPanelPoint(source, panel, e.getPoint()));
                 clearHint();
+                ghostPhoto = null;
+                ghostImage = null;
                 if (start == null || !SwingUtilities.isLeftMouseButton(e)
                         || e.getPoint().distance(start) <= THRESHOLD || dragging == null) {
                     return;

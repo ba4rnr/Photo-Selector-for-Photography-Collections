@@ -2,6 +2,7 @@ package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.event.ActionEvent;
@@ -115,6 +116,28 @@ class TargetPanelTest {
                 .actionPerformed(new ActionEvent(panel, 0, "addToTarget"));
 
         assertEquals(0, panel.targetPanelForTest().entryCount());
+        panel.shutdown();
+    }
+
+    @Test
+    void 目标文件夹读不了时要明确报错_而不是当成空的() throws Exception {
+        Theme.install();
+        Path source = Files.createDirectories(tempDir.resolve("素材"));
+        Files.createDirectories(source.resolve("001_拍摄"));
+        Path notAFolder = Files.writeString(tempDir.resolve("不是目录.txt"), "x");
+
+        MainPanel panel = new MainPanel(tempDir.resolve("cache"));
+        panel.setOnWorkspaceChanged(workspace -> { });
+        java.util.concurrent.atomic.AtomicReference<Path> failed =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        panel.setOnTargetFolderError(failed::set);
+        SwingUtilities.invokeAndWait(() ->
+                panel.applyWorkspace(new Workspace(source, Set.of(), notAFolder)));
+
+        waitUntil(() -> failed.get() != null, "目标文件夹读取失败的通知");
+        assertEquals(notAFolder, failed.get());
+        assertNull(panel.targetPanelForTest().session(),
+                "读失败时不能建一个假的空中间商");
         panel.shutdown();
     }
 

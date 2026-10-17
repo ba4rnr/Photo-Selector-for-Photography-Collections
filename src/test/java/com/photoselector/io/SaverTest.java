@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,6 +17,9 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.imageio.ImageIO;
+
+import com.photoselector.core.EditState;
 import com.photoselector.core.NumberingRule;
 import com.photoselector.core.Session;
 import com.photoselector.testing.TestImages;
@@ -140,5 +144,48 @@ class SaverTest {
 
         assertEquals(0, result.renamed(), "名字本来就对，不该动它");
         assertEquals(Set.of("010.jpg"), fileNamesIn(target));
+    }
+
+    @Test
+    void 新挑的照片带旋转_保存时直接写成摆正后的JPG() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path source = Files.createDirectories(tempDir.resolve("素材"));
+        Path fresh = TestImages.writeJpeg(source.resolve("竖构图.jpg"), 300, 200);
+
+        Session session = sessionFor(target);
+        session.add(fresh);
+        session.setEdits(fresh, EditState.NONE.rotate(1));
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertEquals(1, result.copied());
+        assertEquals(1, result.rewritten(), "带编辑的新照片应当按重写计数");
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+
+        BufferedImage saved = ImageIO.read(target.resolve("010.jpg").toFile());
+        assertEquals(200, saved.getWidth(), "顺时针转 90° 后宽高互换");
+        assertEquals(300, saved.getHeight());
+    }
+
+    @Test
+    void 原有照片带旋转_保存时用临时名安全重写() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path old = TestImages.writeJpeg(target.resolve("旧A.jpg"), 300, 200);
+
+        Session session = sessionFor(target);
+        session.seedExisting(List.of(old));
+        session.setEdits(old, EditState.NONE.rotate(1));
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertEquals(1, result.rewritten());
+        assertEquals(0, result.renamed(), "重写编辑单独计数，不再混进普通改名");
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+        assertEquals(Set.of("010.jpg"), fileNamesIn(target),
+                "成功后不该留下 __renaming_ 临时文件");
+
+        BufferedImage saved = ImageIO.read(target.resolve("010.jpg").toFile());
+        assertEquals(200, saved.getWidth());
+        assertEquals(300, saved.getHeight());
     }
 }

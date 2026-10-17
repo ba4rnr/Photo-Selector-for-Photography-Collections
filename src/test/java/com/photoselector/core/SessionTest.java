@@ -400,14 +400,27 @@ class SessionTest {
     }
 
     @Test
-    void 撤销之后仍然是脏的_因为它只是把改动改小了() {
+    void 撤销之后回到磁盘基线_不再算脏() {
         Session session = newSession();
         session.seedExisting(List.of(Path.of("target", "x.jpg")));
         session.add(PHOTO_A);
 
-        session.undo(); // 又变回铺底时的样子：和磁盘一致，但中间商并没有跟磁盘对过账
+        assertTrue(session.isDirty(), "刚加入一张时确实和磁盘不同");
+        session.undo(); // 又变回铺底时的样子
 
-        assertTrue(session.isDirty(),
-                "撤销不等于保存——真要放弃全部改动，是关窗口时选\"不保存\"");
+        assertFalse(session.isDirty(),
+                "撤销之后序列、垃圾桶、编辑都和铺底时一致，不该再拿保存去烦用户");
+    }
+
+    @Test
+    void 旋转撤销之后也回到干净状态() {
+        Session session = newSession();
+        session.seedExisting(List.of(Path.of("target", "x.jpg")));
+
+        session.setEdits(PHOTO_A, EditState.NONE.rotate(1));
+        assertTrue(session.isDirty(), "编辑会让画面偏离磁盘");
+
+        session.undo();
+        assertFalse(session.isDirty(), "撤销编辑之后同样应当回到基线");
     }
 }

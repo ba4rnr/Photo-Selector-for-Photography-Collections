@@ -2,8 +2,10 @@ package com.photoselector.ui;
 
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -35,8 +37,18 @@ final class ThumbnailLoader {
     private final ThumbnailService service;
     private final ExecutorService pool;
 
+    /** 一次等待中的请求，以及所有等这张图的回调。 */
+    private record Pending(long session, Consumer<BufferedImage> callback) {
+    }
+
+    /** 正在排队或正在解的一张图；同一张图的多个调用者共享一次解码。 */
+    private static final class InFlight {
+        final List<Pending> listeners = new CopyOnWriteArrayList<>();
+        volatile boolean completed;
+    }
+
     /** 正在排队或正在解的图（键是路径 + 目标高度）。 */
-    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+    private final Map<String, InFlight> inFlight = new ConcurrentHashMap<>();
 
     /** 当前是第几轮。每次换文件夹就加一，旧一轮的回调自然全部失效。 */
     private final AtomicLong session = new AtomicLong();
@@ -75,18 +87,19 @@ final class ThumbnailLoader {
         }
         long mySession = session.get();
         String key = photo.toAbsolutePath() + "|" + maxHeight;
-        if (!inFlight.add(key)) {
-            return; // 同一张已经在路上了
+        InFlight task = join(key, new Pending(mySession, onReady));
+        if (task == null) {
+            return; // 已经并进前一个请求，回调会在那一次完成时统一调用
         }
 
-        submit(key, () -> {
+        submit(key, task, () -> {
             try {
                 BufferedImage image = service.thumbnail(photo, maxHeight);
-                deliver(mySession, () -> onReady.accept(image));
+                deliver(task, image);
             } catch (RuntimeException e) {
                 // 单张出意外不该影响别的图，丢掉即可
             } finally {
-                inFlight.remove(key);
+                complete(key, task);
             }
         });
     }
@@ -103,20 +116,47 @@ final class ThumbnailLoader {
         }
         long mySession = session.get();
         String key = photo.toAbsolutePath() + "|full";
-        if (!inFlight.add(key)) {
+        InFlight task = join(key, new Pending(mySession, onReady));
+        if (task == null) {
             return;
         }
 
-        submit(key, () -> {
+        submit(key, task, () -> {
             try {
                 BufferedImage image = ImageSource.open(photo).loadFull();
-                deliver(mySession, () -> onReady.accept(image));
+                deliver(task, image);
             } catch (RuntimeException e) {
-                deliver(mySession, () -> onReady.accept(null));
+                deliver(task, null);
             } finally {
-                inFlight.remove(key);
+                complete(key, task);
             }
         });
+    }
+
+    /**
+     * 加入一次取图请求。
+     *
+     * @return 新建的任务；如果已经并进前一个请求则返回 null
+     */
+    private InFlight join(String key, Pending pending) {
+        java.util.concurrent.atomic.AtomicBoolean owner = new java.util.concurrent.atomic.AtomicBoolean();
+        InFlight task = inFlight.compute(key, (ignored, existing) -> {
+            if (existing == null || existing.completed) {
+                InFlight fresh = new InFlight();
+                fresh.listeners.add(pending);
+                owner.set(true);
+                return fresh;
+            }
+            existing.listeners.add(pending);
+            return existing;
+        });
+        return owner.get() ? task : null;
+    }
+
+    private void complete(String key, InFlight task) {
+        task.completed = true;
+        // 按值删除：restart 清空后可能有同键的新任务，别把新任务误删。
+        inFlight.remove(key, task);
     }
 
     /**
@@ -126,19 +166,26 @@ final class ThumbnailLoader {
      * 真正 {@code submit} 之前被另一条线程关掉线程池。此时线程池会拒绝任务，
      * 这只是一种迟到的正常情况，不该让异常从界面事件里冒出来。
      */
-    private void submit(String key, Runnable task) {
+    private void submit(String key, InFlight pending, Runnable task) {
         try {
             pool.submit(task);
         } catch (RejectedExecutionException e) {
-            inFlight.remove(key);
+            complete(key, pending);
         }
     }
 
-    /** 把结果送回界面线程；期间换过文件夹的话直接作废。 */
-    private void deliver(long mySession, Runnable callback) {
+    /**
+     * 把同一张图的结果送回界面线程，并通知所有还在等它的调用者。
+     *
+     * <p>每个等待者记着自己发起时的轮次；换了文件夹的旧轮次仍然会静默作废。
+     */
+    private void deliver(InFlight task, BufferedImage image) {
         SwingUtilities.invokeLater(() -> {
-            if (mySession == session.get()) {
-                callback.run();
+            long current = session.get();
+            for (Pending pending : task.listeners) {
+                if (pending.session() == current) {
+                    pending.callback().accept(image);
+                }
             }
         });
     }

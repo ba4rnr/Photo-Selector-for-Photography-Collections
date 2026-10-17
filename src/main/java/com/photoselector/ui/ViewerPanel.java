@@ -13,12 +13,14 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
+import java.util.Objects;
 
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.io.ImageSource;
 import com.photoselector.core.EditState;
+import com.photoselector.core.PhotoTransforms;
 import com.photoselector.ui.theme.ChipGroup;
 import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
@@ -101,6 +103,14 @@ final class ViewerPanel extends JPanel {
     private BufferedImage rawImage;
     private boolean loading;
     private boolean failed;
+
+    /**
+     * 原图请求的代次。每换一次照片就加一，迟到的旧解码结果据此丢掉。
+     *
+     * <p>没有它的话，快速连按方向键时 A 的慢解码可能在 B 之后回来，把 B 的画面盖掉，
+     * 表格里的文件名却还是 B。
+     */
+    private long loadVersion;
 
     /** 当前照片的虚拟编辑；由 {@link #setEdits} 从中间商那边灌进来。 */
     private EditState edits = EditState.NONE;
@@ -202,6 +212,7 @@ final class ViewerPanel extends JPanel {
 
     /** 换一张要看的大图；传 null 表示什么都不看。 */
     void showPhoto(Path newPhoto) {
+        long request = ++loadVersion;
         this.photo = newPhoto;
         this.image = null;
         this.rawImage = null;
@@ -210,7 +221,7 @@ final class ViewerPanel extends JPanel {
         resetView(); // 换片把位置收回中间；缩放比例保留，方便连着看一堆细节
         repaint();
         if (newPhoto != null) {
-            loader.loadFull(newPhoto, this::onLoaded);
+            loader.loadFull(newPhoto, loaded -> onLoaded(newPhoto, request, loaded));
         }
     }
 
@@ -418,13 +429,26 @@ final class ViewerPanel extends JPanel {
 
     // ─────────────────────────── 内部 ───────────────────────────
 
-    private void onLoaded(BufferedImage loaded) {
+    /**
+     * 接收一次原图解码结果；只有“当前照片 + 最新代次”的这一份才允许上屏。
+     *
+     * <p>包级可见是为了测试能直接构造一个迟到的旧结果，不必依赖真实磁盘速度。
+     */
+    void onLoaded(Path requested, long request, BufferedImage loaded) {
+        if (request != loadVersion || !Objects.equals(requested, photo)) {
+            return;
+        }
         loading = false;
         failed = loaded == null;
         rawImage = loaded;
         rebuildImageFromEdits();
         resetView();
         repaint();
+    }
+
+    /** 当前原图请求的代次；给回归测试构造“迟到的旧结果”用。 */
+    long loadVersionForTest() {
+        return loadVersion;
     }
 
     private void resetView() {

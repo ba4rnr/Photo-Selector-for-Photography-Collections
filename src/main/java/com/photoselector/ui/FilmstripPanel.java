@@ -25,7 +25,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -97,7 +96,6 @@ final class FilmstripPanel extends JPanel {
 
     private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
     private final Set<Path> collapsed = new HashSet<>();
-    private final AtomicInteger loaded = new AtomicInteger();
 
     /**
      * 一格缩略图的高 : 宽的比。
@@ -171,7 +169,6 @@ final class FilmstripPanel extends JPanel {
         this.cellWidth = Math.round(height / BOX_ASPECT) + GAP;
         thumbnails.clear();
         collapsed.clear();
-        loaded.set(0);
         currentPhoto = null; // 换了一批照片，之前点中的那张就不算数了
         loader.restart();
 
@@ -252,7 +249,7 @@ final class FilmstripPanel extends JPanel {
 
     /** 已经拿到缩略图的张数。测试和排查用。 */
     int loadedCount() {
-        return loaded.get();
+        return thumbnails.size();
     }
 
     /** 还在路上的取图请求数。测试用它等后台收工，免得临时目录删不掉。 */
@@ -299,7 +296,9 @@ final class FilmstripPanel extends JPanel {
     void moveCurrent(int delta) {
         List<Path> flat = new ArrayList<>();
         for (PhotoGroup group : groups) {
-            flat.addAll(group.photos());
+            if (!collapsed.contains(group.folder())) {
+                flat.addAll(group.photos());
+            }
         }
         if (flat.isEmpty()) {
             return;
@@ -449,7 +448,6 @@ final class FilmstripPanel extends JPanel {
 
     private void onThumbnail(Path photo, BufferedImage image) {
         thumbnails.put(photo, image);
-        loaded.incrementAndGet();
         repaint();
     }
 

@@ -437,6 +437,43 @@ class FilmstripPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 方向键过片会跳过已收起的组() throws Exception {
+        Theme.install();
+
+        List<PhotoGroup> groups = new ArrayList<>();
+        for (int g = 0; g < 3; g++) {
+            Path folder = Files.createDirectories(tempDir.resolve("00" + (g + 1) + "_组"));
+            List<Path> photos = List.of(
+                    TestImages.writeJpeg(folder.resolve("p.jpg"), 900, 600));
+            groups.add(new PhotoGroup(folder.getFileName().toString(), folder, photos));
+        }
+
+        ThumbnailLoader loader = new ThumbnailLoader(
+                new ThumbnailService(Path.of("target", "test-cache-collapsed-navigation")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(1200, 200);
+            filmstrip.setGroups(groups, 120);
+            layoutTree(filmstrip);
+        });
+
+        // 收起中间那组，再从第一组往右走：应当直接到第三组。
+        Rectangle middle = filmstrip.groupBoundsForTest().get(1);
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                middle.x + 30, 8, 1, false, MouseEvent.BUTTON1)));
+        assertTrue(filmstrip.isCollapsed(groups.get(1).folder()));
+
+        filmstrip.setCurrentPhoto(groups.get(0).photos().get(0));
+        filmstrip.moveCurrent(1);
+
+        assertEquals(groups.get(2).photos().get(0), filmstrip.currentPhoto(),
+                "收起组的照片不该被方向键选中");
+        awaitIdle(loader);
+        loader.shutdown();
+    }
+
     private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {
         long deadline = System.currentTimeMillis() + 30_000;
         while (filmstrip.loadedCount() < expected && System.currentTimeMillis() < deadline) {

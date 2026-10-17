@@ -104,4 +104,27 @@ class ThumbnailLoaderTest {
         Thread.sleep(200); // 给"万一真排上了队"一点时间露馅
         assertEquals(0, received.get(), "关掉之后不该再送结果出来");
     }
+
+    @Test
+    void 同一张缩略图的多个调用者都能收到回调() throws Exception {
+        Path photo = TestImages.writeJpeg(tempDir.resolve("shared.jpg"), 900, 600);
+        ThumbnailLoader loader = newLoader();
+
+        CountDownLatch delivered = new CountDownLatch(2);
+        AtomicInteger callbacks = new AtomicInteger();
+        loader.load(photo, 100, image -> {
+            callbacks.incrementAndGet();
+            delivered.countDown();
+        });
+
+        // 同一张图的两个调用者共享一次解码，但两个回调都必须登记并收到结果。
+        loader.load(photo, 100, image -> {
+            callbacks.incrementAndGet();
+            delivered.countDown();
+        });
+
+        assertTrue(delivered.await(30, TimeUnit.SECONDS), "两个调用者都应当收到结果");
+        assertEquals(2, callbacks.get());
+        loader.shutdown();
+    }
 }

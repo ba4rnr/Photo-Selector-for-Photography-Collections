@@ -67,14 +67,27 @@ public final class Session {
     }
 
     /**
-     * 有没有还没落盘的改动。
+     * 上一次与磁盘对齐时的快照。
      *
-     * <p>它不是"历史"而是"和磁盘的差距"：只要有一步操作让序列或垃圾桶偏离了
-     * 磁盘现状，它就是 true。所以撤销也照样是 true——撤销改回来只是让差距变小，
-     * 并没有消失。它唯一的消费者是关窗口时的那一问：没有改动就别拿
-     * "是否保存"去烦用户。
+     * <p>脏状态不再靠一个只升不降的布尔值，而是拿当前序列 / 垃圾桶 / 编辑表
+     * 和这份基线逐项比较。这样撤销回到原样后，程序会正确地认为“没有改动”。
      */
-    private boolean dirty;
+    private Snapshot baseline = Snapshot.empty();
+
+    /** 中间商在某一个时刻的纯数据快照；用于判断是否仍与磁盘一致。 */
+    private record Snapshot(List<TargetEntry> sequence, List<TrashedItem> trash,
+                            Map<Path, EditState> edits) {
+
+        Snapshot {
+            sequence = List.copyOf(sequence);
+            trash = List.copyOf(trash);
+            edits = Map.copyOf(edits);
+        }
+
+        static Snapshot empty() {
+            return new Snapshot(List.of(), List.of(), Map.of());
+        }
+    }
 
     public Session(Path targetFolder, NumberingRule numbering) {
         this.targetFolder = Objects.requireNonNull(targetFolder, "targetFolder 不能为空");
@@ -175,7 +188,6 @@ public final class Session {
         int at = Math.max(0, Math.min(index, sequence.size()));
         TargetEntry entry = new TargetEntry(normalized, Origin.PENDING);
         sequence.add(at, entry);
-        dirty = true; // 已经多出一条，和磁盘不一样了
         // 反向动作：把刚加入的这条拿掉（唯一性约束保证序列里恰好只有它这一条）。
         // 正向动作：再插回原来的位置——撤销之后又重做时用的就是它。
         pushAction(() -> sequence.remove(entry),
@@ -197,12 +209,11 @@ public final class Session {
         undoStack.clear();
         redoStack.clear();
         edits.clear();
-        // 铺底之后，中间商和磁盘是同一份东西——保存也刚走过这一步，
-        // 所以"干净"要在最后统一置位，不能跟着前面的 clear 走
-        dirty = false;
         for (Path file : existingFiles) {
             sequence.add(new TargetEntry(file, Origin.EXISTING));
         }
+        // 铺底之后，中间商和磁盘是同一份东西；把这一刻记成新的比较基线。
+        baseline = snapshot();
     }
 
     /**
@@ -222,7 +233,6 @@ public final class Session {
             return; // 原地没动，不产生无意义的历史
         }
         doMoveEntry(from, target);
-        dirty = true; // 位置变了，编号也就变了
         // 撤销 = 从新位置搬回原位置；重做 = 再搬一遍。
         // 都走 doMoveEntry（只动序列、不记历史），免得重做时又把重做栈清掉。
         pushAction(() -> doMoveEntry(target, from), () -> doMoveEntry(from, target));
@@ -242,7 +252,6 @@ public final class Session {
     public void trash(int index) {
         checkIndex(index);
         doTrashEntry(index);
-        dirty = true; // 它离开了序列，保存时得真的从文件夹里消失
         // 撤销 = 从垃圾桶里把它捡出来放回原位；重做 = 再丢进去
         pushAction(() -> {
             TrashedItem last = trash.removeLast();
@@ -286,7 +295,6 @@ public final class Session {
         int to = Math.max(0, Math.min(index, sequence.size()));
         trash.removeAt(at);
         sequence.add(to, picked.entry());
-        dirty = true;
         // 撤销 = 把刚插进去的这条再丢回垃圾桶，而且要插回它原来那一格——
         // 用 add 追加到末尾的话，垃圾桶的排序会悄悄变（界面按顺序渲染，看得出差别）。
         // 重做 = 再捡回来一次，位置照旧。
@@ -354,7 +362,6 @@ public final class Session {
             return false;
         }
         applyEdits(key, next);
-        dirty = true; // 图像内容将来要跟着变，和磁盘不一样了
         pushAction(() -> applyEdits(key, before), () -> applyEdits(key, next));
         return true;
     }
@@ -383,7 +390,7 @@ public final class Session {
 
     /** 有没有还没保存的改动（关窗口时用来决定要不要问"是否保存"）。 */
     public boolean isDirty() {
-        return dirty;
+        return !snapshot().equals(baseline);
     }
 
     /** 换目标文件夹时调用：中间商彻底清空，准备为新文件夹服务。 */
@@ -393,7 +400,12 @@ public final class Session {
         undoStack.clear();
         redoStack.clear();
         edits.clear();
-        dirty = false;
+        baseline = Snapshot.empty();
+    }
+
+    /** 当前状态的一份不可变快照。 */
+    private Snapshot snapshot() {
+        return new Snapshot(sequence, trash.items(), edits);
     }
 
     /**

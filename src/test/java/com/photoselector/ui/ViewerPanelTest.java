@@ -173,6 +173,31 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 迟到的旧原图不能盖住当前照片() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path folder = Files.createDirectories(tempDir.resolve("素材"));
+        Path first = TestImages.writeJpeg(folder.resolve("a.jpg"), 300, 200);
+        Path second = TestImages.writeJpeg(folder.resolve("b.jpg"), 400, 100);
+
+        // 关掉真实加载，只靠手工投递回调来模拟“慢解码晚回来”，避免测试看机器速度。
+        loader.shutdown();
+        SwingUtilities.invokeAndWait(() -> viewer.showPhoto(second));
+        long currentRequest = viewer.loadVersionForTest();
+
+        BufferedImage oldImage = new BufferedImage(30, 20, BufferedImage.TYPE_INT_RGB);
+        viewer.onLoaded(first, currentRequest - 1, oldImage);
+        assertTrue(!viewer.hasImage(), "旧代次的结果必须丢掉");
+
+        BufferedImage currentImage = new BufferedImage(40, 10, BufferedImage.TYPE_INT_RGB);
+        viewer.onLoaded(second, currentRequest, currentImage);
+        assertTrue(viewer.hasImage(), "当前代次的结果应当正常上屏");
+        assertEquals(40, viewer.imageSizeForTest().width);
+        assertEquals(10, viewer.imageSizeForTest().height);
+    }
+
+    @Test
     void 滚轮在整百倍率之间跳() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));

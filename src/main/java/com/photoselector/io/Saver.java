@@ -1,13 +1,23 @@
 package com.photoselector.io;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
+
+import com.photoselector.core.EditState;
 import com.photoselector.core.Origin;
+import com.photoselector.core.PhotoTransforms;
 import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
 import com.photoselector.core.TrashedItem;
@@ -15,7 +25,8 @@ import com.photoselector.core.TrashedItem;
 /**
  * 保存：把中间商里的改动一次性落到磁盘上。
  *
- * <p>做的三件事：把新挑进来的复制过去、按新顺序给原有的文件改名、删掉垃圾桶里的真实文件。
+ * <p>做的四件事：把新挑进来的复制过去、按新顺序给原有的文件改名、
+ * 把带旋转 / 翻转的照片重写成新 JPG、删掉垃圾桶里的真实文件。
  *
  * <p><b>为什么先要一份"计划"（{@link Plan}）</b>：保存跑在后台线程上，而中间商是活的——
  * 保存期间你在界面上再挑一张、按一下撤销，后台正在遍历的集合就变了。所以进后台之前，
@@ -46,8 +57,13 @@ public final class Saver {
      * @param source 文件现在在哪
      * @param origin 是目标文件夹里原有的，还是从素材挑来待复制的
      * @param number 它在序列里的编号（配合原扩展名就是最终文件名）
+     * @param edits  虚拟旋转 / 翻转；没动过就是 {@link EditState#NONE}
      */
-    public record Item(Path source, Origin origin, String number) {
+    public record Item(Path source, Origin origin, String number, EditState edits) {
+
+        public Item {
+            edits = edits == null ? EditState.NONE : edits;
+        }
     }
 
     /**
@@ -73,7 +89,8 @@ public final class Saver {
             List<Item> items = new ArrayList<>(session.size());
             for (int i = 0; i < session.size(); i++) {
                 TargetEntry entry = session.entryAt(i);
-                items.add(new Item(entry.source(), entry.origin(), session.nameAt(i)));
+                items.add(new Item(entry.source(), entry.origin(), session.nameAt(i),
+                        session.editsOf(entry.source())));
             }
             List<Path> trashFiles = new ArrayList<>();
             for (TrashedItem item : session.trash().items()) {
@@ -86,7 +103,7 @@ public final class Saver {
     }
 
     /** 一次保存的结果。 */
-    public record Result(int copied, int renamed, int deleted,
+    public record Result(int copied, int renamed, int rewritten, int deleted,
                          List<Path> finalOrder, List<Path> failedSources, List<String> problems) {
 
         public Result {
@@ -101,12 +118,17 @@ public final class Saver {
 
         /** 一句话总结，用来弹给用户看。 */
         public String summary() {
-            return "新增 " + copied + " 张，重命名 " + renamed + " 张，删除 " + deleted + " 张";
+            return "新增 " + copied + " 张，重命名 " + renamed + " 张，"
+                    + "重写编辑 " + rewritten + " 张，删除 " + deleted + " 张";
         }
     }
 
     /** 一项待归位的临时搬运。 */
-    private record TempMove(Path temp, Path target) {
+    private record TempMove(Path temp, Path target, EditState edits) {
+    }
+
+    /** 复制阶段的计数：新增了几张，其中几张因为带编辑而重写。 */
+    private record CopyStats(int copied, int rewritten) {
     }
 
     /**
@@ -126,11 +148,16 @@ public final class Saver {
 
         List<TempMove> toDelete = moveTrashAside(plan, problems);
         List<TempMove> toRename = moveAsideForRenaming(plan, finals, problems);
-        int copied = copyNewEntries(plan, finals, failedSources, problems);
-        int renamed = moveToFinalNames(toRename, problems);
+        CopyStats copied = copyNewEntries(plan, finals, failedSources, problems);
+        List<TempMove> plainMoves = toRename.stream()
+                .filter(move -> move.edits().isNone()).toList();
+        List<TempMove> editedMoves = toRename.stream()
+                .filter(move -> !move.edits().isNone()).toList();
+        int renamed = moveToFinalNames(plainMoves, problems);
+        int rewritten = copied.rewritten() + rewriteMovedEntries(editedMoves, problems);
         int deleted = deleteMovedAside(toDelete, problems);
 
-        return new Result(copied, renamed, deleted,
+        return new Result(copied.copied(), renamed, rewritten, deleted,
                 collectFinalOrder(plan, finals, failedSources), failedSources, problems);
     }
 
@@ -150,7 +177,7 @@ public final class Saver {
             Path temp = plan.folder().resolve(TRASHED_PREFIX + System.nanoTime() + "_" + index++ + ".tmp");
             try {
                 Files.move(file, temp);
-                pending.add(new TempMove(temp, file));
+                pending.add(new TempMove(temp, file, EditState.NONE));
             } catch (IOException e) {
                 problems.add("删不掉：" + file.getFileName());
             }
@@ -165,13 +192,17 @@ public final class Saver {
         for (int i = 0; i < plan.items().size(); i++) {
             Item item = plan.items().get(i);
             Path finalPath = finals.get(i);
-            if (item.origin() != Origin.EXISTING || item.source().equals(finalPath)) {
+            if (item.origin() != Origin.EXISTING
+                    || (item.source().equals(finalPath) && item.edits().isNone())) {
                 continue;
             }
-            Path temp = plan.folder().resolve(RENAMING_PREFIX + System.nanoTime() + "_" + i + ".tmp");
+            // 保留原扩展名：带编辑的条目还要从这个临时文件重新解码，
+            // 而 ImageSource 是按扩展名挑解码器的。
+            Path temp = plan.folder().resolve(RENAMING_PREFIX + System.nanoTime()
+                    + "_" + i + extensionOf(item.source()));
             try {
                 Files.move(item.source(), temp);
-                pending.add(new TempMove(temp, finalPath));
+                pending.add(new TempMove(temp, finalPath, item.edits()));
             } catch (IOException e) {
                 problems.add("改名前挪不动：" + item.source().getFileName());
             }
@@ -180,9 +211,10 @@ public final class Saver {
     }
 
     /** 第二步：新挑进来的复制到最终名字。已经有人占了那个名字就不覆盖。 */
-    private static int copyNewEntries(Plan plan, List<Path> finals, List<Path> failedSources,
-                                      List<String> problems) {
+    private static CopyStats copyNewEntries(Plan plan, List<Path> finals,
+                                            List<Path> failedSources, List<String> problems) {
         int copied = 0;
+        int rewritten = 0;
         for (int i = 0; i < plan.items().size(); i++) {
             Item item = plan.items().get(i);
             if (item.origin() != Origin.PENDING) {
@@ -195,14 +227,19 @@ public final class Saver {
                 continue;
             }
             try {
-                Files.copy(item.source(), target, StandardCopyOption.COPY_ATTRIBUTES);
+                if (item.edits().isNone()) {
+                    copyAtomically(item.source(), target);
+                } else {
+                    writeEditedAtomically(item.source(), target, item.edits());
+                    rewritten++;
+                }
                 copied++;
-            } catch (IOException e) {
-                problems.add("复制失败：" + item.source().getFileName());
+            } catch (IOException | RuntimeException e) {
+                problems.add("复制或写图失败：" + item.source().getFileName());
                 failedSources.add(item.source());
             }
         }
-        return copied;
+        return new CopyStats(copied, rewritten);
     }
 
     /** 第三步：临时名改成最终名。 */
@@ -214,13 +251,38 @@ public final class Saver {
                 continue;
             }
             try {
-                Files.move(move.temp(), move.target());
+                moveAtomically(move.temp(), move.target());
                 renamed++;
             } catch (IOException e) {
                 problems.add("改名失败，文件还留在临时名下：" + move.temp().getFileName());
             }
         }
         return renamed;
+    }
+
+    /**
+     * 把带旋转 / 翻转的原有照片重写成新 JPG。
+     *
+     * <p>输入先经 {@link ImageSource#loadFull()} 按 EXIF 摆正，再套
+     * {@link PhotoTransforms#apply}——和屏幕上的画法完全相同。写文件仍然走
+     * 临时名再原子改名，写到一半失败不会留下半截正式文件。
+     */
+    private static int rewriteMovedEntries(List<TempMove> pending, List<String> problems) {
+        int rewritten = 0;
+        for (TempMove move : pending) {
+            if (Files.exists(move.target())) {
+                problems.add("最终名字被占了，这张照片还留在临时名下：" + move.temp().getFileName());
+                continue;
+            }
+            try {
+                writeEditedAtomically(move.temp(), move.target(), move.edits());
+                Files.deleteIfExists(move.temp());
+                rewritten++;
+            } catch (IOException | RuntimeException e) {
+                problems.add("重写编辑失败，原图还留在临时名下：" + move.temp().getFileName());
+            }
+        }
+        return rewritten;
     }
 
     /** 第四步：到这一步才真的删除。 */
@@ -250,13 +312,82 @@ public final class Saver {
         for (int i = 0; i < plan.items().size(); i++) {
             Item item = plan.items().get(i);
             Path finalPath = finals.get(i);
+            if (failedSources.contains(item.source())) {
+                continue; // 这一条已经明确失败：就算目标处碰巧有东西也不能认
+            }
             if (Files.exists(finalPath)) {
                 order.add(finalPath);
-            } else if (!failedSources.contains(item.source()) && Files.exists(item.source())) {
+            } else if (Files.exists(item.source())) {
                 order.add(item.source()); // 没搬成功，那就还在原地
             }
         }
         return order;
+    }
+
+    /**
+     * 没编辑的照片：先复制到同目录临时文件，成功后再原子改名。
+     *
+     * <p>直接往最终名字复制的旧写法，在磁盘满或读写出错时会留下半截 JPG；
+     * 这个半截文件还会被后续的“文件存在就算成功”误认。临时文件把失败挡在正式名字之外。
+     */
+    private static void copyAtomically(Path source, Path target) throws IOException {
+        Path temp = Files.createTempFile(target.getParent(), "__copying_", ".tmp");
+        try {
+            Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
+            moveAtomically(temp, target);
+            temp = null;
+        } finally {
+            if (temp != null) {
+                Files.deleteIfExists(temp);
+            }
+        }
+    }
+
+    /** 解码、套编辑、以较高质量写成新 JPG，再原子改名到最终位置。 */
+    private static void writeEditedAtomically(Path source, Path target, EditState edits)
+            throws IOException {
+        BufferedImage original = ImageSource.open(source).loadFull();
+        BufferedImage result = PhotoTransforms.apply(original, edits);
+
+        Path temp = Files.createTempFile(target.getParent(), "__writing_", ".tmp");
+        try {
+            writeJpeg(result, temp);
+            moveAtomically(temp, target);
+            temp = null;
+        } finally {
+            if (temp != null) {
+                Files.deleteIfExists(temp);
+            }
+        }
+    }
+
+    /**
+     * 用 0.95 质量写 JPG。
+     *
+     * <p>{@code ImageIO.write} 的默认质量偏低，经过一次旋转就可能肉眼看出损失；
+     * 这里显式指定压缩参数。像素已经按 EXIF 摆正，所以新文件不再写方向标记。
+     */
+    private static void writeJpeg(BufferedImage image, Path file) throws IOException {
+        ImageWriter writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        try (ImageOutputStream output = ImageIO.createImageOutputStream(file.toFile())) {
+            writer.setOutput(output);
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(0.95f);
+            writer.write(null, new IIOImage(image, null, null), param);
+        } finally {
+            writer.dispose();
+        }
+    }
+
+    /** 同目录内优先原子改名；个别文件系统不支持时退回普通改名。 */
+    private static void moveAtomically(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source, target);
+        }
     }
 
     /** 取扩展名（含点）；没有就返回空串。 */
