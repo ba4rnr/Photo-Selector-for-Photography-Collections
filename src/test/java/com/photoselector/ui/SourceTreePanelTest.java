@@ -103,6 +103,46 @@ class SourceTreePanelTest {
     }
 
     @Test
+    void 外部刷新保留展开状态_勾选和当前选中() throws Exception {
+        Theme.install();
+        SourceTreePanel panel = new SourceTreePanel();
+        Path root = buildLibrary();
+        Path shootA = root.resolve("095_2026_0929");
+        SwingUtilities.invokeAndWait(() -> panel.setRoot(root));
+
+        DefaultMutableTreeNode rootNode =
+                (DefaultMutableTreeNode) panel.tree().getModel().getRoot();
+        waitUntil(() -> rootNode.getChildCount() == 3, "根目录后台加载");
+        DefaultMutableTreeNode shoot = child(rootNode, "095_2026_0929");
+        SwingUtilities.invokeAndWait(() -> {
+            panel.toggleIncluded(shootA);
+            panel.tree().expandPath(new TreePath(shoot.getPath()));
+        });
+        waitUntil(() -> shoot.getChildCount() == 2, "子文件夹后台加载");
+        SwingUtilities.invokeAndWait(() ->
+                panel.tree().setSelectionPath(new TreePath(shoot.getPath())));
+
+        TestImages.writeJpeg(shootA.resolve("L1000003.JPG"), 400, 300);
+        Files.createDirectories(root.resolve("097_新目录"));
+        SwingUtilities.invokeAndWait(panel::refreshFromDisk);
+
+        waitUntil(() -> panel.tree().getModel().getRoot() instanceof DefaultMutableTreeNode node
+                        && node.getChildCount() == 4,
+                "刷新后的根目录");
+        DefaultMutableTreeNode rebuiltRoot =
+                (DefaultMutableTreeNode) panel.tree().getModel().getRoot();
+        DefaultMutableTreeNode rebuiltShoot = child(rebuiltRoot, "095_2026_0929");
+        waitUntil(() -> rebuiltShoot.getChildCount() == 3, "刷新后的子文件夹");
+
+        assertTrue(panel.tree().isExpanded(new TreePath(rebuiltShoot.getPath())),
+                "刷新后仍应保持展开");
+        assertFalse(panel.isIncluded(shootA), "刷新后仍应保持剔除");
+        SourceTreePanel.Node selected = SourceTreePanel.nodeOf(
+                panel.tree().getSelectionPath().getLastPathComponent());
+        assertEquals(shootA, selected.path(), "刷新后仍应保持当前选中");
+    }
+
+    @Test
     void 勾选框决定文件夹是否纳入范围() throws Exception {
         Theme.install();
         SourceTreePanel panel = new SourceTreePanel();

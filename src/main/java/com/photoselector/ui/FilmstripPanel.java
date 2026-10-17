@@ -183,6 +183,37 @@ final class FilmstripPanel extends JPanel {
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
     }
 
+    /**
+     * 外部文件变化后换一批内容，但尽量保留用户眼下的位置。
+     *
+     * <p>和 {@link #setGroups} 的区别：折叠状态与当前照片能留下就留下；
+     * 当前照片确实被删掉时才清空。缩略图一律重取，因为同名文件的像素可能已经变了。
+     */
+    void refreshGroups(List<PhotoGroup> newGroups) {
+        Path keep = currentPhoto;
+        this.groups = List.copyOf(newGroups);
+
+        Set<Path> folders = new HashSet<>();
+        for (PhotoGroup group : groups) {
+            folders.add(group.folder());
+        }
+        collapsed.retainAll(folders);
+        thumbnails.clear();
+        loader.restart();
+        if (keep != null && !containsPhoto(keep)) {
+            currentPhoto = null;
+        }
+
+        updatePreferredSize();
+        repaint();
+        SwingUtilities.invokeLater(() -> {
+            requestVisibleThumbnails();
+            if (currentPhoto != null) {
+                scrollToPhoto(currentPhoto);
+            }
+        });
+    }
+
     /** 把某一组滚到视野里。目录树里点文件夹时用。 */
     void scrollToGroup(Path folder) {
         if (!(getParent() instanceof JViewport viewport)) {

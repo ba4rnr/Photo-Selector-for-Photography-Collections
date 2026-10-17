@@ -72,6 +72,11 @@ final class SourceTreePanel extends JPanel {
         }
     }
 
+    /** 目录树刷新前的快照；只递归用户当前展开着的目录。 */
+    private record TreeSnapshot(Path path, boolean folder, boolean loaded,
+                                List<TreeSnapshot> children) {
+    }
+
     private final DefaultTreeModel model = new DefaultTreeModel(new DefaultMutableTreeNode(Node.placeholder()));
     private final JTree tree = new JTree(model);
 
@@ -185,6 +190,59 @@ final class SourceTreePanel extends JPanel {
         tree.repaint();
     }
 
+    /**
+     * 外部文件变化后重读目录树，尽量保留勾选、展开和选中状态。
+     *
+     * <p>只递归当前展开的目录；收起目录重新变成占位节点，下次展开时再读，
+     * 这样既不会丢掉用户展开的位置，也不会为整棵树做不必要的文件系统扫描。
+     */
+    void refreshFromDisk() {
+        DefaultMutableTreeNode rootNode = (DefaultMutableTreeNode) model.getRoot();
+        Node rootPayload = nodeOf(rootNode);
+        if (rootPayload == null || !rootPayload.folder()) {
+            return;
+        }
+
+        Path rootPath = rootPayload.path();
+        Set<Path> expandedPaths = new HashSet<>();
+        collectExpandedPaths(rootNode, expandedPaths);
+        expandedPaths.add(rootPath);
+        Path selected = selectedPath();
+        Set<Path> keepExcluded = Set.copyOf(excluded);
+        long myGeneration = ++generation;
+        loadingNodes.clear();
+
+        listingPool.submit(() -> {
+            TreeSnapshot snapshot = snapshot(rootPath, true, expandedPaths);
+            SwingUtilities.invokeLater(() -> {
+                if (myGeneration != generation) {
+                    return;
+                }
+                excluded.clear();
+                excluded.addAll(keepExcluded);
+                DefaultMutableTreeNode rebuilt = buildNode(snapshot);
+                model.setRoot(rebuilt);
+                model.reload();
+
+                List<Path> orderedExpanded = new ArrayList<>(expandedPaths);
+                orderedExpanded.sort(Comparator.comparingInt(Path::getNameCount));
+                for (Path path : orderedExpanded) {
+                    DefaultMutableTreeNode node = findNode(rebuilt, path);
+                    if (node != null && !tree.isExpanded(new TreePath(node.getPath()))) {
+                        tree.expandPath(new TreePath(node.getPath()));
+                    }
+                }
+                if (selected != null) {
+                    DefaultMutableTreeNode node = findNode(rebuilt, selected);
+                    if (node != null) {
+                        tree.setSelectionPath(new TreePath(node.getPath()));
+                    }
+                }
+                tree.repaint();
+            });
+        });
+    }
+
     /** 只留给测试用。 */
     JTree tree() {
         return tree;
@@ -266,6 +324,71 @@ final class SourceTreePanel extends JPanel {
                 model.nodeStructureChanged(node);
             });
         });
+    }
+
+    private void collectExpandedPaths(DefaultMutableTreeNode node, Set<Path> expandedPaths) {
+        Node payload = nodeOf(node);
+        if (payload == null || !payload.folder()) {
+            return;
+        }
+        TreePath path = new TreePath(node.getPath());
+        if (!tree.isExpanded(path)) {
+            return;
+        }
+        expandedPaths.add(payload.path());
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectExpandedPaths((DefaultMutableTreeNode) node.getChildAt(i), expandedPaths);
+        }
+    }
+
+    private Path selectedPath() {
+        TreePath selection = tree.getSelectionPath();
+        if (selection == null) {
+            return null;
+        }
+        Node payload = nodeOf(selection.getLastPathComponent());
+        return payload == null || payload.isPlaceholder() ? null : payload.path();
+    }
+
+    private static TreeSnapshot snapshot(Path path, boolean folder, Set<Path> expandedPaths) {
+        boolean loaded = folder && expandedPaths.contains(path);
+        List<TreeSnapshot> children = new ArrayList<>();
+        if (loaded) {
+            for (Path child : listChildren(path)) {
+                boolean childFolder = Files.isDirectory(child);
+                children.add(snapshot(child, childFolder, expandedPaths));
+            }
+        }
+        return new TreeSnapshot(path, folder, loaded || !folder, List.copyOf(children));
+    }
+
+    private static DefaultMutableTreeNode buildNode(TreeSnapshot snapshot) {
+        DefaultMutableTreeNode node =
+                new DefaultMutableTreeNode(new Node(snapshot.path(), snapshot.folder()));
+        for (TreeSnapshot child : snapshot.children()) {
+            node.add(buildNode(child));
+        }
+        if (snapshot.folder() && !snapshot.loaded()) {
+            node.add(new DefaultMutableTreeNode(Node.placeholder()));
+        }
+        return node;
+    }
+
+    private static DefaultMutableTreeNode findNode(DefaultMutableTreeNode node, Path path) {
+        Node payload = nodeOf(node);
+        if (payload != null && !payload.isPlaceholder()
+                && payload.path().toAbsolutePath().normalize()
+                        .equals(path.toAbsolutePath().normalize())) {
+            return node;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            DefaultMutableTreeNode found =
+                    findNode((DefaultMutableTreeNode) node.getChildAt(i), path);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     void shutdown() {

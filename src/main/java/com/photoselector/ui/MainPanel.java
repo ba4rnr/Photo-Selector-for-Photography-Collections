@@ -12,8 +12,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -34,6 +36,7 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.Saver;
+import com.photoselector.io.SourceFolderWatcher;
 import com.photoselector.io.TargetFolderWatcher;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
@@ -127,9 +130,15 @@ public final class MainPanel extends JPanel {
     /** 目标文件夹的外部改动监听；换工作区或退出时跟着换 / 关。 */
     private final TargetFolderWatcher targetWatcher;
 
+    /** 素材根目录 + 直接子文件夹的外部改动监听。 */
+    private final SourceFolderWatcher sourceWatcher;
+
     /** 外部刷新正在跑；期间又来事件就记一笔，跑完再补一次。 */
     private boolean refreshingTargetExternally;
     private boolean pendingTargetRefresh;
+
+    /** 素材扫描 / 外部刷新的轮次，迟到的旧目录结果据此丢掉。 */
+    private long sourceScanRound;
 
     /** 某个文件夹被打开时通知外部（参数是文件夹和张数，张数为 -1 表示读失败）。 */
     private BiConsumer<Path, Integer> onFolderOpened = (folder, count) -> { };
@@ -233,6 +242,8 @@ public final class MainPanel extends JPanel {
         setBackground(Theme.PANEL);
         targetWatcher = new TargetFolderWatcher(folder ->
                 SwingUtilities.invokeLater(() -> externalTargetChanged(folder)));
+        sourceWatcher = new SourceFolderWatcher(root ->
+                SwingUtilities.invokeLater(() -> externalSourceChanged(root)));
 
         ThumbnailService thumbnailService = new ThumbnailService(thumbnailCacheDir);
         thumbnailLoader = new ThumbnailLoader(thumbnailService);
@@ -440,13 +451,15 @@ public final class MainPanel extends JPanel {
      * 在界面线程上扫会卡住；所以这里立刻返回，结果通过 {@link #setOnFolderOpened} 通知。
      */
     private void reloadGroups(Path folder) {
+        long myRound = ++sourceScanRound;
         scanPool.submit(() -> {
             List<PhotoGroup> groups;
             try {
                 groups = PhotoFiles.groupsIn(folder);
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
-                    if (workspace != null && folder.equals(workspace.sourceRoot())) {
+                    if (myRound == sourceScanRound
+                            && workspace != null && folder.equals(workspace.sourceRoot())) {
                         markSourceLoadFinished();
                         onFolderOpened.accept(folder, -1);
                     }
@@ -455,13 +468,15 @@ public final class MainPanel extends JPanel {
             }
 
             SwingUtilities.invokeLater(() -> {
-                if (workspace == null || !folder.equals(workspace.sourceRoot())) {
+                if (myRound != sourceScanRound
+                        || workspace == null || !folder.equals(workspace.sourceRoot())) {
                     return; // 扫的是旧的根目录：用户已经换过工作区，这批结果作废
                 }
                 scannedGroups = groups;
                 applyGroups();
                 markSourceLoadFinished();
                 onFolderOpened.accept(folder, filmstrip.photoCount());
+                startSourceWatcher(folder);
             });
         });
     }
@@ -477,13 +492,25 @@ public final class MainPanel extends JPanel {
 
     /** 按目录树的勾选状态筛一遍：被剔除的组不进素材条。 */
     private void applyGroups() {
+        applyGroups(false);
+    }
+
+    /**
+     * @param preserveView 外部刷新时为 true：保留当前照片和折叠状态；
+     *                     初次扫描 / 换工作区时为 false，从头布置素材条
+     */
+    private void applyGroups(boolean preserveView) {
         List<PhotoGroup> included = new ArrayList<>();
         for (PhotoGroup group : scannedGroups) {
             if (sourceTree.isIncluded(group.folder())) {
                 included.add(group);
             }
         }
-        filmstrip.setGroups(included, FILMSTRIP_THUMBNAIL_HEIGHT);
+        if (preserveView) {
+            filmstrip.refreshGroups(included);
+        } else {
+            filmstrip.setGroups(included, FILMSTRIP_THUMBNAIL_HEIGHT);
+        }
     }
 
     /** 设置"某个文件夹被打开"的回调。 */
@@ -713,6 +740,7 @@ public final class MainPanel extends JPanel {
         // 旧工作区的照片不能继续留在中央、也不能让它的预读取读跑完再盖回来。
         // 新工作区的 lastViewedPhoto 会在两条异步扫描完成后重新显示。
         viewer.showPhoto(null);
+        stopSourceWatcher();
         this.workspace = newWorkspace;
         pendingRestorePhoto = newWorkspace.lastViewedPhoto();
         sourceLoadFinished = false;
@@ -862,6 +890,102 @@ public final class MainPanel extends JPanel {
             return;
         }
         refreshTargetFromDisk(folder);
+    }
+
+    /** 启动素材监听；注册失败时界面仍可用，只是不再自动跟进外部变化。 */
+    private void startSourceWatcher(Path root) {
+        try {
+            sourceWatcher.watch(root);
+        } catch (IOException ignored) {
+            // 读目录已经成功；监听权限问题不该把已经打开的工作区判成失败
+        }
+    }
+
+    private void stopSourceWatcher() {
+        sourceWatcher.close();
+    }
+
+    /** 监听线程说素材根目录或某个直接子文件夹变了。 */
+    private void externalSourceChanged(Path root) {
+        if (shutDown || workspace == null
+                || !root.toAbsolutePath().normalize()
+                        .equals(workspace.sourceRoot().toAbsolutePath().normalize())) {
+            return;
+        }
+        refreshSourceFromDisk(root);
+    }
+
+    /**
+     * 外部素材变化后的重扫：换掉素材条内容，但不推倒目标文件夹的中间商。
+     *
+     * <p>用户正在看的那张如果还在，就重读一次文件，避免文件被外部原地覆盖后
+     * 大图和缩略图仍然显示旧像素；它被删掉则清空大图。
+     */
+    private void refreshSourceFromDisk(Path root) {
+        long round = ++sourceScanRound;
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        scanPool.submit(() -> {
+            List<PhotoGroup> groups = null;
+            IOException failure = null;
+            try {
+                groups = PhotoFiles.groupsIn(normalizedRoot);
+            } catch (IOException e) {
+                failure = e;
+            }
+
+            List<PhotoGroup> scanned = groups;
+            IOException error = failure;
+            SwingUtilities.invokeLater(() -> {
+                if (shutDown || round != sourceScanRound || workspace == null
+                        || !normalizedRoot.equals(
+                                workspace.sourceRoot().toAbsolutePath().normalize())) {
+                    return; // 换过工作区，或者已经有更新的一轮刷新
+                }
+                if (error != null) {
+                    onFolderOpened.accept(normalizedRoot, -1);
+                    return;
+                }
+
+                Path showing = viewer.photo();
+                boolean listingChanged = !sourceListingFingerprint(scannedGroups)
+                        .equals(sourceListingFingerprint(scanned));
+                scannedGroups = List.copyOf(scanned);
+                applyGroups(true);
+                if (listingChanged) {
+                    sourceTree.refreshFromDisk();
+                }
+                onFolderOpened.accept(normalizedRoot, filmstrip.photoCount());
+                if (showing != null && isSourcePhoto(normalizedRoot, showing)) {
+                    if (Files.isRegularFile(showing)) {
+                        viewer.clearFullImageCache();
+                        showPhotoInViewer(showing);
+                    } else {
+                        showPhotoInViewer(null);
+                    }
+                }
+            });
+        });
+    }
+
+    private static boolean isSourcePhoto(Path root, Path photo) {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Path normalizedPhoto = photo.toAbsolutePath().normalize();
+        Path parent = normalizedPhoto.getParent();
+        return parent != null
+                && (parent.equals(normalizedRoot)
+                        || normalizedRoot.equals(parent.getParent()));
+    }
+
+    /** 组路径 + 照片路径；覆盖同名文件时签名不变，增删 / 改名时会变。 */
+    private static Set<Path> sourceListingFingerprint(List<PhotoGroup> groups) {
+        Set<Path> paths = new HashSet<>();
+        for (PhotoGroup group : groups) {
+            paths.add(group.folder().toAbsolutePath().normalize());
+            for (Path photo : group.photos()) {
+                paths.add(photo.toAbsolutePath().normalize());
+            }
+        }
+        return paths;
     }
 
     /**
@@ -1519,6 +1643,7 @@ public final class MainPanel extends JPanel {
             return;
         }
         shutDown = true;
+        sourceWatcher.close();
         targetWatcher.close();
         sourceTree.shutdown();
         thumbnailLoader.shutdown();
