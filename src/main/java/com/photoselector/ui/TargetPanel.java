@@ -1,29 +1,13 @@
 package com.photoselector.ui;
 
-import java.awt.Dimension;
 import java.awt.FontMetrics;
-import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Origin;
-import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.TextStyles;
@@ -36,50 +20,14 @@ import com.photoselector.ui.theme.Theme;
  * 每一格下面写的是它<b>将来</b>在磁盘上的名字，由编号规则按当前位置现算；
  * 挪动位置，名字跟着变，不需要谁去手工同步。
  *
- * <p>两个几何上的决定：
- * <ul>
- *   <li><b>格子撑满可用宽度</b>，而不是写死尺寸。右栏宽度是可以拖的，
- *       写死的话窄了会挤、宽了右侧留一大片空白。</li>
- *   <li><b>只画看得见的格子</b>，目标文件夹里可能有上千张。</li>
- * </ul>
+ * <p>几何、虚拟化、取图、落点白线这些都在基类 {@link ThumbnailGridPanel} 里；
+ * 这里只负责"数据来自目标序列"和"每格怎么画"。
  */
 @SuppressWarnings("serial")
-final class TargetPanel extends JPanel {
-
-    /** 四周留白的最小值；有多余宽度时会一起变宽。 */
-    private static final int PADDING = 12;
-
-    /** 格子之间、行之间的最小间隔；有多余宽度时横向间隔会一起变宽。 */
-    private static final int GAP = 8;
-
-    /** 表头（目标文件夹路径 + 张数）占的高度。 */
-    private static final int HEADER_HEIGHT = 34;
+final class TargetPanel extends ThumbnailGridPanel {
 
     /** 表头右侧给「展开」按钮预留的宽度；路径再长也不许占过来。 */
     private static final int HEADER_BUTTON_SPACE = 76;
-
-    /** 名字那一行占的高度。 */
-    private static final int CAPTION_HEIGHT = 18;
-
-    /** 缩略图的默认宽度（"查看 → 缩略图大小"里可以改）。 */
-    private static final int DEFAULT_BOX_WIDTH = 150;
-
-    /**
-     * 一格缩略图的高 : 宽的比。
-     *
-     * <p>取 1:1（方框）是为了两种朝向都放得下：横照片按 3:2 满宽排，
-     * 竖照片也能占满一格宽度、竖着立起来。格子要是横形的（原来按 3:2），
-     * 竖照片只能缩成中间一条窄条。
-     */
-    private static final float BOX_ASPECT = 1.0f;
-
-    private final ThumbnailLoader loader;
-    private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
-
-    private Session session;
-
-    /** 缩略图宽度由"查看 → 缩略图大小"决定，不随面板宽度变化。 */
-    private int boxWidth = DEFAULT_BOX_WIDTH;
 
     /** 表头右侧那个「展开 / 收起」按钮的位置；绘制时算出来，点击时用它做命中判断。 */
     private Rectangle expandButtonBounds;
@@ -93,147 +41,39 @@ final class TargetPanel extends JPanel {
     /** 点中某一格时通知外部（大图视图据此显示它）。 */
     private java.util.function.Consumer<Path> onPhotoChosen = photo -> { };
 
-    /** 当前点中的那一格；用来画个底色，不然点下去看不出发生了什么。 */
-    private int chosenIndex = -1;
-
-    /** 拖动中的落点：插在第几项之前；-1 表示现在没在拖。 */
-    private int dropHint = -1;
-
-    // 下面三个由 updateMetrics() 按当前宽度算出来
-    private int columns = 1;
-    private int extraSpace;
-    private int thumbnailHeight = Math.round(DEFAULT_BOX_WIDTH * BOX_ASPECT);
-
     TargetPanel(ThumbnailLoader loader) {
-        this.loader = loader;
-        setBackground(Theme.PANEL);
-        setOpaque(true);
+        super(loader);
+    }
 
-        addComponentListener(new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent e) {
-                updateMetrics();
-                updatePreferredSize();
-                requestVisibleThumbnails();
-            }
-        });
-        addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                if (!SwingUtilities.isLeftMouseButton(e)) {
-                    return;
-                }
-                if (expandButtonBounds != null && expandButtonBounds.contains(e.getPoint())) {
-                    onToggleExpanded.run();
-                    return;
-                }
-                int index = indexAt(e.getPoint());
-                if (index >= 0) {
-                    chosenIndex = index;
-                    repaint();
-                    onPhotoChosen.accept(session.entryAt(index).source());
-                }
-            }
-        });
+    // ─────────────────────────── 基类要的"数据从哪来" ───────────────────────────
+
+    @Override
+    protected int itemCount() {
+        return session == null ? 0 : session.size();
+    }
+
+    @Override
+    protected Path sourceAt(int index) {
+        return session.entryAt(index).source();
+    }
+
+    @Override
+    protected void onCellActivated(int index) {
+        onPhotoChosen.accept(session.entryAt(index).source());
+    }
+
+    @Override
+    protected boolean onHeaderClick(Point point) {
+        if (expandButtonBounds != null && expandButtonBounds.contains(point)) {
+            onToggleExpanded.run();
+            return true;
+        }
+        return false;
     }
 
     /** 点中某一格时通知外部。 */
     void setOnPhotoChosen(java.util.function.Consumer<Path> listener) {
         this.onPhotoChosen = listener == null ? photo -> { } : listener;
-    }
-
-    /**
-     * 光标落在哪两个格子之间，返回"插在第几项之前"。
-     *
-     * <p>判据是每一格的<b>中点</b>：偏左就插在这一格前面，偏右就插到它后面。
-     * 这正是"拖到两张之间"的落点算法。
-     */
-    int dropIndexAt(Point point) {
-        if (session == null) {
-            return 0;
-        }
-        updateMetrics();
-        int row = Math.max(0, (point.y - HEADER_HEIGHT) / rowHeight());
-        int column = -1; // -1 表示"落在这一行最后一个格子之后"
-        for (int c = 0; c < columns; c++) {
-            if (point.x < cellX(c) + boxWidth / 2) {
-                column = c;
-                break;
-            }
-        }
-        if (column == 0 && row > 0) {
-            // 换行处：光标在"本行开头"这一块时，照片该接在<b>上一行的末尾</b>，
-            // 而不是插到本行第一张的前面——那会让它在视觉上凭空跳到下一行去。
-            // 所以整体往回挪一格：上一行的最后一格之后。
-            row--;
-            column = -1;
-        }
-        if (column < 0) {
-            column = columns; // 落在这一行最后一个格子之后
-        }
-        return Math.max(0, Math.min(session.size(), row * columns + column));
-    }
-
-    /** 拖动过程中告诉面板落点在哪，它会画一条白线标出来。 */
-    void setDropHint(int index) {
-        if (dropHint != index) {
-            dropHint = index;
-            repaint();
-        }
-    }
-
-    void clearDropHint() {
-        setDropHint(-1);
-    }
-
-    /** 当前标出的落点（没标就是 -1）。给测试和排查用。 */
-    int dropHintIndex() {
-        return dropHint;
-    }
-
-    /** 一行有多高。给测试算落点用。 */
-    int rowHeightForTest() {
-        updateMetrics();
-        return rowHeight();
-    }
-
-    /** 第 column 格左边缘的 x。给测试算落点用。 */
-    int cellXForTest(int column) {
-        updateMetrics();
-        return cellX(column);
-    }
-
-    /** 第 column 格右边缘的 x。给测试算落点用。 */
-    int cellRightForTest(int column) {
-        updateMetrics();
-        return cellX(column) + boxWidth;
-    }
-
-    /** 一格缩略图多宽。给测试算落点用。 */
-    int thumbnailWidthForTest() {
-        return boxWidth;
-    }
-
-    /** 某一格对应的条目下标；点在空白处返回 -1。 */
-    int indexAt(Point point) {
-        if (session == null || session.isEmpty() || point.y < HEADER_HEIGHT) {
-            return -1;
-        }
-        updateMetrics();
-        int row = (point.y - HEADER_HEIGHT) / rowHeight();
-        int column = -1;
-        for (int c = 0; c < columns; c++) {
-            int left = cellX(c);
-            if (point.x >= left && point.x < left + boxWidth) {
-                column = c;
-                break;
-            }
-        }
-        if (column < 0) {
-            return -1;
-        }
-        int index = row * columns + column;
-        return index < session.size() ? index : -1;
     }
 
     /** 点表头那个按钮时通知外部。 */
@@ -252,253 +92,47 @@ final class TargetPanel extends JPanel {
         return expandButtonBounds;
     }
 
-    /** 换一个中间商；传 null 表示还没选目标文件夹。 */
-    void setSession(Session newSession) {
-        this.session = newSession;
-        // 换了中间商，之前点中的位置就不作数了——照片可能已经换了一批、
-        // 数量也可能短了。不清的话"选中"会指到一张不相干的照片上。
-        chosenIndex = -1;
-        thumbnails.clear();
-        updateMetrics();
-        updatePreferredSize();
-        repaint();
-        SwingUtilities.invokeLater(this::requestVisibleThumbnails);
-        // 换中间商也是"历史换了"：撤销 / 重做的灰亮要跟着新中间商走
-        onChanged.run();
-    }
-
-    Session session() {
-        return session;
-    }
-
-    /** 某一张照片手里有没有缩略图；拖动时拿它当"跟着鼠标的那张图"。 */
-    BufferedImage thumbnailOf(Path photo) {
-        return thumbnails.get(photo);
-    }
-
-    /** 点中的那张照片；还没点过、或者中间商换过了就是 null。 */
-    Path selectedPhoto() {
-        if (session == null || chosenIndex < 0 || chosenIndex >= session.size()) {
-            return null;
-        }
-        return session.entryAt(chosenIndex).source();
-    }
-
-    /**
-     * 让"点中的那张"改指向新的位置。
-     *
-     * <p>拖动重排之后要调：照片挪了位置，而"选中"是按位置记的——
-     * 不跟着挪，高亮就会留在原地，指着另一张照片，编号也跟着对不上。
-     */
-    void moveSelectionTo(int index) {
-        if (session != null && index >= 0 && index < session.size()) {
-            chosenIndex = index;
-            repaint();
-        }
-    }
-
-    /** 序列变了（挑入、撤销、挪动）之后调用：重新取图并重画。 */
-    void refresh() {
-        updatePreferredSize();
-        repaint();
-        SwingUtilities.invokeLater(this::requestVisibleThumbnails);
-        // 顺手通知一声外部：撤销 / 重做按钮的灰亮状态跟着历史走。
-        // 挂在这儿是因为"序列变过"的地方都会走到这里（挑入、挪位、丢垃圾桶、
-        // 撤销、重做、保存之后重建），不必在每个动作里再重复一次
-        onChanged.run();
-    }
-
-    /** 面板内容变过之后通知外部。 */
-    void setOnChanged(Runnable listener) {
-        this.onChanged = listener == null ? () -> { } : listener;
-    }
-
-    private Runnable onChanged = () -> { };
-
-    int entryCount() {
-        return session == null ? 0 : session.size();
-    }
-
-    /** 已经拿到缩略图的张数。给测试和排查用。 */
-    int loadedCount() {
-        return thumbnails.size();
-    }
-
-    /** 还在路上的取图请求数。测试用它等后台收工。 */
-    int inFlightForTest() {
-        return loader.inFlightCount();
-    }
-
-    /** 某一张的缩略图在不在手里。测试用。 */
-    boolean isLoaded(Path photo) {
-        return thumbnails.containsKey(photo);
-    }
-
     /** 第 index 条将来在磁盘上叫什么名字。测试用。 */
     String nameAt(int index) {
         return session == null ? null : session.nameAt(index);
     }
 
-    /**
-     * 改缩略图大小（"查看 → 缩略图大小"里选）。
-     *
-     * <p>尺寸一变，手里那些缩略图就不合用了——先清空再重新取。
-     * 缩略图服务的缓存键里带着高度，所以换尺寸不会和旧的那批打架。
-     */
-    void setThumbnailWidth(int width) {
-        this.boxWidth = Math.max(60, width);
-        thumbnails.clear();
-        updateMetrics();
-        updatePreferredSize();
-        repaint();
-        SwingUtilities.invokeLater(this::requestVisibleThumbnails);
-    }
-
-    int thumbnailWidth() {
-        return boxWidth;
-    }
-
-    /** 一行排几列。测试用。 */
-    int columnsForTest() {
-        updateMetrics();
-        return columns;
-    }
-
-    /** 每处间隔分到的多余宽度。测试用。 */
-    int extraSpaceForTest() {
-        updateMetrics();
-        return extraSpace;
-    }
-
-    /**
-     * 装进滚动面板。
-     *
-     * <p>两个监听缺一不可，和素材条是同一个道理：视口滚动、以及视口大小变化，
-     * 都要重新算"哪些格子看得见"。
-     */
-    JScrollPane wrapInScrollPane() {
-        JScrollPane scroll = new JScrollPane(this,
-                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
-                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        // 同样的坑：不摘掉左右键，焦点在这块面板上时方向键只会让画面滑动
-        ScrollKeys.dropArrowKeys(scroll);
-        scroll.setBorder(null);
-        scroll.getViewport().setBackground(Theme.PANEL);
-        scroll.getVerticalScrollBar().setUnitIncrement(24);
-        Theme.themeScrollBar(scroll.getVerticalScrollBar());
-
-        scroll.getViewport().addChangeListener(e -> requestVisibleThumbnails());
-        scroll.getViewport().addComponentListener(new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent e) {
-                requestVisibleThumbnails();
-            }
-        });
-        return scroll;
-    }
-
-    // ─────────────────────────── 尺寸计算 ───────────────────────────
-
-    /**
-     * 按当前宽度算排几列、以及多余的宽度怎么分。
-     *
-     * <p>缩略图尺寸是固定的（由"查看 → 缩略图大小"定），宽度变化时变的是<b>间距</b>：
-     * 先把能放下的列数定下来，剩下的宽度平均分给每条间隔和左右留白。
-     * 这样拖动左边框看到的是"照片之间松了/紧了"，而不是照片忽大忽小。
-     */
-    private void updateMetrics() {
-        thumbnailHeight = Math.max(16, Math.round(boxWidth * BOX_ASPECT));
-        int available = Math.max(40, getWidth() - PADDING * 2);
-        columns = Math.max(1, (available + GAP) / (boxWidth + GAP));
-        int used = columns * boxWidth + (columns - 1) * GAP;
-        extraSpace = Math.max(0, (available - used) / (columns + 1));
-    }
-
-    /** 第 column 列的左边缘：留白、间隔都加上分到的那份多余宽度。 */
-    private int cellX(int column) {
-        return PADDING + extraSpace + column * (boxWidth + GAP + extraSpace);
-    }
-
-    private int rowHeight() {
-        return thumbnailHeight + CAPTION_HEIGHT + GAP;
-    }
-
-    private int contentHeight() {
-        if (session == null || session.isEmpty()) {
-            return HEADER_HEIGHT + 40;
-        }
-        int rows = (session.size() + columns - 1) / columns;
-        return HEADER_HEIGHT + rows * rowHeight() + PADDING;
-    }
-
-    private void updatePreferredSize() {
-        // 宽度交给滚动面板去撑（ViewportLayout 会把视图拉到至少和视口一样宽），
-        // 高度按内容算，这样内容多了垂直滚动条才会出现
-        setPreferredSize(new Dimension(120, contentHeight()));
-        revalidate();
-    }
-
-    // ─────────────────────────── 绘制 ───────────────────────────
+    // ─────────────────────────── 每一格画什么 ───────────────────────────
 
     @Override
-    protected void paintComponent(Graphics g) {
-        super.paintComponent(g);
-        Graphics2D g2 = (Graphics2D) g.create();
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+    protected void paintCellContent(Graphics2D g, int index, Rectangle cell,
+                                    BufferedImage image, boolean chosen) {
+        TargetEntry entry = session.entryAt(index);
 
-        paintHeader(g2);
-        if (session == null || session.isEmpty()) {
-            paintEmptyHint(g2);
-        } else {
-            paintCells(g2);
-            paintDropHint(g2);
-        }
-        g2.dispose();
+        // 高亮底、占位框、等比居中——这一套规矩在组件库里（Painters.thumbnailCell），
+        // 和素材条、垃圾桶用的是同一个画法
+        Painters.thumbnailCell(g, cell, image, chosen, null, false);
+
+        // 名字用编号规则按位置现算，而不是文件现在叫什么。
+        // 已有的用普通色、新挑进来的用暖橙——一眼看出哪些还没落到磁盘上。
+        g.setFont(Theme.FONT_SMALL);
+        g.setColor(entry.origin() == Origin.EXISTING ? Theme.TEXT : Theme.ACCENT);
+        g.drawString(session.nameAt(index), cell.x, cell.y + cell.height + 14);
     }
 
-    /**
-     * 拖动时标出落点的那条白线。
-     *
-     * <p>白线画在"将要插进去的那个缝"上，贯穿那一行——和底部素材条拖动排序用的是同一套视觉语言。
-     */
-    private void paintDropHint(Graphics2D g) {
-        if (dropHint < 0) {
-            return;
+    @Override
+    protected void paintEmptyHint(Graphics2D g) {
+        g.setFont(Theme.FONT);
+        g.setColor(Theme.TEXT_MUTED);
+        String hint = session == null
+                ? "先在「文件 → 选择工作区…」里指定一个目标文件夹"
+                : "在下方素材条里点中一张照片，按空格键加入这里";
+        FontMetrics metrics = g.getFontMetrics();
+        for (String line : hint.split("\n")) {
+            g.drawString(TextStyles.end(line, metrics, getWidth() - PADDING * 2), PADDING,
+                    HEADER_HEIGHT + metrics.getAscent() + 6);
         }
-        Rectangle line = dropHintRect();
-        g.setColor(Theme.DIVIDER_HINT);
-        g.fillRect(line.x, line.y, line.width, line.height);
     }
 
-    /** 那条落点白线占的位置；没有落点时返回 null。 */
-    private Rectangle dropHintRect() {
-        if (dropHint < 0) {
-            return null;
-        }
-        updateMetrics();
-        int row = dropHint / columns;
-        int column = dropHint % columns;
-        if (dropHint > 0 && column == 0) {
-            // 换行处：这个落点是"下一行的第一张之前"，等价于"上一行的最后一张之后"。
-            // 白线要画在上一行的末尾——画在下一行开头的话，它会跑到光标左边老远，
-            // 看起来就像"要插到下一行去"，和实际插入的位置也对不上。
-            row--;
-            column = columns;
-        }
-        int x = column < columns ? cellX(column) : cellX(columns - 1) + boxWidth + GAP / 2;
-        int y = HEADER_HEIGHT + row * rowHeight();
-        return new Rectangle(x - 4, y, 3, thumbnailHeight);
-    }
+    // ─────────────────────────── 表头 ───────────────────────────
 
-    /** 那条白线现在画在哪。给测试用。 */
-    Rectangle dropHintRectForTest() {
-        return dropHintRect();
-    }
-
-    private void paintHeader(Graphics2D g) {
+    @Override
+    protected void paintHeader(Graphics2D g) {
         g.setFont(Theme.FONT_SMALL);
         FontMetrics metrics = g.getFontMetrics();
         int baseline = 22;
@@ -543,8 +177,8 @@ final class TargetPanel extends JPanel {
         int height = 20;
         int x = getWidth() - PADDING - Math.max(width, HEADER_BUTTON_SPACE - 12);
         int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
-        // 胶囊底由组件库统一画（和别的面板上的按钮同一套观感）；
-        // 这里只负责在它左边加一枚小三角。命中判断用的矩形也从同一处来。
+        // 胶囊底由组件库统一画；这里只负责在它左边加一枚小三角，
+        // 命中判断用的矩形也从同一处来
         int fullWidth = metrics.stringWidth("  " + label) + 26;
         expandButtonBounds = new Rectangle(x, y, fullWidth, height);
         Painters.chip(g, expandButtonBounds, metrics, "  " + label, true, false);
@@ -560,98 +194,6 @@ final class TargetPanel extends JPanel {
         }
     }
 
-    /** 只画看得见的那几行。 */
-    private void paintCells(Graphics2D g) {
-        updateMetrics(); // 宽度可能刚被拖动过，画之前先按当前宽度算一遍
-        Rectangle clip = g.getClipBounds();
-        int firstRow = Math.max(0, (clip.y - HEADER_HEIGHT) / rowHeight());
-        int lastRow = (clip.y + clip.height - HEADER_HEIGHT) / rowHeight();
-
-        for (int row = firstRow; row <= lastRow; row++) {
-            for (int column = 0; column < columns; column++) {
-                int index = row * columns + column;
-                if (index >= session.size()) {
-                    return;
-                }
-                paintCell(g, index, cellX(column), HEADER_HEIGHT + row * rowHeight());
-            }
-        }
-    }
-
-    private void paintCell(Graphics2D g, int index, int x, int y) {
-        TargetEntry entry = session.entryAt(index);
-        Path source = entry.source();
-        BufferedImage image = thumbnails.get(source);
-
-        // 高亮底、占位框、等比居中——这一套规矩在组件库里（Painters.thumbnailCell），
-        // 和素材条、垃圾桶用的是同一个画法
-        Rectangle cell = new Rectangle(x, y, boxWidth, thumbnailHeight);
-        Painters.thumbnailCell(g, cell, image, index == chosenIndex, null, false);
-
-        // 名字用编号规则按位置现算，而不是文件现在叫什么。
-        // 已有的用普通色、新挑进来的用暖橙——一眼看出哪些还没落到磁盘上。
-        g.setFont(Theme.FONT_SMALL);
-        g.setColor(entry.origin() == Origin.EXISTING ? Theme.TEXT : Theme.ACCENT);
-        g.drawString(session.nameAt(index), x, y + thumbnailHeight + 14);
-    }
-
-    private void paintEmptyHint(Graphics2D g) {
-        g.setFont(Theme.FONT);
-        g.setColor(Theme.TEXT_MUTED);
-        String hint = session == null
-                ? "先在「文件 → 选择工作区…」里指定一个目标文件夹"
-                : "在下方素材条里点中一张照片，按空格键加入这里";
-        FontMetrics metrics = g.getFontMetrics();
-        for (String line : hint.split("\n")) {
-            g.drawString(TextStyles.end(line, metrics, getWidth() - PADDING * 2), PADDING,
-                    HEADER_HEIGHT + metrics.getAscent() + 6);
-        }
-    }
-
-    // ─────────────────────────── 取图 ───────────────────────────
-
-    private void requestVisibleThumbnails() {
-        // 不可见时直接返回：浏览模式右栏和整理模式中间各有一块目标面板，
-        // 同一时刻只有一块可见；不挡的话隐藏的那块会按整块尺寸白取一批图
-        if (!isVisible() || session == null || session.isEmpty()) {
-            return;
-        }
-        updateMetrics(); // 同上：算可见范围要依赖列数和行高
-        Rectangle visible = getVisibleRect();
-        if (visible.height <= 0) {
-            visible = new Rectangle(0, 0, getWidth(), getHeight());
-        }
-
-        // 可见范围上下各多取一行，滚动时不至于先看到空白
-        int firstRow = Math.max(0, (visible.y - HEADER_HEIGHT) / rowHeight() - 1);
-        int lastRow = (visible.y + visible.height - HEADER_HEIGHT) / rowHeight() + 1;
-        int first = firstRow * columns;
-        int last = Math.min(session.size() - 1, (lastRow + 1) * columns - 1);
-
-        Set<Path> keep = new HashSet<>();
-        for (int index = first; index <= last; index++) {
-            Path source = session.entryAt(index).source();
-            keep.add(source);
-            if (!thumbnails.containsKey(source)) {
-                loader.load(source, thumbnailHeight, image -> onThumbnail(source, image));
-            }
-        }
-        if (!thumbnails.isEmpty() && thumbnails.keySet().removeIf(path -> !keep.contains(path))) {
-            repaint();
-        }
-    }
-
-    private void onThumbnail(Path source, BufferedImage image) {
-        thumbnails.put(source, image);
-        repaint();
-    }
-
-    /**
-     * 路径太长就在中间截断：头（盘符）和尾（文件夹名）都留着，中间用省略号省掉。
-     *
-     * <p>尾部最有用——认出"这是哪个文件夹"靠的就是最后一段，所以头最多只占
-     * 三分之一的宽度，剩下的尽量都留给尾部。
-     */
     /** 路径太长就在中间截断。组件库里的通用实现，保留这个方法名给旧测试用。 */
     static String shortenMiddle(String text, FontMetrics metrics, int maxWidth) {
         return TextStyles.middle(text, metrics, maxWidth);

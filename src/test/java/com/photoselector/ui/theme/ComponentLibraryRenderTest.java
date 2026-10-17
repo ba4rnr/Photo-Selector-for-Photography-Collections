@@ -55,7 +55,11 @@ class ComponentLibraryRenderTest {
         Painters.thumbnailCell(g, new Rectangle(20, 142, 160, 150), photo, false, "普通", true);
         Painters.thumbnailCell(g, new Rectangle(200, 142, 160, 150), photo, true, "选中", false);
         Painters.thumbnailCell(g, new Rectangle(380, 142, 160, 150), null, false, "还没解出来", true);
-        Painters.thumbnailCell(g, new Rectangle(560, 142, 160, 150), photo, false, "竖着的照片", true);
+        // 这一格要真的画一张竖图：第一版偷懒复用了同一张横图，标签写着"竖着"，
+        // 图却是横的——看图的人当然会以为方向逻辑坏了。验货图必须名副其实。
+        BufferedImage portrait = demoImage(120, 160);
+        Painters.thumbnailCell(g, new Rectangle(560, 142, 160, 150), portrait, false,
+                "竖着的照片（120×160）", true);
 
         // 3) 文字截断
         g.drawString("文字：放得下 / 末尾截断 / 路径中间截断", 20, 350);
