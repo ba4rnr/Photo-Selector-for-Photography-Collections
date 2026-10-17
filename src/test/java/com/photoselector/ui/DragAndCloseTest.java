@@ -109,6 +109,36 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 平移工具下拖动大图_不显示照片拖拽提示() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            FilmstripPanel filmstrip = window.panel.filmstripForTest();
+            ViewerPanel viewer = window.panel.viewerForTest();
+            Path photo = filmstrip.photoAtForTest(0);
+            SwingUtilities.invokeAndWait(() -> filmstrip.setCurrentPhoto(photo));
+            waitUntil(viewer::hasImage, "大图显示出来");
+            SwingUtilities.invokeAndWait(() ->
+                    window.panel.toolBar().setActiveToolForTest(CursorTool.PAN));
+
+            Point from = new Point(viewer.getWidth() / 2, viewer.getHeight() / 2);
+            Point to = new Point(from.x + 30, from.y + 20);
+            SwingUtilities.invokeAndWait(() -> {
+                press(viewer, from);
+                drag(viewer, new Point(from.x + 10, from.y + 5));
+                drag(viewer, to);
+            });
+
+            assertNull(DragOut.ghostBoundsForTest(viewer),
+                    "平移工具下拖动画面，不应该出现照片缩略图");
+            SwingUtilities.invokeAndWait(() -> release(viewer, to));
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 目标面板滚动后拖动_白线和实际插入位置一致() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow(1, 12, 24);

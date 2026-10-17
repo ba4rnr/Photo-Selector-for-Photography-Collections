@@ -103,6 +103,14 @@ final class DragOut {
                 if (pressedAt == null || e.getPoint().distance(pressedAt) <= THRESHOLD) {
                     return;
                 }
+                // 工具可能已经从“选择”切成“平移”。拖动的每一帧都要重新问一次，
+                // 不能只在松手时检查；否则平移时仍会画出跟着鼠标的照片和落点提示，
+                // 看起来像照片正在被拖出去，实际松手却不会执行。
+                if (!enabled.getAsBoolean()) {
+                    hideGhost(source);
+                    clearHint();
+                    return;
+                }
                 Path dragging = pressedPhoto;
                 if (dragging == null) {
                     return;

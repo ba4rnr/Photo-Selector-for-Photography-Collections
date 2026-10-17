@@ -89,6 +89,21 @@ class ImageEditTest {
     }
 
     @Test
+    void 旋转后即使原来不是适应窗口_也自动收进窗口() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        ViewerPanel viewer = panel.viewerForTest();
+
+        SwingUtilities.invokeAndWait(viewer::actualSize);
+        assertTrue(!viewer.isFitToWindow(), "先让这张处在固定倍率");
+
+        SwingUtilities.invokeAndWait(() -> panel.rotateCurrentPhoto(true));
+
+        assertTrue(viewer.isFitToWindow(),
+                "旋转交换宽高后，应自动回到适应窗口，不能只看到画面的一角");
+        panel.shutdown();
+    }
+
+    @Test
     void 翻转只影响画面_不动文件() throws Exception {
         MainPanel panel = panelWithOnePhoto();
         Path photo = panel.viewerForTest().photo();

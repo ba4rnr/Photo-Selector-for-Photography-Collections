@@ -563,6 +563,9 @@ public final class MainPanel extends JPanel {
             Session session = targetPanel.session();
             if (session.setEdits(photo, session.editsOf(photo).rotate(clockwise ? 1 : -1))) {
                 viewer.setEdits(session.editsOf(photo));
+                // 旋转会交换宽高；即使之前在 100% 或某个固定倍率，
+                // 也先把完整画面收进窗口，避免旋转后只看到画面的一角。
+                viewer.fitToWindow();
                 refreshEditedThumbnail(photo);
                 historyChanged();
             }

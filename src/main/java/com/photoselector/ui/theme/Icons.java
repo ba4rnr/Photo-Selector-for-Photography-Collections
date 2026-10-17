@@ -160,10 +160,10 @@ public final class Icons {
     }
 
     /**
-     * 旋转：逆时针的圆弧箭头，中间一个加号（参照 C1）。
+     * 旋转：顺时针的圆弧箭头，中间一个加号（参照 C1）。
      *
-     * <p>缺口留在左上，箭头从缺口处指进去——"转一下"的意思一眼能看出来；
-     * 中间的加号把它和别的弧线图标区分开。
+     * <p>按钮动作是“顺时针转 90°”，图标必须和动作同向；
+     * 把逆时针图形水平镜像，箭头方向就跟着翻到顺时针。
      */
     public static Icon rotate() {
         return stroke(Icons::paintRotate);
@@ -377,6 +377,17 @@ public final class Icons {
     }
 
     private static void paintRotate(Graphics2D g) {
+        // 先用原来的逆时针几何画一遍，再整体水平镜像。这样圆心、半径和
+        // 加号位置都不变，只把圆弧与箭头的旋转方向翻成顺时针。
+        Graphics2D mirrored = (Graphics2D) g.create();
+        mirrored.translate(SIZE, 0);
+        mirrored.scale(-1, 1);
+        paintRotateCounterclockwise(mirrored);
+        mirrored.dispose();
+    }
+
+    /** 逆时针几何本体；由 {@link #paintRotate(Graphics2D)} 镜像成顺时针。 */
+    private static void paintRotateCounterclockwise(Graphics2D g) {
         // 圆心 (9, 9)、半径 5.1：弧从 195° 逆时针绕到 135°，缺口留在左上；
         // 末端压一枚实心三角箭头——C1 那个箭头是实心的，18 像素下比 V 形干净
         g.draw(new Arc2D.Double(3.9, 3.9, 10.2, 10.2, 195, 300, Arc2D.OPEN));
