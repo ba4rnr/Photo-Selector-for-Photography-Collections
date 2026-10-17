@@ -63,6 +63,12 @@ class WorkspaceDialogTest {
         dialog.dispose();
     }
 
+    @Test
+    void 手输路径带非法字符时当作没填_不抛异常() {
+        assertEquals(null, WorkspaceDialog.textPath("bad" + (char) 0 + "path"));
+        assertEquals(null, WorkspaceDialog.textPath("   "));
+    }
+
     private static int countColors(BufferedImage image) {
         Set<Integer> colors = new HashSet<>();
         for (int y = 0; y < image.getHeight(); y += 3) {

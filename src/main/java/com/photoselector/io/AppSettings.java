@@ -2,7 +2,6 @@ package com.photoselector.io;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -89,7 +88,14 @@ public final class AppSettings {
     /** 打开每张照片时默认是否适应窗口；老配置没有这一项时按新的出厂行为用 true。 */
     public boolean defaultFitToWindow() {
         String raw = readProperties().getProperty(KEY_DEFAULT_FIT);
-        return raw == null || Boolean.parseBoolean(raw);
+        if (raw == null || raw.isBlank()) {
+            return true;
+        }
+        return switch (raw.trim().toLowerCase(java.util.Locale.ROOT)) {
+            case "true" -> true;
+            case "false" -> false;
+            default -> true; // 坏值回到出厂策略，不要悄悄把 Fit 当成关闭
+        };
     }
 
     /** 记下“默认适应窗口”开关。 */
@@ -146,7 +152,7 @@ public final class AppSettings {
         if (Files.isRegularFile(configFile)) {
             try (InputStream in = Files.newInputStream(configFile)) {
                 properties.load(in);
-            } catch (IOException ignored) {
+            } catch (IOException | RuntimeException ignored) {
                 // 读不了就从空的开始：总比整份设置都写不进去强
             }
         }
@@ -155,10 +161,7 @@ public final class AppSettings {
 
     private void writeProperties(Properties properties) {
         try {
-            Files.createDirectories(configFile.getParent());
-            try (OutputStream out = Files.newOutputStream(configFile)) {
-                properties.store(out, "摄影集照片筛选器的偏好设置");
-            }
+            PropertyFiles.write(configFile, properties, "摄影集照片筛选器的偏好设置");
         } catch (IOException e) {
             // 记不住不影响这次使用，只是下次打开要重设一遍
         }

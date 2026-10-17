@@ -11,6 +11,8 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
 import java.util.function.BooleanSupplier;
@@ -48,9 +50,6 @@ final class DragOut {
     /** 跟着鼠标走的那张缩略图有多宽。 */
     private static final int GHOST_WIDTH = 140;
 
-    /** 一次拖动最多记几处白线提示（扫过好几块面板时用）。 */
-    private static final int MAX_HINTS = 4;
-
     private DragOut() {
     }
 
@@ -84,8 +83,7 @@ final class DragOut {
 
             private Point pressedAt;
             private Path pressedPhoto;
-            private final DropTarget[] hinted = new DropTarget[MAX_HINTS];
-            private int hintedCount;
+            private final Set<DropTarget> hinted = new HashSet<>();
             private boolean hintedTrash;
             private Path ghostPhoto;
             private BufferedImage ghostImage;
@@ -160,11 +158,12 @@ final class DragOut {
                 if (hovered != null) {
                     setHint(hovered, dropIndexAt(hovered, toTargetPoint(source, hovered, pointInSource)));
                 }
-                for (int i = 0; i < hintedCount; i++) {
+                for (DropTarget previous : Set.copyOf(hinted)) {
                     // 按"值"比，不能按身份比：每次鼠标一动都会新建一个 DropTarget，
                     // 身份永远不相等——那样刚设上的白线会被自己立刻擦掉（踩过这个坑）
-                    if (!hinted[i].equals(hovered)) {
-                        clearHint(hinted[i]);
+                    if (!previous.equals(hovered)) {
+                        clearHint(previous);
+                        hinted.remove(previous);
                     }
                 }
                 applyTrashHint(hovered == null
@@ -177,9 +176,7 @@ final class DragOut {
                 } else {
                     target.trash().setDropHint(index);
                 }
-                if (!contains(target) && hintedCount < MAX_HINTS) {
-                    hinted[hintedCount++] = target;
-                }
+                hinted.add(target);
             }
 
             private void clearHint(DropTarget target) {
@@ -188,15 +185,6 @@ final class DragOut {
                 } else {
                     target.trash().clearDropHint();
                 }
-            }
-
-            private boolean contains(DropTarget target) {
-                for (int i = 0; i < hintedCount; i++) {
-                    if (hinted[i] == target) {
-                        return true;
-                    }
-                }
-                return false;
             }
 
             /** 悬在"垃圾桶"大图区上时给出边框提示。 */
@@ -210,10 +198,10 @@ final class DragOut {
             }
 
             private void clearHint() {
-                for (int i = 0; i < hintedCount; i++) {
-                    clearHint(hinted[i]);
+                for (DropTarget target : hinted) {
+                    clearHint(target);
                 }
-                hintedCount = 0;
+                hinted.clear();
                 applyTrashHint(false);
             }
 

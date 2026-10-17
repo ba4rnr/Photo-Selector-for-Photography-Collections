@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Stream;
 
 import javax.swing.AbstractAction;
@@ -489,39 +490,44 @@ final class FolderPickerDialog extends JDialog {
         updateHover(-1); // 换了地方，上一处残留的悬停行不该还亮着
         showHint("正在读取…");
 
-        listingPool.submit(() -> {
-            List<Path> folders;
-            boolean readable;
-            try (Stream<Path> entries = Files.list(folder)) {
-                folders = entries.filter(Files::isDirectory)
-                        .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                        .toList();
-                readable = true;
-            } catch (IOException e) {
-                folders = List.of();
-                readable = false;
-            }
-            List<Path> listed = folders;
-            boolean ok = readable;
+        try {
+            listingPool.submit(() -> {
+                List<Path> folders;
+                boolean readable;
+                try (Stream<Path> entries = Files.list(folder)) {
+                    folders = entries.filter(Files::isDirectory)
+                            .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                            .toList();
+                    readable = true;
+                } catch (IOException | RuntimeException e) {
+                    folders = List.of();
+                    readable = false;
+                }
+                List<Path> listed = folders;
+                boolean ok = readable;
 
-            SwingUtilities.invokeLater(() -> {
-                if (generation != listingGeneration || !folder.equals(currentFolder)) {
-                    return;
-                }
-                listedFolder = folder;
-                folderModel.clear();
-                for (Path child : listed) {
-                    folderModel.addElement(child);
-                }
-                if (!ok) {
-                    showHint("读不了这个文件夹");
-                } else if (folderModel.isEmpty()) {
-                    showHint("这个文件夹里没有子文件夹");
-                } else {
-                    showList();
-                }
+                SwingUtilities.invokeLater(() -> {
+                    if (generation != listingGeneration || !folder.equals(currentFolder)
+                            || listingPool.isShutdown()) {
+                        return;
+                    }
+                    listedFolder = folder;
+                    folderModel.clear();
+                    for (Path child : listed) {
+                        folderModel.addElement(child);
+                    }
+                    if (!ok) {
+                        showHint("读不了这个文件夹");
+                    } else if (folderModel.isEmpty()) {
+                        showHint("这个文件夹里没有子文件夹");
+                    } else {
+                        showList();
+                    }
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            // 对话框已经关闭，列目录线程池不再收任务
+        }
     }
 
     // ─────────────────────────── 杂项 ───────────────────────────

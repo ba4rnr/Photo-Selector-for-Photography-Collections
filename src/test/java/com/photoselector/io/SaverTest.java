@@ -127,6 +127,30 @@ class SaverTest {
     }
 
     @Test
+    void 原有文件改名失败时_不能把占名的别的文件当成保存成功() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path original = TestImages.writeJpeg(target.resolve("旧照片.jpg"), 300, 200);
+        Session session = sessionFor(target);
+        session.seedExisting(List.of(original));
+
+        // 在中间商建好之后，外部才塞进一个占住最终名字 010.jpg 的文件。
+        Path occupied = TestImages.writeJpeg(target.resolve("010.jpg"), 340, 200);
+        byte[] occupiedBytes = Files.readAllBytes(occupied);
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertTrue(result.hasProblems(), "改名被占名挡住必须报告失败");
+        assertEquals(0, result.renamed());
+        assertEquals(List.of(original), result.finalOrder(),
+                "失败的原有照片应当退回原路径，占名的 010.jpg 不能被当成它");
+        assertEquals(original.toAbsolutePath().normalize(),
+                result.savedLocations().get(original.toAbsolutePath().normalize()),
+                "失败后界面仍应指向原照片，而不是占名的别的文件");
+        assertArrayEquals(occupiedBytes, Files.readAllBytes(occupied),
+                "外部塞进来的文件不能被覆盖");
+    }
+
+    @Test
     void 垃圾桶里没复制过的条目不会去删任何东西() throws Exception {
         Path target = Files.createDirectories(tempDir.resolve("成片"));
         Path source = Files.createDirectories(tempDir.resolve("素材"));
@@ -141,6 +165,27 @@ class SaverTest {
         assertEquals(0, result.deleted());
         assertTrue(Files.exists(fresh), "素材文件绝对不能被碰");
         assertEquals(Set.of(), fileNamesIn(target));
+    }
+
+    @Test
+    void 保存中途失败时_垃圾桶里的原文件不能被永久删除() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path old = TestImages.writeJpeg(target.resolve("旧照片.jpg"), 300, 200);
+        byte[] oldBytes = Files.readAllBytes(old);
+        Path missing = Files.createDirectories(tempDir.resolve("素材"))
+                .resolve("这张不存在.jpg");
+
+        Session session = sessionFor(target);
+        session.seedExisting(List.of(old));
+        session.trash(0);
+        session.add(missing); // 保存时复制这一步必然失败
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertTrue(result.hasProblems(), "缺少源文件必须报告保存失败");
+        assertEquals(0, result.deleted(), "保存没完成时一张都不能删");
+        assertTrue(Files.exists(old), "垃圾桶里的原文件应当恢复原名");
+        assertArrayEquals(oldBytes, Files.readAllBytes(old), "恢复的文件内容必须完全一致");
     }
 
     @Test

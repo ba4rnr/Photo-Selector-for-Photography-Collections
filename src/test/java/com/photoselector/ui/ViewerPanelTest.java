@@ -223,6 +223,33 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 当前画面临时缩放不会改掉默认缩放偏好() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 900, 600);
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(500, 400);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        SwingUtilities.invokeAndWait(viewer::actualSize);
+        assertTrue(viewer.isDefaultFitToWindow(),
+                "当前这张切到 100% 只是在看细节，默认策略仍是适应窗口");
+
+        SwingUtilities.invokeAndWait(() -> viewer.setDefaultScale(0.5));
+        assertTrue(!viewer.isDefaultFitToWindow(), "选了固定倍率才算改了默认策略");
+
+        SwingUtilities.invokeAndWait(viewer::setDefaultFitToWindow);
+        assertTrue(viewer.isDefaultFitToWindow());
+        assertTrue(viewer.isFitToWindow(), "改默认策略时当前这张也立刻切到适应窗口");
+        loader.shutdown();
+    }
+
+    @Test
     void 迟到的旧原图不能盖住当前照片() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));

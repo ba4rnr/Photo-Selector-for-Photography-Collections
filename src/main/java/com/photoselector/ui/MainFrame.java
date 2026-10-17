@@ -88,7 +88,14 @@ public final class MainFrame extends JFrame {
         mainPanel.setOnFolderOpened(this::folderOpened);
         mainPanel.setOnTargetFolderError(this::targetFolderFailed);
         mainPanel.setOnSaveResiduals(this::showSaveResiduals);
-        mainPanel.setOnWorkspaceChanged(workspaceStore::save);
+        // 配置文件写不进去只影响下次恢复，不该让“选工作区”这个界面动作抛到 EDT 上。
+        mainPanel.setOnWorkspaceChanged(workspace -> {
+            try {
+                workspaceStore.save(workspace);
+            } catch (RuntimeException ignored) {
+                // 下次启动重新选一遍工作区即可，当前这次使用不受影响。
+            }
+        });
         mainPanel.setOnSaveFinished(this::saveFinished);
 
         // 工具栏左组那两个按钮：和菜单里对应的项走同一条路
@@ -403,7 +410,10 @@ public final class MainFrame extends JFrame {
             MessageDialog.show(this, "打开失败", "读不了这个文件夹：\n" + folder);
             return;
         }
-        setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
+        Path name = folder.getFileName();
+        setTitle("摄影集照片筛选器 — "
+                + (name == null ? folder : name)
+                + "（" + count + " 张）");
     }
 
     /** 目标文件夹读不了时明确报错，并保持中间商为空。 */

@@ -64,7 +64,10 @@ final class ToolBarPanel extends JPanel {
             cursorTools.add(button);
             add(button);
         }
-        activate(cursorTools.get(0), CursorTool.SELECT); // 默认选中"选择"
+        // 默认工具就是"选择"，启动时直接把对应按钮点亮。
+        // 这里不能走 activate()：activeTool 初值已经是 SELECT，那方法会把它当成
+        // "点了一颗已经选中的模式按钮"而提前返回，结果工具栏开局没有任何高亮。
+        cursorTools.get(0).setActive(true);
 
         add(Box.createHorizontalStrut(28));
 

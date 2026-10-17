@@ -3,8 +3,8 @@ package com.photoselector.io;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -74,12 +74,14 @@ public final class WorkspaceStore {
         Properties properties = new Properties();
         try (InputStream in = Files.newInputStream(configFile)) {
             properties.load(in);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            // Properties.load 遇到畸形 Unicode 转义会抛 IllegalArgumentException；
+            // 和读文件失败一样，坏配置只该当成"没配过"。
             return Optional.empty();
         }
 
-        String sourceRoot = properties.getProperty(KEY_SOURCE_ROOT);
-        if (sourceRoot == null || sourceRoot.isBlank()) {
+        Path sourceRoot = parsePath(properties.getProperty(KEY_SOURCE_ROOT));
+        if (sourceRoot == null) {
             return Optional.empty();
         }
 
@@ -88,18 +90,15 @@ public final class WorkspaceStore {
             if (!key.startsWith(KEY_EXCLUDED_PREFIX)) {
                 continue;
             }
-            Path folder = Path.of(properties.getProperty(key));
-            if (Files.isDirectory(folder)) { // 不在了就忽略这一条
+            Path folder = parsePath(properties.getProperty(key));
+            if (folder != null && Files.isDirectory(folder)) { // 不在了就忽略这一条
                 excluded.add(folder);
             }
         }
 
-        String target = properties.getProperty(KEY_TARGET);
-        Path targetFolder = (target == null || target.isBlank()) ? null : Path.of(target);
-        String lastViewed = properties.getProperty(KEY_LAST_VIEWED);
-        Path lastViewedPhoto = (lastViewed == null || lastViewed.isBlank())
-                ? null : Path.of(lastViewed);
-        return Optional.of(new Workspace(Path.of(sourceRoot), excluded, targetFolder,
+        Path targetFolder = parsePath(properties.getProperty(KEY_TARGET));
+        Path lastViewedPhoto = parsePath(properties.getProperty(KEY_LAST_VIEWED));
+        return Optional.of(new Workspace(sourceRoot, excluded, targetFolder,
                 lastViewedPhoto));
     }
 
@@ -119,13 +118,27 @@ public final class WorkspaceStore {
         }
 
         try {
-            Files.createDirectories(configFile.getParent());
-            try (OutputStream out = Files.newOutputStream(configFile)) {
-                properties.store(out, "摄影集照片筛选器的工作区配置");
-            }
+            PropertyFiles.write(configFile, properties, "摄影集照片筛选器的工作区配置");
         } catch (IOException e) {
             // 记不住不影响这次使用，只是下次打开要重新选一遍
             throw new UncheckedIOException("写不进配置文件：" + configFile, e);
+        }
+    }
+
+    /**
+     * 把配置里的字符串转成路径；空串或系统不接受的路径都当作没写。
+     *
+     * <p>{@code Path.of} 遇到 NUL、非法盘符等会抛 {@link InvalidPathException}。
+     * 这类损坏只应该让对应的一项失效，不能让整个程序启动失败。
+     */
+    private static Path parsePath(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Path.of(raw);
+        } catch (InvalidPathException e) {
+            return null;
         }
     }
 }

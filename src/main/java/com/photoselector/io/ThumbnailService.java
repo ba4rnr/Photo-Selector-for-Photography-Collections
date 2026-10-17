@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import javax.imageio.ImageIO;
@@ -165,7 +166,14 @@ public final class ThumbnailService {
             return new Lease(new Entry(placeholder(maxHeight)));
         }
 
-        String key = cacheKey(photo, maxHeight);
+        String key;
+        try {
+            key = cacheKey(photo, maxHeight);
+        } catch (UncheckedIOException e) {
+            // 文件在 isRegularFile() 之后被外部删掉/锁住了。缩略图相机条
+            // 一次会请求很多张，这种竞态只能退化成占位图，不能拖垮整批请求。
+            return new Lease(new Entry(placeholder(maxHeight)));
+        }
 
         Entry cached = pinIfCached(key);
         if (cached != null) {
@@ -226,7 +234,7 @@ public final class ThumbnailService {
                     total -= size;
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             // 缓存是不是超了，不影响功能，清理失败就算了
         }
     }
@@ -350,9 +358,11 @@ public final class ThumbnailService {
      */
     private String cacheKey(Path photo, int maxHeight) {
         try {
-            String raw = photo.toAbsolutePath()
+            String raw = photo.toAbsolutePath().normalize()
                     + "|" + Files.size(photo)
-                    + "|" + Files.getLastModifiedTime(photo).toMillis()
+                    // 用纳秒而不是毫秒：外部程序在同一毫秒内覆盖一张同尺寸照片时，
+                    // 毫秒键可能不变，界面就会继续拿旧缩略图。
+                    + "|" + Files.getLastModifiedTime(photo).to(TimeUnit.NANOSECONDS)
                     + "|v" + RENDER_VERSION
                     + "|" + maxHeight;
             byte[] digest = MessageDigest.getInstance("SHA-256")
@@ -376,7 +386,7 @@ public final class ThumbnailService {
         }
         try {
             return ImageIO.read(cacheFile.toFile());
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             // 读不出来就当没有——比如上次写到一半被打断，留了个半截文件
             return null;
         }
@@ -391,7 +401,7 @@ public final class ThumbnailService {
             ImageIO.write(image, "png", temp.toFile());
             Files.move(temp, cacheFile, StandardCopyOption.REPLACE_EXISTING);
             temp = null;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             // 缓存写不进去不影响功能，顶多下次再算一遍
         } finally {
             // 写失败时别把临时文件落在缓存目录里没人管

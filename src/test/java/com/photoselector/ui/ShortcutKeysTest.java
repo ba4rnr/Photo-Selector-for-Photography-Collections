@@ -73,6 +73,17 @@ class ShortcutKeysTest {
     }
 
     @Test
+    void 工具栏开局就把选择工具点亮() throws Exception {
+        MainPanel panel = panelWithPhotos();
+
+        assertEquals(CursorTool.SELECT, panel.toolBar().activeTool());
+        assertEquals(Theme.ACCENT,
+                panel.toolBar().toolButton(CursorTool.SELECT).getForeground(),
+                "默认工具的文字和图标应当是激活色，而不是一片灰");
+        panel.shutdown();
+    }
+
+    @Test
     void 挑进一张就算脏_保存完又是干净的() throws Exception {
         MainPanel panel = panelWithPhotos();
         assertFalse(panel.isDirty(), "刚打开时和磁盘一致");

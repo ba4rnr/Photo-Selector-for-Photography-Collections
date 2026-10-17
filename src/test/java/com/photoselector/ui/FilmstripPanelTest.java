@@ -515,6 +515,45 @@ class FilmstripPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 点击位置要扣掉组内边距_点在边距或格子缝隙里不能选错照片() throws Exception {
+        Theme.install();
+        List<Path> photos = List.of(
+                TestImages.writeJpeg(tempDir.resolve("pad-0.jpg"), 300, 200),
+                TestImages.writeJpeg(tempDir.resolve("pad-1.jpg"), 300, 200));
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+
+        SwingUtilities.invokeAndWait(() -> {
+            filmstrip.setSize(600, 200);
+            filmstrip.setGroups(oneGroup("照片", photos), 120);
+            layoutTree(filmstrip);
+        });
+
+        int firstLeft = filmstrip.photoLeftInViewForTest(photos.get(0));
+        assertTrue(firstLeft > 0);
+
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                firstLeft - 3, 40, 1, false, MouseEvent.BUTTON1)));
+        assertEquals(null, filmstrip.currentPhoto(), "点在照片左侧留白里不该选中第一张");
+
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                firstLeft, 40, 1, false, MouseEvent.BUTTON1)));
+        assertEquals(photos.get(0), filmstrip.currentPhoto(), "照片左边缘本身应当命中第一张");
+
+        int gapStart = firstLeft + filmstrip.cellWidthForTest() - 8;
+        SwingUtilities.invokeAndWait(() -> filmstrip.dispatchEvent(new MouseEvent(filmstrip,
+                MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), MouseEvent.BUTTON1_DOWN_MASK,
+                gapStart + 2, 40, 1, false, MouseEvent.BUTTON1)));
+        assertEquals(photos.get(0), filmstrip.currentPhoto(),
+                "点进两格之间的缝隙不应悄悄选中下一张");
+
+        awaitIdle(loader);
+        loader.shutdown();
+    }
+
     private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {
         long deadline = System.currentTimeMillis() + 30_000;
         while (filmstrip.loadedCount() < expected && System.currentTimeMillis() < deadline) {

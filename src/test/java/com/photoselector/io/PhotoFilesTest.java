@@ -48,4 +48,11 @@ class PhotoFilesTest {
         assertEquals(List.of(jpg), PhotoFiles.imagesIn(folder),
                 "含 DNG 的文件夹里，只应识别出 JPG");
     }
+
+    @Test
+    void 盘符根目录也能算出一个非空组名() {
+        Path driveRoot = tempDir.getRoot();
+        assertEquals(driveRoot.toString(), PhotoFiles.displayName(driveRoot),
+                "根路径没有 getFileName，直接用完整路径作显示名，不能 NPE");
+    }
 }

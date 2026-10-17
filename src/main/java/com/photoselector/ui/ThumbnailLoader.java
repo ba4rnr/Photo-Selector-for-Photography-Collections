@@ -136,7 +136,7 @@ final class ThumbnailLoader {
             return;
         }
         long mySession = thumbnailSession.get();
-        String key = photo.toAbsolutePath() + "|" + maxHeight;
+        String key = photo.toAbsolutePath().normalize() + "|" + maxHeight;
         InFlight task = join(key, new Pending(mySession, onReady, false));
         if (task == null) {
             return; // 已经并进前一个请求，回调会在那一次完成时统一调用
@@ -168,7 +168,7 @@ final class ThumbnailLoader {
             return;
         }
         long mySession = thumbnailSession.get();
-        String key = photo.toAbsolutePath() + "|lease|" + maxHeight;
+        String key = photo.toAbsolutePath().normalize() + "|lease|" + maxHeight;
         LeaseInFlight task = joinLease(key, new LeasePending(mySession, onReady));
         if (task == null) {
             return;
@@ -202,7 +202,7 @@ final class ThumbnailLoader {
             return LoadHandle.NONE;
         }
         long mySession = fullSession.get();
-        String key = photo.toAbsolutePath() + "|full";
+        String key = photo.toAbsolutePath().normalize() + "|full";
         Pending pending = new Pending(mySession, onReady, true);
         InFlight task = join(key, pending);
         LoadHandle handle = () -> cancel(key, pending);

@@ -432,7 +432,8 @@ final class FilmstripPanel extends JPanel {
             }
             int index = groups.get(box.index()).photos().indexOf(photo);
             if (index >= 0) {
-                scrollRectToVisible(new Rectangle(box.x() + index * cellWidth, 0, cellWidth, 1));
+                scrollRectToVisible(new Rectangle(
+                        box.x() + PAD + index * cellWidth, 0, cellWidth - GAP, 1));
                 return;
             }
         }
@@ -583,8 +584,9 @@ final class FilmstripPanel extends JPanel {
                 }
                 continue;
             }
-            int first = Math.max(0, (windowStart - box.x()) / cellWidth);
-            int last = Math.min(photos.size() - 1, (windowEnd - box.x()) / cellWidth);
+            int photosX = box.x() + PAD;
+            int first = Math.max(0, (windowStart - photosX) / cellWidth);
+            int last = Math.min(photos.size() - 1, (windowEnd - photosX) / cellWidth);
             for (int i = first; i <= last; i++) {
                 Path photo = photos.get(i);
                 keep.add(photo);
@@ -661,8 +663,11 @@ final class FilmstripPanel extends JPanel {
             if (box.containsX(x) && !box.collapsed()) {
                 // 落在照片格里：算出是这一组的第几张，把它记为"当前"
                 PhotoGroup group = groups.get(box.index());
-                int index = (x - box.x()) / cellWidth;
-                if (index >= 0 && index < group.size()) {
+                int relativeX = x - box.x() - PAD;
+                int index = relativeX / cellWidth;
+                int insideCell = relativeX % cellWidth;
+                if (relativeX >= 0 && index >= 0 && index < group.size()
+                        && insideCell < cellWidth - GAP) {
                     // 把键盘焦点拿到素材条这边来。左右方向键是"过片"，而焦点要是还留在
                     // 左边的目录树上，方向键会被那棵树吃掉——表现就是"点完照片，
                     // 方向键还是翻不动"。requestFocusInWindow 让点击顺手把焦点带过来。
@@ -855,7 +860,7 @@ final class FilmstripPanel extends JPanel {
                 RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         g2.setColor(Theme.TEXT_MUTED);
         g2.setFont(Theme.FONT);
-        String hint = "还没有打开素材文件夹 —— 文件 → 打开素材文件夹…";
+        String hint = "还没有打开素材文件夹 —— 文件 → 选择工作区…";
         FontMetrics metrics = g2.getFontMetrics();
         g2.drawString(hint, Math.max(8, (getWidth() - metrics.stringWidth(hint)) / 2),
                 Math.max(metrics.getAscent(), (getHeight() - metrics.getHeight()) / 2 + metrics.getAscent()));

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -212,35 +213,39 @@ final class SourceTreePanel extends JPanel {
         long myGeneration = ++generation;
         loadingNodes.clear();
 
-        listingPool.submit(() -> {
-            TreeSnapshot snapshot = snapshot(rootPath, true, expandedPaths);
-            SwingUtilities.invokeLater(() -> {
-                if (myGeneration != generation) {
-                    return;
-                }
-                excluded.clear();
-                excluded.addAll(keepExcluded);
-                DefaultMutableTreeNode rebuilt = buildNode(snapshot);
-                model.setRoot(rebuilt);
-                model.reload();
+        try {
+            listingPool.submit(() -> {
+                TreeSnapshot snapshot = snapshot(rootPath, true, expandedPaths);
+                SwingUtilities.invokeLater(() -> {
+                    if (myGeneration != generation || listingPool.isShutdown()) {
+                        return;
+                    }
+                    excluded.clear();
+                    excluded.addAll(keepExcluded);
+                    DefaultMutableTreeNode rebuilt = buildNode(snapshot);
+                    model.setRoot(rebuilt);
+                    model.reload();
 
-                List<Path> orderedExpanded = new ArrayList<>(expandedPaths);
-                orderedExpanded.sort(Comparator.comparingInt(Path::getNameCount));
-                for (Path path : orderedExpanded) {
-                    DefaultMutableTreeNode node = findNode(rebuilt, path);
-                    if (node != null && !tree.isExpanded(new TreePath(node.getPath()))) {
-                        tree.expandPath(new TreePath(node.getPath()));
+                    List<Path> orderedExpanded = new ArrayList<>(expandedPaths);
+                    orderedExpanded.sort(Comparator.comparingInt(Path::getNameCount));
+                    for (Path path : orderedExpanded) {
+                        DefaultMutableTreeNode node = findNode(rebuilt, path);
+                        if (node != null && !tree.isExpanded(new TreePath(node.getPath()))) {
+                            tree.expandPath(new TreePath(node.getPath()));
+                        }
                     }
-                }
-                if (selected != null) {
-                    DefaultMutableTreeNode node = findNode(rebuilt, selected);
-                    if (node != null) {
-                        tree.setSelectionPath(new TreePath(node.getPath()));
+                    if (selected != null) {
+                        DefaultMutableTreeNode node = findNode(rebuilt, selected);
+                        if (node != null) {
+                            tree.setSelectionPath(new TreePath(node.getPath()));
+                        }
                     }
-                }
-                tree.repaint();
+                    tree.repaint();
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            // 对话框/主窗口收尾期间，树线程池已经关闭
+        }
     }
 
     /** 只留给测试用。 */
@@ -302,28 +307,34 @@ final class SourceTreePanel extends JPanel {
             return; // 同一个节点已经有人在读
         }
         long myGeneration = generation;
-        listingPool.submit(() -> {
-            List<Path> children = listChildren(payload.path());
-            SwingUtilities.invokeLater(() -> {
-                loadingNodes.remove(node);
-                if (myGeneration != generation || !hasOnlyPlaceholder(node)) {
-                    return;
-                }
-                node.removeAllChildren();
-                for (Path child : children) {
-                    boolean isFolder = Files.isDirectory(child);
-                    DefaultMutableTreeNode childNode =
-                            new DefaultMutableTreeNode(new Node(child, isFolder));
-                    if (isFolder) {
-                        // 给文件夹塞个占位子节点，它才长得像"可以展开"，
-                        // 真正的子项等用户展开时再去读
-                        childNode.add(new DefaultMutableTreeNode(Node.placeholder()));
+        try {
+            listingPool.submit(() -> {
+                List<Path> children = listChildren(payload.path());
+                SwingUtilities.invokeLater(() -> {
+                    loadingNodes.remove(node);
+                    if (myGeneration != generation || !hasOnlyPlaceholder(node)
+                            || listingPool.isShutdown()) {
+                        return;
                     }
-                    node.add(childNode);
-                }
-                model.nodeStructureChanged(node);
+                    node.removeAllChildren();
+                    for (Path child : children) {
+                        boolean isFolder = Files.isDirectory(child);
+                        DefaultMutableTreeNode childNode =
+                                new DefaultMutableTreeNode(new Node(child, isFolder));
+                        if (isFolder) {
+                            // 给文件夹塞个占位子节点，它才长得像"可以展开"，
+                            // 真正的子项等用户展开时再去读
+                            childNode.add(new DefaultMutableTreeNode(Node.placeholder()));
+                        }
+                        node.add(childNode);
+                    }
+                    model.nodeStructureChanged(node);
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            loadingNodes.remove(node);
+            // 收尾期间不再更新已销毁的树
+        }
     }
 
     private void collectExpandedPaths(DefaultMutableTreeNode node, Set<Path> expandedPaths) {
@@ -421,7 +432,7 @@ final class SourceTreePanel extends JPanel {
             files.sort(byName);
             folders.addAll(files);
             return folders;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             return List.of(); // 读不了就当空的，界面上表现为"这个文件夹没有东西"
         }
     }
@@ -453,7 +464,8 @@ final class SourceTreePanel extends JPanel {
                 setText(" ");
                 setIcon(null);
             } else if (node.folder()) {
-                setText(node.path().getFileName().toString());
+                Path name = node.path().getFileName();
+                setText(name == null ? node.path().toString() : name.toString());
                 setIcon(Icons.checkBox(isIncluded(node.path())));
             } else {
                 setText(node.path().getFileName().toString());

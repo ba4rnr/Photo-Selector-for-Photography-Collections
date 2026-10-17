@@ -113,6 +113,24 @@ class CloseOnExitTest {
     }
 
     @Test
+    void 目标照片全丢进垃圾桶后_保存仍然能真正删除() throws Exception {
+        Theme.install();
+        Panel panel = new Panel(false);
+        Path onlyTarget = panel.target.resolve("旧A.jpg");
+        assertTrue(Files.isRegularFile(onlyTarget));
+
+        SwingUtilities.invokeAndWait(() ->
+                panel.main.targetPanelForTest().session().trash(0));
+        assertTrue(panel.main.targetPanelForTest().session().isEmpty(),
+                "先造出\"序列已空、垃圾桶非空\"的状态");
+        assertTrue(panel.main.save(), "垃圾桶里还有真实文件，这次保存不能当作空操作");
+
+        waitUntil(() -> !Files.exists(onlyTarget) && !panel.main.isDirty(),
+                "垃圾桶里的最后一张写到磁盘并清空中间商");
+        panel.main.shutdown();
+    }
+
+    @Test
     void 把对话框直接关掉算是取消_程序留着() throws Exception {
         Theme.install();
         Panel panel = new Panel(true);

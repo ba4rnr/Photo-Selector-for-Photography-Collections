@@ -142,6 +142,9 @@ public final class JpegImageSource implements ImageSource {
 
     /** 让 ImageIO 挑一个能读这个文件的解码器，并把输入接上去。 */
     private static ImageReader firstReader(ImageInputStream stream) throws IOException {
+        if (stream == null) {
+            throw new IOException("无法建立图像输入流");
+        }
         Iterator<ImageReader> readers = ImageIO.getImageReaders(stream);
         if (!readers.hasNext()) {
             throw new IOException("没有能读这个格式的解码器");

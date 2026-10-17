@@ -60,6 +60,23 @@ class AppSettingsTest {
     }
 
     @Test
+    void 畸形Unicode转义也回默认值而不是崩掉() throws Exception {
+        Path file = tempDir.resolve("preferences.properties");
+        Files.writeString(file, "viewer.defaultZoomPercent=\\uZZZZ\n");
+
+        assertEquals(18, new AppSettings(file).defaultZoomPercent());
+        assertTrue(new AppSettings(file).defaultFitToWindow());
+    }
+
+    @Test
+    void 默认适应开关的坏值也回出厂策略() throws Exception {
+        Path file = tempDir.resolve("preferences.properties");
+        Files.writeString(file, "viewer.defaultFitToWindow=随便写的\n");
+
+        assertTrue(new AppSettings(file).defaultFitToWindow());
+    }
+
+    @Test
     void 窗口位置大小与放大倍率互不覆盖() {
         Path file = tempDir.resolve("preferences.properties");
         AppSettings settings = new AppSettings(file);
@@ -89,5 +106,18 @@ class AppSettingsTest {
 
         assertTrue(new AppSettings(file).windowState().isEmpty(),
                 "尺寸为 0 的窗口配置不能拿来恢复");
+    }
+
+    @Test
+    void 写设置后不会留下临时文件_内容完整可读() throws Exception {
+        Path file = tempDir.resolve("preferences.properties");
+        new AppSettings(file).setDefaultZoomPercent(42);
+
+        assertTrue(Files.isRegularFile(file));
+        try (var entries = Files.list(tempDir)) {
+            assertTrue(entries.noneMatch(path -> path.getFileName().toString().endsWith(".tmp")),
+                    "原子写入完成后，同目录不该残留临时文件");
+        }
+        assertEquals(42, new AppSettings(file).defaultZoomPercent());
     }
 }

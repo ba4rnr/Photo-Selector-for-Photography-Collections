@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -87,6 +88,48 @@ class WorkspaceStoreTest {
         Files.writeString(config, "这不是一个 properties 文件\u0000\u0001乱码");
 
         assertTrue(new WorkspaceStore(config).load().isEmpty(), "读不出来就当没配过，别让程序起不来");
+    }
+
+    @Test
+    void 畸形Unicode转义也只当作没配过() throws Exception {
+        Path config = tempDir.resolve("config").resolve("workspace.properties");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, "sourceRoot=bad\\uZZZZ\n");
+
+        assertTrue(new WorkspaceStore(config).load().isEmpty(),
+                "Properties.load 抛出的非法转义不能穿透到启动流程");
+    }
+
+    @Test
+    void 配置里有非法路径时忽略坏项而不是让启动崩溃() throws Exception {
+        Path config = tempDir.resolve("config").resolve("workspace.properties");
+        Files.createDirectories(config.getParent());
+        Files.writeString(config, """
+                sourceRoot=bad\\u0000root
+                targetFolder=bad\\u0000target
+                lastViewedPhoto=bad\\u0000photo
+                excluded.0=bad\\u0000excluded
+                """);
+
+        assertTrue(new WorkspaceStore(config).load().isEmpty(),
+                "素材根路径本身非法时，应当回到选择工作区");
+    }
+
+    @Test
+    void 目标文件夹和恢复照片的非法路径单独失效() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("素材"));
+        Path config = tempDir.resolve("config").resolve("workspace.properties");
+        new WorkspaceStore(config).save(new Workspace(root, Set.of(), null));
+        Files.writeString(config, """
+
+                targetFolder=bad\\u0000target
+                lastViewedPhoto=bad\\u0000photo
+                """, StandardOpenOption.APPEND);
+
+        Workspace loaded = new WorkspaceStore(config).load().orElseThrow();
+        assertEquals(root, loaded.sourceRoot());
+        assertEquals(null, loaded.targetFolder());
+        assertEquals(null, loaded.lastViewedPhoto());
     }
 
     @Test

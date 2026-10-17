@@ -262,6 +262,9 @@ public final class MainPanel extends JPanel {
         // 点目标文件夹里的某张，大图就换成它，并套用这张已有的虚拟编辑。
         targetPanel.setOnPhotoChosen(photo -> {
             showPhotoInViewer(photo);
+            // 两块目标视图看的是同一个序列，选中状态也要同步；
+            // 否则切到整理模式时底部目标带会把刚才的选择清掉。
+            arrangePanel.selectPhoto(photo);
             targetFilmstrip.selectPhoto(photo);
         });
         arrangePanel.setOnPhotoChosen(this::arrangePhotoChosen);
@@ -450,41 +453,57 @@ public final class MainPanel extends JPanel {
      */
     private void reloadGroups(Path folder) {
         long myRound = ++sourceScanRound;
-        scanPool.submit(() -> {
-            List<PhotoGroup> groups;
-            try {
-                groups = PhotoFiles.groupsIn(folder);
-            } catch (IOException e) {
-                SwingUtilities.invokeLater(() -> {
-                    if (myRound == sourceScanRound
-                            && workspace != null && folder.equals(workspace.sourceRoot())) {
-                        markSourceLoadFinished();
-                        onFolderOpened.accept(folder, -1);
-                    }
-                });
-                return;
-            }
-
-            SwingUtilities.invokeLater(() -> {
-                if (myRound != sourceScanRound
-                        || workspace == null || !folder.equals(workspace.sourceRoot())) {
-                    return; // 扫的是旧的根目录：用户已经换过工作区，这批结果作废
+        try {
+            scanPool.submit(() -> {
+                List<PhotoGroup> groups;
+                try {
+                    groups = PhotoFiles.groupsIn(folder);
+                } catch (IOException | RuntimeException e) {
+                    SwingUtilities.invokeLater(() -> {
+                        if (!shutDown && myRound == sourceScanRound
+                                && workspace != null && folder.equals(workspace.sourceRoot())) {
+                            markSourceLoadFinished();
+                            onFolderOpened.accept(folder, -1);
+                        }
+                    });
+                    return;
                 }
-                scannedGroups = groups;
-                applyGroups();
-                markSourceLoadFinished();
-                onFolderOpened.accept(folder, filmstrip.photoCount());
-                startSourceWatcher(folder);
+
+                SwingUtilities.invokeLater(() -> {
+                    if (shutDown || myRound != sourceScanRound
+                            || workspace == null || !folder.equals(workspace.sourceRoot())) {
+                        return; // 扫的是旧的根目录，或窗口已经关闭：这批结果作废
+                    }
+                    scannedGroups = groups;
+                    applyGroups();
+                    markSourceLoadFinished();
+                    onFolderOpened.accept(folder, filmstrip.photoCount());
+                    startSourceWatcher(folder);
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            // 关闭收尾期间扫描池已经不再收任务
+        }
     }
 
     /** 勾选变化：重新筛组，并把新的剔除项记进工作区。 */
     private void inclusionChanged() {
-        applyGroups();
+        // 只增删一组的筛选，不应把用户当前看的那张和滚动位置一起重置；
+        // refreshGroups 会在当前照片仍被保留时尽量留在原处。
+        applyGroups(true);
         if (workspace != null) {
             workspace = workspace.withExcluded(sourceTree.excludedFolders());
             onWorkspaceChanged.accept(workspace);
+        }
+        // 如果当前大图正是刚被勾掉的素材组里的照片，它已经从浏览范围里消失，
+        // 不能继续留在中间冒充"还在范围里"。目标文件夹里的照片不受排除规则影响。
+        Path showing = viewer.photo();
+        Session session = targetPanel.session();
+        boolean inTarget = session != null && showing != null && session.indexOf(showing) >= 0;
+        if (!inTarget && showing != null && workspace != null
+                && isSourcePhoto(workspace.sourceRoot(), showing)
+                && !filmstrip.containsPhoto(showing)) {
+            showPhotoInViewer(null);
         }
     }
 
@@ -616,7 +635,9 @@ public final class MainPanel extends JPanel {
     private java.util.Optional<Path> editingPhoto() {
         Session session = targetPanel.session();
         Path photo = viewer.photo();
-        if (session == null || photo == null) {
+        // 保存期间所有会改中间商的动作都必须停下；旋转 / 翻转 / 裁切
+        // 也属于中间商变更，不能趁着后台保存把结果改到下一份快照之外。
+        if (saving || session == null || photo == null) {
             return java.util.Optional.empty();
         }
         return java.util.Optional.of(photo);
@@ -659,6 +680,7 @@ public final class MainPanel extends JPanel {
     /** 中间整理网格点中一张：大图状态和底部目标带一起跟上。 */
     private void arrangePhotoChosen(Path photo) {
         showPhotoDeferredInViewer(photo);
+        targetPanel.selectPhoto(photo);
         targetFilmstrip.selectPhoto(photo);
     }
 
@@ -715,12 +737,12 @@ public final class MainPanel extends JPanel {
 
     /** 以后打开每张照片都默认适应窗口；当前这张也立刻切过去。 */
     public void setDefaultFitToWindow() {
-        viewer.fitToWindow();
+        viewer.setDefaultFitToWindow();
     }
 
-    /** 当前是否默认/正处于适应窗口；菜单勾选用。 */
+    /** 默认缩放方式是不是"适应窗口"；菜单勾选用。 */
     public boolean defaultFitToWindow() {
-        return viewer.isFitToWindow();
+        return viewer.isDefaultFitToWindow();
     }
 
     /** 启动时应用保存的“适应 / 固定倍率”偏好；只配置状态，不重复写偏好文件。 */
@@ -754,10 +776,22 @@ public final class MainPanel extends JPanel {
         // 新工作区的 lastViewedPhoto 会在两条异步扫描完成后重新显示。
         viewer.showPhoto(null);
         stopSourceWatcher();
+        // 换工作区前把旧工作区刚记住的"最后浏览照片"写回配置；否则旧工作区
+        // 的浏览指针只留在即将被替换掉的内存对象里，下次再选它就丢了。
+        if (workspace != null) {
+            try {
+                onWorkspaceChanged.accept(workspace);
+            } catch (RuntimeException ignored) {
+                // 配置写不进去不该阻止切换工作区。
+            }
+        }
         this.workspace = newWorkspace;
         pendingRestorePhoto = newWorkspace.lastViewedPhoto();
         sourceLoadFinished = false;
         targetLoadFinished = false;
+        // 新工作区扫描完成之前，旧素材不能继续留在底栏里冒充新工作区的内容。
+        scannedGroups = List.of();
+        filmstrip.setGroups(List.of(), FILMSTRIP_THUMBNAIL_HEIGHT);
         sourceTree.setRoot(newWorkspace.sourceRoot());
         sourceTree.setExcluded(newWorkspace.excludedFolders());
         openTargetFolder(newWorkspace.targetFolder());
@@ -783,53 +817,64 @@ public final class MainPanel extends JPanel {
             markTargetLoadFinished();
             return;
         }
-        scanPool.submit(() -> {
-            List<Path> existing = List.of();
-            List<Path> residuals = List.of();
-            IOException readError = null;
-            try {
-                residuals = Saver.residualFiles(target);
-                existing = PhotoFiles.imagesIn(target);
-            } catch (IOException e) {
-                readError = e;
-            }
-            List<Path> files = existing;
-            List<Path> leftovers = residuals;
-            IOException failure = readError;
-            SwingUtilities.invokeLater(() -> {
-                if (shutDown || myRound != targetLoadRound) {
-                    return; // 这一轮已经过期：用户换过目标文件夹了
-                }
-                if (failure != null) {
-                    // 读失败和“真的空目录”是两回事。前者不能建空中间商，
-                    // 否则用户会以为目标文件夹里什么都没有，甚至继续往不可用的目录保存。
-                    targetPanel.setSession(null);
-                    arrangePanel.setSession(null);
-                    trashPanel.setSession(null);
-                    targetFilmstrip.setSession(null);
-                    markTargetLoadFinished();
-                    onTargetFolderError.accept(target);
-                    return;
-                }
-                Session session = new Session(target, NumberingRule.DEFAULT);
-                session.seedExisting(files);
-                targetPanel.setSession(session);
-                arrangePanel.setSession(session);
-                trashPanel.setSession(session);
-                targetFilmstrip.setSession(session);
-                markTargetLoadFinished();
-                if (!leftovers.isEmpty()) {
-                    onSaveResiduals.accept(leftovers);
-                }
+        targetLoadFinished = false;
+        // 读新目标文件夹期间先清空旧中间商；读失败时也不能让上一份旧序列
+        // 继续出现在界面上，否则用户会以为自己正在编辑新文件夹。
+        targetPanel.setSession(null);
+        arrangePanel.setSession(null);
+        trashPanel.setSession(null);
+        targetFilmstrip.setSession(null);
+        try {
+            scanPool.submit(() -> {
+                List<Path> existing = List.of();
+                List<Path> residuals = List.of();
+                Exception readError = null;
                 try {
-                    targetWatcher.watch(target);
-                } catch (IOException e) {
-                    // 初次读目录成功、但系统不允许注册监听：界面仍可用，
-                    // 只是外部变化不会自动跟进，必须明确告诉用户。
-                    onTargetFolderError.accept(target);
+                    residuals = Saver.residualFiles(target);
+                    existing = PhotoFiles.imagesIn(target);
+                } catch (IOException | RuntimeException e) {
+                    readError = e;
                 }
+                List<Path> files = existing;
+                List<Path> leftovers = residuals;
+                Exception failure = readError;
+                SwingUtilities.invokeLater(() -> {
+                    if (shutDown || myRound != targetLoadRound) {
+                        return; // 这一轮已经过期：用户换过目标文件夹了
+                    }
+                    if (failure != null) {
+                        // 读失败和“真的空目录”是两回事。前者不能建空中间商，
+                        // 否则用户会以为目标文件夹里什么都没有，甚至继续往不可用的目录保存。
+                        targetPanel.setSession(null);
+                        arrangePanel.setSession(null);
+                        trashPanel.setSession(null);
+                        targetFilmstrip.setSession(null);
+                        markTargetLoadFinished();
+                        onTargetFolderError.accept(target);
+                        return;
+                    }
+                    Session session = new Session(target, NumberingRule.DEFAULT);
+                    session.seedExisting(files);
+                    targetPanel.setSession(session);
+                    arrangePanel.setSession(session);
+                    trashPanel.setSession(session);
+                    targetFilmstrip.setSession(session);
+                    markTargetLoadFinished();
+                    if (!leftovers.isEmpty()) {
+                        onSaveResiduals.accept(leftovers);
+                    }
+                    try {
+                        targetWatcher.watch(target);
+                    } catch (IOException | RuntimeException e) {
+                        // 初次读目录成功、但系统不允许注册监听：界面仍可用，
+                        // 只是外部变化不会自动跟进，必须明确告诉用户。
+                        onTargetFolderError.accept(target);
+                    }
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            // 关闭收尾期间扫描池已经不再收任务
+        }
     }
 
     private void stopTargetWatcher() {
@@ -909,7 +954,7 @@ public final class MainPanel extends JPanel {
     private void startSourceWatcher(Path root) {
         try {
             sourceWatcher.watch(root);
-        } catch (IOException ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // 读目录已经成功；监听权限问题不该把已经打开的工作区判成失败
         }
     }
@@ -937,47 +982,51 @@ public final class MainPanel extends JPanel {
     private void refreshSourceFromDisk(Path root) {
         long round = ++sourceScanRound;
         Path normalizedRoot = root.toAbsolutePath().normalize();
-        scanPool.submit(() -> {
-            List<PhotoGroup> groups = null;
-            IOException failure = null;
-            try {
-                groups = PhotoFiles.groupsIn(normalizedRoot);
-            } catch (IOException e) {
-                failure = e;
-            }
-
-            List<PhotoGroup> scanned = groups;
-            IOException error = failure;
-            SwingUtilities.invokeLater(() -> {
-                if (shutDown || round != sourceScanRound || workspace == null
-                        || !normalizedRoot.equals(
-                                workspace.sourceRoot().toAbsolutePath().normalize())) {
-                    return; // 换过工作区，或者已经有更新的一轮刷新
-                }
-                if (error != null) {
-                    onFolderOpened.accept(normalizedRoot, -1);
-                    return;
+        try {
+            scanPool.submit(() -> {
+                List<PhotoGroup> groups = null;
+                Exception failure = null;
+                try {
+                    groups = PhotoFiles.groupsIn(normalizedRoot);
+                } catch (IOException | RuntimeException e) {
+                    failure = e;
                 }
 
-                Path showing = viewer.photo();
-                boolean listingChanged = !sourceListingFingerprint(scannedGroups)
-                        .equals(sourceListingFingerprint(scanned));
-                scannedGroups = List.copyOf(scanned);
-                applyGroups(true);
-                if (listingChanged) {
-                    sourceTree.refreshFromDisk();
-                }
-                onFolderOpened.accept(normalizedRoot, filmstrip.photoCount());
-                if (showing != null && isSourcePhoto(normalizedRoot, showing)) {
-                    if (Files.isRegularFile(showing)) {
-                        viewer.clearFullImageCache();
-                        showPhotoInViewer(showing);
-                    } else {
-                        showPhotoInViewer(null);
+                List<PhotoGroup> scanned = groups;
+                Exception error = failure;
+                SwingUtilities.invokeLater(() -> {
+                    if (shutDown || round != sourceScanRound || workspace == null
+                            || !normalizedRoot.equals(
+                                    workspace.sourceRoot().toAbsolutePath().normalize())) {
+                        return; // 换过工作区，或者已经有更新的一轮刷新
                     }
-                }
+                    if (error != null) {
+                        onFolderOpened.accept(normalizedRoot, -1);
+                        return;
+                    }
+
+                    Path showing = viewer.photo();
+                    boolean listingChanged = !sourceListingFingerprint(scannedGroups)
+                            .equals(sourceListingFingerprint(scanned));
+                    scannedGroups = List.copyOf(scanned);
+                    applyGroups(true);
+                    if (listingChanged) {
+                        sourceTree.refreshFromDisk();
+                    }
+                    onFolderOpened.accept(normalizedRoot, filmstrip.photoCount());
+                    if (showing != null && isSourcePhoto(normalizedRoot, showing)) {
+                        if (Files.isRegularFile(showing)) {
+                            viewer.clearFullImageCache();
+                            showPhotoInViewer(showing);
+                        } else {
+                            showPhotoInViewer(null);
+                        }
+                    }
+                });
             });
-        });
+        } catch (RejectedExecutionException ignored) {
+            // 关闭收尾期间扫描池已经不再收任务
+        }
     }
 
     private static boolean isSourcePhoto(Path root, Path photo) {
@@ -1020,15 +1069,15 @@ public final class MainPanel extends JPanel {
         try {
             scanPool.submit(() -> {
                 List<Path> files = List.of();
-                IOException failure = null;
+                Exception failure = null;
                 try {
                     files = PhotoFiles.imagesIn(target);
-                } catch (IOException e) {
+                } catch (IOException | RuntimeException e) {
                     failure = e;
                 }
 
                 List<Path> scanned = files;
-                IOException error = failure;
+                Exception error = failure;
                 SwingUtilities.invokeLater(() -> {
                     refreshingTargetExternally = false;
                     if (shutDown || round != targetLoadRound) {
@@ -1039,6 +1088,17 @@ public final class MainPanel extends JPanel {
                         return;
                     }
                     if (error != null) {
+                        // 目标文件夹可能已经被删除/改名。继续留着旧中间商会让用户
+                        // 以为还能保存到那个目录；清空并明确报错更安全。
+                        Path showing = viewer.photo();
+                        if (showing != null && target.toAbsolutePath().normalize()
+                                .equals(showing.toAbsolutePath().normalize().getParent())) {
+                            showPhotoInViewer(null);
+                        }
+                        targetPanel.setSession(null);
+                        arrangePanel.setSession(null);
+                        trashPanel.setSession(null);
+                        targetFilmstrip.setSession(null);
                         onTargetFolderError.accept(target);
                     } else {
                         applyExternalTargetFiles(target, scanned);
@@ -1060,8 +1120,15 @@ public final class MainPanel extends JPanel {
         viewer.clearFullImageCache();
         Session session = targetPanel.session();
         Path targetRoot = target.toAbsolutePath().normalize();
-        if (session == null
-                || !targetRoot.equals(session.targetFolder().toAbsolutePath().normalize())) {
+        if (session == null) {
+            // 刚才目标文件夹消失时我们已经清空了中间商；它重新出现后，监听的
+            // 恢复通知会走到这里，重新读一遍把它接回来，而不是让界面一直空着。
+            if (Files.isDirectory(targetRoot)) {
+                openTargetFolder(targetRoot);
+            }
+            return;
+        }
+        if (!targetRoot.equals(session.targetFolder().toAbsolutePath().normalize())) {
             return;
         }
         Path targetSelection = targetPanel.selectedPhoto();
@@ -1103,6 +1170,15 @@ public final class MainPanel extends JPanel {
         } else {
             panel.clearSelection();
         }
+    }
+
+    /** 保存前后的路径可能变（改名/复制），点选要沿着来源→最终文件映射走。 */
+    private static Path savedSelection(Path selection, Saver.Result result) {
+        if (selection == null) {
+            return null;
+        }
+        return result.savedLocations().getOrDefault(
+                selection.toAbsolutePath().normalize(), selection);
     }
 
     /** 空格：把素材条里点中的那张照片加入目标序列。 */
@@ -1259,9 +1335,12 @@ public final class MainPanel extends JPanel {
             return; // 落回原地或越界：不产生无意义的历史
         }
         session.move(from, to);
-        // 照片挪了位置，"选中"要跟着挪，否则高亮会指着另一张（编号也跟着对不上）
-        targetPanel.moveSelectionTo(to);
-        arrangePanel.moveSelectionTo(to);
+        // 照片挪了位置，"选中"要跟着照片走，而不是把旧的格子下标平移到新位置。
+        // 从底部目标带拖动时，两块目标网格原本可能根本没选中任何照片；那时光改下标
+        // 会凭空点亮一张无关照片。三个入口统一按路径重新选中真正被拖动的那张。
+        targetPanel.selectPhoto(photo);
+        arrangePanel.selectPhoto(photo);
+        targetFilmstrip.selectPhoto(photo);
         targetPanel.refresh();
         arrangePanel.refresh();
         targetFilmstrip.refresh();
@@ -1327,13 +1406,16 @@ public final class MainPanel extends JPanel {
      * @return 是否真的启动了保存；false 表示这次连快照都没拍成
      */
     public boolean save() {
+        if (saving) {
+            return false; // 已有一次保存在路上，别把同一份快照排队执行两遍
+        }
         Session session = targetPanel.session();
         if (session == null) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(),
                     List.of(), List.of("还没有选目标文件夹，没有可以保存的改动。")));
             return false;
         }
-        if (session.isEmpty()) {
+        if (session.isEmpty() && session.trash().isEmpty()) {
             onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(),
                     List.of(), List.of("目标文件夹里什么都没有，没有可以保存的改动。")));
             return false;
@@ -1350,37 +1432,94 @@ public final class MainPanel extends JPanel {
             return false;
         }
         saving = true; // 从这一刻起到下面的回调回来之前，不许再改中间商
-        savePool.submit(() -> {
-            Saver.Result result = new Saver().save(plan);
-            SwingUtilities.invokeLater(() -> {
-                Path shownBeforeSave = viewer.photo();
-                saving = false; // 中间商马上要重建，此刻起放行——重建之后磁盘就是新的基准
-                // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
-                session.seedExisting(result.finalOrder());
-                // 没复制成功的那几条放回末尾，别让用户再去素材条里挑一遍
-                result.failedSources().forEach(session::add);
-                targetPanel.reloadThumbnails();
-                arrangePanel.reloadThumbnails();
-                targetFilmstrip.reloadThumbnails();
-                targetPanel.refresh();
-                arrangePanel.refresh();
-                targetFilmstrip.refresh();
-                // 保存可能改名、改写像素，旧缓存里的“同一路径”已经不代表同一张图。
-                viewer.clearFullImageCache();
-                if (shownBeforeSave != null) {
-                    Path finalPhoto = result.savedLocations().get(
-                            shownBeforeSave.toAbsolutePath().normalize());
-                    if (finalPhoto != null && Files.isRegularFile(finalPhoto)) {
-                        targetPanel.selectPhoto(finalPhoto);
-                        arrangePanel.selectPhoto(finalPhoto);
-                        targetFilmstrip.selectPhoto(finalPhoto);
-                        // 重新读保存后的文件，编辑状态已经在 seedExisting 里清空了。
-                        showPhotoInViewer(finalPhoto);
-                    }
+        historyChanged(); // 旋转 / 翻转 / 重置等按钮在保存期间先灰掉
+        try {
+            savePool.submit(() -> {
+                Saver.Result result;
+                try {
+                    result = new Saver().save(plan);
+                } catch (RuntimeException e) {
+                    // 保存器里出现了没预料到的运行时异常。此时不能假装成功重建中间商，
+                    // 否则用户刚挑的照片会从界面上消失；保留现有状态，只把错误报出来。
+                    SwingUtilities.invokeLater(() -> {
+                        if (shutDown) {
+                            return;
+                        }
+                        saving = false;
+                        historyChanged();
+                        afterSave = null;
+                        closing = false;
+                        onSaveFinished.accept(new Saver.Result(0, 0, 0, 0,
+                                List.of(), Map.of(), List.of(),
+                                List.of("保存器意外失败：" + e.getMessage())));
+                        resumePendingExternalRefresh();
+                    });
+                    return;
                 }
-                handleSaveFinished(result);
+                SwingUtilities.invokeLater(() -> {
+                    if (shutDown) {
+                        return;
+                    }
+                    Path shownBeforeSave = viewer.photo();
+                    Path targetSelectionBeforeSave = targetPanel.selectedPhoto();
+                    Path arrangeSelectionBeforeSave = arrangePanel.selectedPhoto();
+                    Path stripSelectionBeforeSave = targetFilmstrip.selectedPhoto();
+                    saving = false; // 中间商马上要重建，此刻起放行——重建之后磁盘就是新的基准
+                    // 保存之后磁盘就是真相：按真实结果重建中间商，顺序保留、历史清空
+                    session.seedExisting(result.finalOrder());
+                    // 没复制成功的那几条放回末尾，别让用户再去素材条里挑一遍
+                    result.failedSources().forEach(session::add);
+                    // 保存可能只改了顺序；点选是跟着照片走的，不能继续用旧格子下标。
+                    Path targetSelectionAfterSave =
+                            savedSelection(targetSelectionBeforeSave, result);
+                    Path arrangeSelectionAfterSave =
+                            savedSelection(arrangeSelectionBeforeSave, result);
+                    Path stripSelectionAfterSave =
+                            savedSelection(stripSelectionBeforeSave, result);
+                    restoreSelection(targetPanel, targetSelectionAfterSave, session);
+                    restoreSelection(arrangePanel, arrangeSelectionAfterSave, session);
+                    if (stripSelectionAfterSave != null
+                            && session.indexOf(stripSelectionAfterSave) >= 0) {
+                        targetFilmstrip.selectPhoto(stripSelectionAfterSave);
+                    } else {
+                        targetFilmstrip.selectPhoto(null);
+                    }
+                    targetPanel.reloadThumbnails();
+                    arrangePanel.reloadThumbnails();
+                    trashPanel.reloadThumbnails();
+                    targetFilmstrip.reloadThumbnails();
+                    targetPanel.refresh();
+                    arrangePanel.refresh();
+                    trashPanel.refresh();
+                    targetFilmstrip.refresh();
+                    // 保存可能改名、改写像素，旧缓存里的“同一路径”已经不代表同一张图。
+                    viewer.clearFullImageCache();
+                    if (shownBeforeSave != null) {
+                        Path finalPhoto = result.savedLocations().get(
+                                shownBeforeSave.toAbsolutePath().normalize());
+                        if (finalPhoto != null && Files.isRegularFile(finalPhoto)) {
+                            targetPanel.selectPhoto(finalPhoto);
+                            arrangePanel.selectPhoto(finalPhoto);
+                            targetFilmstrip.selectPhoto(finalPhoto);
+                            // 重新读保存后的文件，编辑状态已经在 seedExisting 里清空了。
+                            showPhotoInViewer(finalPhoto);
+                        } else if (!Files.isRegularFile(shownBeforeSave)) {
+                            // 当前照片被这次保存删掉（或被外部删掉）时，大图不能
+                            // 继续拿着内存里的旧像素冒充它还在。
+                            showPhotoInViewer(null);
+                        }
+                    }
+                    handleSaveFinished(result);
+                });
             });
-        });
+        } catch (RejectedExecutionException e) {
+            saving = false;
+            historyChanged();
+            closing = false;
+            onSaveFinished.accept(new Saver.Result(0, 0, 0, 0, List.of(), Map.of(),
+                    List.of(), List.of("程序正在关闭，保存没有启动。")));
+            return false;
+        }
         return true;
     }
 
@@ -1472,6 +1611,7 @@ public final class MainPanel extends JPanel {
         if (closing) {
             return; // 已经在走关闭流程了，别问第二遍
         }
+        closing = true;
         // 关窗口这条路的收尾就是"退出"，和换工作区共用同一套
         //「有改动先问 → 选保存就等保存 → 再执行」的逻辑
         confirmChangesOrAbort(this::exitAfterSave);
@@ -1508,11 +1648,25 @@ public final class MainPanel extends JPanel {
         }
         int choice = confirmSaveOnClose.apply(this);
         if (choice == JOptionPane.CLOSED_OPTION) {
+            closing = false;
             return; // 把对话框直接关掉：当作"取消"，什么都不做
         }
         if (choice == JOptionPane.NO_OPTION) {
             // 不保存：中间商连同垃圾桶一起消失，磁盘上什么都没变（见《软件设计》第 7 节）
             action.run();
+            return;
+        }
+
+        // 用户已经按过一次保存，后台还在跑：不要再排第二份快照，
+        // 把这次的收尾挂到那一次上即可。否则关窗口/换工作区会落空。
+        if (saving) {
+            Runnable previous = afterSave;
+            afterSave = () -> {
+                if (previous != null) {
+                    previous.run();
+                }
+                action.run();
+            };
             return;
         }
 
@@ -1528,6 +1682,9 @@ public final class MainPanel extends JPanel {
             // 连快照都没拍成（回调刚刚已经说清原因了）：把待办退回原样，
             // 否则状态会卡在"点了保存、等一个永远不来的回调"上
             afterSave = previous;
+            if (closing && !shutDown) {
+                closing = false;
+            }
         }
     }
 

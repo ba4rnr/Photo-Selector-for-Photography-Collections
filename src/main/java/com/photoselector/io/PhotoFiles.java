@@ -48,17 +48,28 @@ public final class PhotoFiles {
 
         List<Path> loose = imagesIn(root);
         if (!loose.isEmpty()) {
-            groups.add(new PhotoGroup(root.getFileName().toString(), root, loose));
+            groups.add(new PhotoGroup(displayName(root), root, loose));
         }
 
         try (Stream<Path> children = Files.list(root)) {
             for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
-                List<Path> photos = imagesIn(child);
-                if (!photos.isEmpty()) {
-                    groups.add(new PhotoGroup(child.getFileName().toString(), child, photos));
+                try {
+                    List<Path> photos = imagesIn(child);
+                    if (!photos.isEmpty()) {
+                        groups.add(new PhotoGroup(child.getFileName().toString(), child, photos));
+                    }
+                } catch (IOException | RuntimeException ignored) {
+                    // 某一个子文件夹没权限/正在移动，不应让整个素材根目录都打不开。
+                    // 能读的其他组照常显示，下一次文件监听事件还会再对齐。
                 }
             }
         }
         return groups;
+    }
+
+    /** 根目录可能直接是盘符（getFileName() 为 null），这时用完整路径当组名。 */
+    static String displayName(Path folder) {
+        Path name = folder.getFileName();
+        return name == null ? folder.toString() : name.toString();
     }
 }

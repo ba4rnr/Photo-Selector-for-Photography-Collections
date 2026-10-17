@@ -138,6 +138,15 @@ final class ViewerPanel extends JPanel {
     /** 是不是"适应窗口"。新照片默认适应窗口；固定倍率是用户主动选择的另一种模式。 */
     private boolean fitToWindow = true;
 
+    /**
+     * "以后打开照片时默认怎么显示"这项偏好。
+     *
+     * <p>它和 {@link #fitToWindow} 不是同一件事：用户当前这张可以临时滚到 100%，
+     * 但"默认缩放"仍然可以选着"适应窗口"。把两者混成一个字段，会让菜单里的
+     * 默认缩放勾选跟着当前画面乱跳。
+     */
+    private boolean defaultFitToWindow = true;
+
     /** 非适应窗口时用的比例。 */
     private double customScale = defaultScale;
 
@@ -414,6 +423,7 @@ final class ViewerPanel extends JPanel {
      */
     void setDefaultScale(double scale) {
         this.defaultScale = Math.max(0.01, Math.min(MAX_SCALE, scale));
+        this.defaultFitToWindow = false;
         fitToWindow = false;
         customScale = this.defaultScale;
         resetView();
@@ -431,9 +441,21 @@ final class ViewerPanel extends JPanel {
         this.defaultScale = Math.max(0.01, Math.min(MAX_SCALE, scale));
         this.customScale = this.defaultScale;
         this.fitToWindow = fit;
+        this.defaultFitToWindow = fit;
         resetView();
         repaint();
         onZoomChanged.run();
+    }
+
+    /** 把"以后默认适应窗口"写进偏好，并让当前这张立刻切过去。 */
+    void setDefaultFitToWindow() {
+        this.defaultFitToWindow = true;
+        fitToWindow();
+    }
+
+    /** 「查看 → 默认缩放」里该勾哪一项；不受当前这张临时缩放的影响。 */
+    boolean isDefaultFitToWindow() {
+        return defaultFitToWindow;
     }
 
     /** 当前设定的默认倍率（0.18 = 18%）。 */

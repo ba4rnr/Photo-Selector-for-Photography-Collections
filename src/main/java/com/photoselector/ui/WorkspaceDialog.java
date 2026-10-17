@@ -4,7 +4,10 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -64,6 +67,14 @@ final class WorkspaceDialog extends JDialog {
                 targetField.setText(current.targetFolder().toString());
             }
         }
+        // 工作区对话框自己有一棵带后台列目录线程的树；对话框关掉时也要把线程收掉，
+        // 否则每打开一次对话框就多一只常驻的树线程。
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent e) {
+                tree.shutdown();
+            }
+        });
 
         pack();
         setLocationRelativeTo(owner);
@@ -165,8 +176,19 @@ final class WorkspaceDialog extends JDialog {
     }
 
     private static Path textOf(JTextField field) {
-        String text = field.getText().trim();
-        return text.isEmpty() ? null : Path.of(text);
+        return textPath(field.getText());
+    }
+
+    /** 解析用户手输的路径；NUL 等非法字符只当作"这一栏没填好"，不能抛出界面事件。 */
+    static Path textPath(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return Path.of(text.trim());
+        } catch (InvalidPathException e) {
+            return null;
+        }
     }
 
     private static JLabel label(String text) {

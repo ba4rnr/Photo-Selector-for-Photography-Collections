@@ -113,8 +113,20 @@ public final class SourceFolderWatcher implements AutoCloseable {
                 // 根目录被删除 / 改名：关闭当前服务，等它回来再重新注册整套目录。
                 closeQuietly(registration.service());
                 Registration reopened = recover(watchedRoot, myGeneration);
-                if (reopened == null) {
+                if (reopened == null || myGeneration != generation) {
+                    if (reopened != null) {
+                        closeQuietly(reopened.service());
+                    }
                     return;
+                }
+                synchronized (this) {
+                    if (myGeneration != generation) {
+                        closeQuietly(reopened.service());
+                        return;
+                    }
+                    // 恢复后的服务也要挂回字段，否则下一次 watch/close 只关闭旧服务，
+                    // 监听线程可能继续攥着一个没人管理的 WatchService。
+                    service = reopened.service();
                 }
                 registration = reopened;
                 notifyChanged(watchedRoot, myGeneration);

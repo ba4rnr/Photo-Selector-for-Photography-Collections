@@ -236,11 +236,26 @@ public final class Session {
             onDisk.add(normalized);
         }
 
-        boolean changed = sequence.removeIf(entry ->
-                entry.origin() == Origin.EXISTING && !onDisk.contains(entry.source()));
-        changed |= trash.removeIf(item ->
-                item.entry().origin() == Origin.EXISTING
-                        && !onDisk.contains(item.entry().source()));
+        Set<Path> removedExisting = new HashSet<>();
+        boolean changed = sequence.removeIf(entry -> {
+            boolean remove = entry.origin() == Origin.EXISTING
+                    && !onDisk.contains(entry.source());
+            if (remove) {
+                removedExisting.add(entry.source());
+            }
+            return remove;
+        });
+        changed |= trash.removeIf(item -> {
+            boolean remove = item.entry().origin() == Origin.EXISTING
+                    && !onDisk.contains(item.entry().source());
+            if (remove) {
+                removedExisting.add(item.entry().source());
+            }
+            return remove;
+        });
+        // 文件已经不在磁盘上，挂在旧路径上的编辑也失去了对象，顺手清掉。
+        // 待复制照片和外部快照之外的编辑不会进来，所以不会误伤尚未保存的改动。
+        edits.keySet().removeAll(removedExisting);
 
         for (Path file : diskFiles) {
             if (!contains(file)) {

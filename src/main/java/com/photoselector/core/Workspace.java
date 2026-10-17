@@ -1,6 +1,7 @@
 package com.photoselector.core;
 
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -24,7 +25,8 @@ public record Workspace(Path sourceRoot, Set<Path> excludedFolders, Path targetF
     public Workspace {
         Objects.requireNonNull(sourceRoot, "sourceRoot 不能为空");
         // 用 LinkedHashSet 保留顺序：写进配置文件时不至于每次顺序都不一样
-        excludedFolders = Set.copyOf(new LinkedHashSet<>(excludedFolders));
+        excludedFolders = Collections.unmodifiableSet(
+                new LinkedHashSet<>(excludedFolders));
     }
 
     /** 只有素材根文件夹、还没选目标文件夹的工作区。 */

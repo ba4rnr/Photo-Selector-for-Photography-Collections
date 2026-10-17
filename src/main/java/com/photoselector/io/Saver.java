@@ -8,9 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -83,6 +85,7 @@ public final class Saver {
     public record Plan(Path folder, List<Item> items, List<Path> trashFiles) {
 
         public Plan {
+            folder = folder.toAbsolutePath().normalize();
             items = List.copyOf(items);
             trashFiles = List.copyOf(trashFiles);
         }
@@ -133,7 +136,7 @@ public final class Saver {
     }
 
     /** 一项待归位的临时搬运。 */
-    private record TempMove(Path temp, Path target, EditState edits) {
+    private record TempMove(Path temp, Path target, Path original, EditState edits) {
     }
 
     /** 复制阶段的计数：新增了几张，其中几张因为带编辑而重写。 */
@@ -157,18 +160,41 @@ public final class Saver {
 
         List<TempMove> toDelete = moveTrashAside(plan, problems);
         List<TempMove> toRename = moveAsideForRenaming(plan, finals, problems);
-        CopyStats copied = copyNewEntries(plan, finals, failedSources, problems);
+        // 只有真正完成的操作才进 settled。不能等最后再看“目标路径有没有文件”：
+        // 名字可能被外部文件占着，看到它存在并不等于这张照片已经保存成功。
+        Set<Path> settled = new HashSet<>();
+        for (int i = 0; i < plan.items().size(); i++) {
+            Item item = plan.items().get(i);
+            if (item.origin() == Origin.EXISTING
+                    && item.source().equals(finals.get(i))
+                    && item.edits().isNone()
+                    && Files.exists(item.source())) {
+                settled.add(finals.get(i));
+            }
+        }
+        CopyStats copied = copyNewEntries(plan, finals, failedSources, problems, settled);
         List<TempMove> plainMoves = toRename.stream()
                 .filter(move -> move.edits().isNone()).toList();
         List<TempMove> editedMoves = toRename.stream()
                 .filter(move -> !move.edits().isNone()).toList();
-        int renamed = moveToFinalNames(plainMoves, problems);
-        int rewritten = copied.rewritten() + rewriteMovedEntries(editedMoves, problems);
-        int deleted = deleteMovedAside(toDelete, problems);
+        int renamed = moveToFinalNames(plainMoves, problems, settled);
+        int rewritten = copied.rewritten()
+                + rewriteMovedEntries(editedMoves, problems, settled);
+        // 只有前面全部成功，才允许把垃圾桶里的真实文件永久删掉。
+        // 任何一步失败都说明这次保存没有完整落地；此时先尝试把已挪开的垃圾桶文件
+        // 放回原名，名字若已被别的照片占用，就继续保留在临时名下，绝不能删。
+        int deleted;
+        if (problems.isEmpty()) {
+            deleted = deleteMovedAside(toDelete, problems);
+        } else {
+            restoreMovedAside(toDelete, problems, settled);
+            restoreMovedAside(toRename, problems, settled);
+            deleted = 0;
+        }
 
-        List<Path> finalOrder = collectFinalOrder(plan, finals, failedSources);
+        List<Path> finalOrder = collectFinalOrder(plan, finals, failedSources, settled);
         return new Result(copied.copied(), renamed, rewritten, deleted,
-                finalOrder, collectSavedLocations(plan, finals, failedSources),
+                finalOrder, collectSavedLocations(plan, finals, failedSources, settled),
                 failedSources, problems);
     }
 
@@ -207,7 +233,7 @@ public final class Saver {
             Path temp = plan.folder().resolve(TRASHED_PREFIX + System.nanoTime() + "_" + index++ + ".tmp");
             try {
                 Files.move(file, temp);
-                pending.add(new TempMove(temp, file, EditState.NONE));
+                pending.add(new TempMove(temp, file, file, EditState.NONE));
             } catch (IOException e) {
                 problems.add("删不掉：" + file.getFileName());
             }
@@ -232,7 +258,7 @@ public final class Saver {
                     + "_" + i + extensionOf(item.source()));
             try {
                 Files.move(item.source(), temp);
-                pending.add(new TempMove(temp, finalPath, item.edits()));
+                pending.add(new TempMove(temp, finalPath, item.source(), item.edits()));
             } catch (IOException e) {
                 problems.add("改名前挪不动：" + item.source().getFileName());
             }
@@ -242,7 +268,8 @@ public final class Saver {
 
     /** 第二步：新挑进来的复制到最终名字。已经有人占了那个名字就不覆盖。 */
     private static CopyStats copyNewEntries(Plan plan, List<Path> finals,
-                                            List<Path> failedSources, List<String> problems) {
+                                            List<Path> failedSources, List<String> problems,
+                                            Set<Path> settled) {
         int copied = 0;
         int rewritten = 0;
         for (int i = 0; i < plan.items().size(); i++) {
@@ -264,6 +291,7 @@ public final class Saver {
                     rewritten++;
                 }
                 copied++;
+                settled.add(target);
             } catch (IOException | RuntimeException e) {
                 problems.add("复制或写图失败：" + item.source().getFileName()
                         + "（" + e.getMessage() + "）");
@@ -274,7 +302,8 @@ public final class Saver {
     }
 
     /** 第三步：临时名改成最终名。 */
-    private static int moveToFinalNames(List<TempMove> pending, List<String> problems) {
+    private static int moveToFinalNames(List<TempMove> pending, List<String> problems,
+                                        Set<Path> settled) {
         int renamed = 0;
         for (TempMove move : pending) {
             if (Files.exists(move.target())) {
@@ -284,6 +313,7 @@ public final class Saver {
             try {
                 moveAtomically(move.temp(), move.target());
                 renamed++;
+                settled.add(move.target());
             } catch (IOException e) {
                 problems.add("改名失败，文件还留在临时名下：" + move.temp().getFileName());
             }
@@ -298,7 +328,8 @@ public final class Saver {
      * {@link PhotoTransforms#apply}——和屏幕上的画法完全相同。写文件仍然走
      * 临时名再原子改名，写到一半失败不会留下半截正式文件。
      */
-    private static int rewriteMovedEntries(List<TempMove> pending, List<String> problems) {
+    private static int rewriteMovedEntries(List<TempMove> pending, List<String> problems,
+                                           Set<Path> settled) {
         int rewritten = 0;
         for (TempMove move : pending) {
             if (Files.exists(move.target())) {
@@ -307,7 +338,14 @@ public final class Saver {
             }
             try {
                 writeEditedAtomically(move.temp(), move.target(), move.edits());
-                Files.deleteIfExists(move.temp());
+                // 目标已经写好；即使随后清理临时名失败，结果也已经成功落位。
+                settled.add(move.target());
+                try {
+                    Files.deleteIfExists(move.temp());
+                } catch (IOException cleanupError) {
+                    problems.add("编辑已保存，但临时文件没能清掉："
+                            + move.temp().getFileName());
+                }
                 rewritten++;
             } catch (IOException | RuntimeException e) {
                 problems.add("重写编辑失败，原图还留在临时名下：" + move.temp().getFileName());
@@ -332,13 +370,45 @@ public final class Saver {
     }
 
     /**
+     * 保存中途失败时，把还没删的垃圾桶文件尽量放回原名。
+     *
+     * <p>如果原文件名已经被本次成功保存的另一张照片占了，就不覆盖它；文件继续
+     * 留在 {@code __trashed_} 临时名下，并在问题清单里告诉用户具体名字。
+     */
+    private static void restoreMovedAside(List<TempMove> pending, List<String> problems,
+                                          Set<Path> settled) {
+        for (TempMove move : pending) {
+            if (!Files.exists(move.temp())) {
+                continue;
+            }
+            if (settled.contains(move.target())) {
+                // 目标已经成功写好，只是临时名的清理失败了；不要再把同一张图
+                // 放回原路径，否则会多出一份重复照片。
+                continue;
+            }
+            if (Files.exists(move.original())) {
+                problems.add("保存未完成，原文件保留在临时名下："
+                        + move.temp().getFileName());
+                continue;
+            }
+            try {
+                moveAtomically(move.temp(), move.original());
+            } catch (IOException e) {
+                problems.add("保存未完成，原文件仍保留在临时名下："
+                        + move.temp().getFileName());
+            }
+        }
+    }
+
+    /**
      * 保存完，按序列顺序看看每一项现在落在哪个文件上。
      *
      * <p>不看中间过程、只看磁盘上真实有什么。没复制成功的那几条不进来——
      * 调用方会拿 {@code failedSources} 把它们放回中间商，别让用户再挑一遍。
      */
     private static List<Path> collectFinalOrder(Plan plan, List<Path> finals,
-                                                List<Path> failedSources) {
+                                                List<Path> failedSources,
+                                                Set<Path> settled) {
         List<Path> order = new ArrayList<>(plan.items().size());
         for (int i = 0; i < plan.items().size(); i++) {
             Item item = plan.items().get(i);
@@ -346,7 +416,7 @@ public final class Saver {
             if (failedSources.contains(item.source())) {
                 continue; // 这一条已经明确失败：就算目标处碰巧有东西也不能认
             }
-            if (Files.exists(finalPath)) {
+            if (settled.contains(finalPath) && Files.exists(finalPath)) {
                 order.add(finalPath);
             } else if (Files.exists(item.source())) {
                 order.add(item.source()); // 没搬成功，那就还在原地
@@ -362,7 +432,8 @@ public final class Saver {
      * 当前看的那张复制去了哪里，尤其是它从素材目录被复制成 `010.jpg` 时。
      */
     private static Map<Path, Path> collectSavedLocations(Plan plan, List<Path> finals,
-                                                         List<Path> failedSources) {
+                                                         List<Path> failedSources,
+                                                         Set<Path> settled) {
         Map<Path, Path> locations = new LinkedHashMap<>();
         for (int i = 0; i < plan.items().size(); i++) {
             Path source = plan.items().get(i).source();
@@ -370,7 +441,7 @@ public final class Saver {
                 continue;
             }
             Path finalPath = finals.get(i);
-            Path actual = Files.exists(finalPath) ? finalPath
+            Path actual = settled.contains(finalPath) && Files.exists(finalPath) ? finalPath
                     : Files.exists(source) ? source : null;
             if (actual != null) {
                 locations.put(source.toAbsolutePath().normalize(),
