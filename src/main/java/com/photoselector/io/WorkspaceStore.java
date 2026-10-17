@@ -31,6 +31,9 @@ public final class WorkspaceStore {
     /** 目标文件夹。 */
     private static final String KEY_TARGET = "targetFolder";
 
+    /** 上次关闭时正在浏览的照片。 */
+    private static final String KEY_LAST_VIEWED = "lastViewedPhoto";
+
     /** 被剔除的文件夹，一项一个键：excluded.0、excluded.1…… */
     private static final String KEY_EXCLUDED_PREFIX = "excluded.";
 
@@ -93,7 +96,11 @@ public final class WorkspaceStore {
 
         String target = properties.getProperty(KEY_TARGET);
         Path targetFolder = (target == null || target.isBlank()) ? null : Path.of(target);
-        return Optional.of(new Workspace(Path.of(sourceRoot), excluded, targetFolder));
+        String lastViewed = properties.getProperty(KEY_LAST_VIEWED);
+        Path lastViewedPhoto = (lastViewed == null || lastViewed.isBlank())
+                ? null : Path.of(lastViewed);
+        return Optional.of(new Workspace(Path.of(sourceRoot), excluded, targetFolder,
+                lastViewedPhoto));
     }
 
     /** 把工作区写回文件。 */
@@ -102,6 +109,9 @@ public final class WorkspaceStore {
         properties.setProperty(KEY_SOURCE_ROOT, workspace.sourceRoot().toString());
         if (workspace.targetFolder() != null) {
             properties.setProperty(KEY_TARGET, workspace.targetFolder().toString());
+        }
+        if (workspace.lastViewedPhoto() != null) {
+            properties.setProperty(KEY_LAST_VIEWED, workspace.lastViewedPhoto().toString());
         }
         int index = 0;
         for (Path folder : workspace.excludedFolders()) {

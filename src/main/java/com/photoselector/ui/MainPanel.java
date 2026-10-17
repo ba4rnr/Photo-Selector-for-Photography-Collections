@@ -205,6 +205,12 @@ public final class MainPanel extends JPanel {
     private ViewMode mode = ViewMode.BROWSE;
     private boolean bottomPlaced;
 
+    /** 启动 / 切工作区时要恢复的照片，以及两条异步加载链是否已经完成。 */
+    private Path pendingRestorePhoto;
+    private boolean sourceLoadFinished;
+    private boolean targetLoadFinished;
+    private boolean restoringPhoto;
+
     public MainPanel() {
         this(ThumbnailService.defaultCacheDir());
     }
@@ -399,6 +405,7 @@ public final class MainPanel extends JPanel {
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
                     if (workspace != null && folder.equals(workspace.sourceRoot())) {
+                        markSourceLoadFinished();
                         onFolderOpened.accept(folder, -1);
                     }
                 });
@@ -411,6 +418,7 @@ public final class MainPanel extends JPanel {
                 }
                 scannedGroups = groups;
                 applyGroups();
+                markSourceLoadFinished();
                 onFolderOpened.accept(folder, filmstrip.photoCount());
             });
         });
@@ -549,6 +557,7 @@ public final class MainPanel extends JPanel {
 
     /** 大图换片时把这张照片已有的编辑一起灌进去；所有入口都走这里。 */
     private void showPhotoInViewer(Path photo) {
+        rememberViewedPhoto(photo);
         viewer.showPhoto(photo);
         Session session = targetPanel.session();
         viewer.setEdits(session == null ? EditState.NONE : session.editsOf(photo));
@@ -572,10 +581,25 @@ public final class MainPanel extends JPanel {
 
     /** 整理模式选图：只更新当前对象，不在隐藏的大图区解码全尺寸原图。 */
     private void showPhotoDeferredInViewer(Path photo) {
+        rememberViewedPhoto(photo);
         viewer.selectPhotoDeferred(photo);
         Session session = targetPanel.session();
         viewer.setEdits(session == null ? EditState.NONE : session.editsOf(photo));
         historyChanged();
+    }
+
+    /** 只更新内存中的工作区指针；磁盘写入发生在正常退出时，避免每次过片都写文件。 */
+    private void rememberViewedPhoto(Path photo) {
+        if (!restoringPhoto) {
+            pendingRestorePhoto = null;
+        }
+        if (workspace == null) {
+            return;
+        }
+        Path normalized = photo == null ? null : photo.toAbsolutePath().normalize();
+        if (!java.util.Objects.equals(normalized, workspace.lastViewedPhoto())) {
+            workspace = workspace.withLastViewedPhoto(normalized);
+        }
     }
 
     /** 大图的当前比例（百分比），菜单里显示用。 */
@@ -621,6 +645,9 @@ public final class MainPanel extends JPanel {
      */
     public void applyWorkspace(Workspace newWorkspace) {
         this.workspace = newWorkspace;
+        pendingRestorePhoto = newWorkspace.lastViewedPhoto();
+        sourceLoadFinished = false;
+        targetLoadFinished = false;
         sourceTree.setRoot(newWorkspace.sourceRoot());
         sourceTree.setExcluded(newWorkspace.excludedFolders());
         openTargetFolder(newWorkspace.targetFolder());
@@ -643,6 +670,7 @@ public final class MainPanel extends JPanel {
             arrangePanel.setSession(null);
             trashPanel.setSession(null);
             targetFilmstrip.setSession(null);
+            markTargetLoadFinished();
             return;
         }
         scanPool.submit(() -> {
@@ -669,6 +697,7 @@ public final class MainPanel extends JPanel {
                     arrangePanel.setSession(null);
                     trashPanel.setSession(null);
                     targetFilmstrip.setSession(null);
+                    markTargetLoadFinished();
                     onTargetFolderError.accept(target);
                     return;
                 }
@@ -678,6 +707,7 @@ public final class MainPanel extends JPanel {
                 arrangePanel.setSession(session);
                 trashPanel.setSession(session);
                 targetFilmstrip.setSession(session);
+                markTargetLoadFinished();
                 if (!leftovers.isEmpty()) {
                     onSaveResiduals.accept(leftovers);
                 }
@@ -703,6 +733,48 @@ public final class MainPanel extends JPanel {
     /** 目标文件夹读取失败的提示方式。 */
     public void setOnTargetFolderError(Consumer<Path> listener) {
         this.onTargetFolderError = listener == null ? folder -> { } : listener;
+    }
+
+    private void markSourceLoadFinished() {
+        sourceLoadFinished = true;
+        restorePendingPhotoIfReady();
+    }
+
+    private void markTargetLoadFinished() {
+        targetLoadFinished = true;
+        restorePendingPhotoIfReady();
+    }
+
+    /**
+     * 两条异步链都完成后，按上次关闭时的路径恢复当前照片。
+     *
+     * <p>先查目标序列，再查素材条；路径已经不存在或不在当前筛选范围里就保持空白，
+     * 不为了“恢复”强行显示一张已经不该出现的照片。
+     */
+    private void restorePendingPhotoIfReady() {
+        if (pendingRestorePhoto == null || !sourceLoadFinished || !targetLoadFinished) {
+            return;
+        }
+        Path photo = pendingRestorePhoto;
+        pendingRestorePhoto = null;
+        if (!Files.isRegularFile(photo)) {
+            return;
+        }
+
+        restoringPhoto = true;
+        try {
+            Session session = targetPanel.session();
+            if (session != null && session.indexOf(photo) >= 0) {
+                targetPanel.selectPhoto(photo);
+                arrangePanel.selectPhoto(photo);
+                targetFilmstrip.selectPhoto(photo);
+                showPhotoInViewer(photo);
+            } else {
+                filmstrip.selectPhoto(photo);
+            }
+        } finally {
+            restoringPhoto = false;
+        }
     }
 
     public void setOnSaveResiduals(Consumer<List<Path>> listener) {

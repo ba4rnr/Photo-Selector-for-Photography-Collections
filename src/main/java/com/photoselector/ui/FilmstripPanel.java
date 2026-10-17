@@ -283,6 +283,39 @@ final class FilmstripPanel extends JPanel {
         onCurrentPhotoChanged.accept(photo);
     }
 
+    /** 在当前分组里找一张照片并选中；用于启动恢复，不在范围里就返回 false。 */
+    boolean selectPhoto(Path photo) {
+        if (photo == null) {
+            return false;
+        }
+        Path normalized = photo.toAbsolutePath().normalize();
+        for (PhotoGroup group : groups) {
+            for (Path candidate : group.photos()) {
+                if (candidate.toAbsolutePath().normalize().equals(normalized)) {
+                    setCurrentPhoto(candidate);
+                    scrollToPhoto(candidate);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    boolean containsPhoto(Path photo) {
+        if (photo == null) {
+            return false;
+        }
+        Path normalized = photo.toAbsolutePath().normalize();
+        for (PhotoGroup group : groups) {
+            for (Path candidate : group.photos()) {
+                if (candidate.toAbsolutePath().normalize().equals(normalized)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** 点中或换片时通知外部。 */
     void setOnCurrentPhotoChanged(java.util.function.Consumer<Path> listener) {
         this.onCurrentPhotoChanged = listener == null ? photo -> { } : listener;

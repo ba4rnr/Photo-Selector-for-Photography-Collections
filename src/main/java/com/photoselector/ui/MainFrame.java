@@ -25,6 +25,7 @@ import javax.swing.plaf.basic.BasicMenuBarUI;
 import com.photoselector.core.Workspace;
 import com.photoselector.io.AppSettings;
 import com.photoselector.io.Saver;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.io.WorkspaceStore;
 import com.photoselector.ui.theme.Theme;
 
@@ -34,15 +35,21 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial") // Swing 组件都实现了 Serializable，但我们从不序列化界面，无需 serialVersionUID
 public final class MainFrame extends JFrame {
 
-    private final MainPanel mainPanel = new MainPanel();
+    private final MainPanel mainPanel;
     private final WorkspaceStore workspaceStore;
     private final AppSettings settings;
 
     /** 菜单里那两项：灰亮状态跟着撤销 / 重做的历史走。 */
     public MainFrame(WorkspaceStore workspaceStore, AppSettings settings) {
+        this(workspaceStore, settings, ThumbnailService.defaultCacheDir());
+    }
+
+    /** 供测试指定缩略图缓存目录，避免碰用户真实缓存。 */
+    MainFrame(WorkspaceStore workspaceStore, AppSettings settings, Path thumbnailCacheDir) {
         super("摄影集照片筛选器");
         this.workspaceStore = workspaceStore;
         this.settings = settings;
+        this.mainPanel = new MainPanel(thumbnailCacheDir);
         mainPanel.setDefaultZoomPercent(settings.defaultZoomPercent());
 
         // 不能再用 EXIT_ON_CLOSE：那样点 × 会绕过"有没有没保存的改动"这一问。
@@ -246,6 +253,14 @@ public final class MainFrame extends JFrame {
 
     /** 真正退出：收掉后台线程池，再关窗口。 */
     private void exit() {
+        Workspace workspace = mainPanel.workspace();
+        if (workspace != null) {
+            try {
+                workspaceStore.save(workspace);
+            } catch (RuntimeException ignored) {
+                // 偏好文件写不进去不该阻止用户退出
+            }
+        }
         mainPanel.shutdown();
         dispose();
     }

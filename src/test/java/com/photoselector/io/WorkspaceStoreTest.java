@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.Workspace;
+import com.photoselector.testing.TestImages;
 
 class WorkspaceStoreTest {
 
@@ -64,6 +65,19 @@ class WorkspaceStoreTest {
         store().save(Workspace.of(root));
 
         assertEquals(null, store().load().orElseThrow().targetFolder());
+    }
+
+    @Test
+    void 上次浏览的照片会跟着工作区一起保存() throws Exception {
+        Path root = Files.createDirectories(tempDir.resolve("素材"));
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path photo = TestImages.writeJpeg(root.resolve("last.jpg"), 100, 100);
+        Workspace saved = new Workspace(root, Set.of(), target, photo);
+
+        store().save(saved);
+
+        assertEquals(photo.toAbsolutePath().normalize(),
+                store().load().orElseThrow().lastViewedPhoto());
     }
 
     @Test
