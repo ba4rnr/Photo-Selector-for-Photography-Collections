@@ -16,7 +16,6 @@ import java.util.Set;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
-import javax.swing.JTextArea;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,20 +58,20 @@ class MessageDialogTest {
         assertTrue(countColors(image) > 3, "对话框应当画出内容");
         // 系统外观会画浅灰底和亮色立体按钮；深色消息框里最亮的字也只有 #C3C3C3
         assertEquals(0, countPixelsBrighterThan(image, 0xD8), "消息框不该还是系统外观的亮色");
-        assertTrue(anyTextEquals(dialog.getContentPane(), message), "正文应当在");
+        assertTrue(anyTextContains(dialog.getContentPane(), message), "正文应当在");
+        assertTrue(anyTextContains(dialog.getContentPane(), "text-align:center"),
+                "正文应当居中，而不是贴着左边");
         assertNotNull(findButton(dialog.getContentPane(), "确定"), "右下角应当有确定按钮");
         dialog.dispose();
     }
 
-    private static boolean anyTextEquals(Container container, String wanted) {
+    private static boolean anyTextContains(Container container, String wanted) {
         for (Component child : container.getComponents()) {
-            if (child instanceof JTextArea area && wanted.equals(area.getText())) {
+            if (child instanceof JLabel label && label.getText() != null
+                    && label.getText().contains(wanted)) {
                 return true;
             }
-            if (child instanceof JLabel label && wanted.equals(label.getText())) {
-                return true;
-            }
-            if (child instanceof Container nested && anyTextEquals(nested, wanted)) {
+            if (child instanceof Container nested && anyTextContains(nested, wanted)) {
                 return true;
             }
         }

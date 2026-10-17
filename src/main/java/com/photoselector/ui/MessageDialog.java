@@ -3,7 +3,6 @@ package com.photoselector.ui;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Insets;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
 
@@ -13,9 +12,9 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
 
 import com.photoselector.ui.theme.Theme;
 
@@ -81,33 +80,28 @@ final class MessageDialog extends JDialog {
     }
 
     private static JComponent buildBody(String message) {
-        JTextArea area = new JTextArea(message);
-        area.setEditable(false);
-        area.setFocusable(false);
-        area.setLineWrap(true);
-        area.setWrapStyleWord(true);
-        area.setOpaque(false);
-        area.setForeground(Theme.TEXT);
-        area.setFont(Theme.FONT);
-        area.setBorder(null);
-        area.setMargin(new Insets(0, 0, 0, 0));
-
-        // 先量一遍"这个宽度下折完行有多高"：JTextArea 的折行高度跟当前宽度有关，
-        // 不先给宽度的话，量出来的是不折行的一整条
+        // 正文居中：JTextArea 没法让每一行居中，改用带宽度约束的 HTML 标签。
+        // 宽度写进 HTML，长句子照样在这里折行。
         int textWidth = WIDTH - PAD * 2;
-        area.setSize(new Dimension(textWidth, Short.MAX_VALUE));
-        int textHeight = area.getPreferredSize().height;
-        area.setPreferredSize(new Dimension(textWidth, Math.min(textHeight, MAX_TEXT_HEIGHT)));
+        JLabel text = new JLabel(centeredHtml(message, textWidth));
+        text.setFont(Theme.FONT);
+        text.setForeground(Theme.TEXT);
+        text.setVerticalAlignment(SwingConstants.TOP);
 
-        JComponent bodyContent = area;
-        if (textHeight > MAX_TEXT_HEIGHT) {
-            JScrollPane scroll = new JScrollPane(area,
+        int naturalHeight = text.getPreferredSize().height;
+        Dimension wanted = new Dimension(textWidth, Math.min(naturalHeight, MAX_TEXT_HEIGHT));
+        text.setPreferredSize(wanted);
+
+        JComponent bodyContent = text;
+        if (naturalHeight > MAX_TEXT_HEIGHT) {
+            JScrollPane scroll = new JScrollPane(text,
                     ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                     ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
             scroll.setBorder(null);
             scroll.setOpaque(false);
             scroll.getViewport().setOpaque(false);
             Theme.themeScrollBar(scroll.getVerticalScrollBar());
+            scroll.setPreferredSize(wanted);
             bodyContent = scroll;
         }
 
@@ -116,6 +110,16 @@ final class MessageDialog extends JDialog {
         body.setBorder(BorderFactory.createEmptyBorder(16, PAD, 16, PAD));
         body.add(bodyContent, BorderLayout.CENTER);
         return body;
+    }
+
+    /** 把纯文本包成"在给定宽度里居中、按行折行"的 HTML。 */
+    private static String centeredHtml(String message, int width) {
+        String escaped = message
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br>");
+        return "<html><div style='width:" + width + "px; text-align:center;'>" + escaped + "</div></html>";
     }
 
     private JComponent buildFooter() {
