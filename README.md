@@ -57,6 +57,25 @@ java -jar target/photo-selector.jar   # 运行
 也可以：在 IntelliJ 里直接运行 `PhotoSelectorApp`，或者手动执行
 `mvnw.cmd package` 之后 `java -jar target\photo-selector.jar`。
 
+## 打包 Windows 免安装版
+
+使用 JDK 自带的 `jpackage` 生成带 Java 运行时的 Windows 应用，不要求目标电脑另装 Java：
+
+```powershell
+mvnw.cmd package
+New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
+Copy-Item target\photo-selector.jar target\jpackage-input\photo-selector.jar -Force
+jpackage --type app-image --dest dist --name "摄影集照片筛选器" `
+  --app-version 0.1.0 --vendor BA4RNR `
+  --input target\jpackage-input --main-jar photo-selector.jar `
+  --main-class com.photoselector.PhotoSelectorApp
+Compress-Archive -LiteralPath "dist\摄影集照片筛选器" `
+  -DestinationPath "dist\PhotoSelector-0.1.0-windows-x64.zip" -Force
+```
+
+成品在 `dist\摄影集照片筛选器\`，双击其中的 EXE 即可运行；
+`dist\PhotoSelector-0.1.0-windows-x64.zip` 可直接拷贝到另一台 Windows 电脑。
+
 ## 现在可以试什么
 
 打开素材文件夹之后，下面这些已经能用了：
