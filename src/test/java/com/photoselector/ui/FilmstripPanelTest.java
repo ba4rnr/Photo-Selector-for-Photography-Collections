@@ -366,8 +366,9 @@ class FilmstripPanelTest {
                 40, 8, 1, false, MouseEvent.BUTTON1)));
         assertTrue(filmstrip.isCollapsed(folderA), "点组头应当把这一组收起来");
 
-        // 四张都在最开始请求过，等它们全部到位，第一张肯定在其中
-        assertEquals(4, waitUntilStable(filmstrip, 4), "缩略图应当全部到位");
+        // 收起后只需保留预览图 a0，以及第二组当前可见的 b0、b1；
+        // 原先 a0/a1/b0/b1 的在途请求中，已经不再需要的 a1 会被丢弃。
+        assertEquals(3, waitUntilStable(filmstrip, 3), "收起后只保留当前需要的那几张");
 
         BufferedImage rendered = render(filmstrip);
         Rectangle first = filmstrip.groupBoundsForTest().get(0);

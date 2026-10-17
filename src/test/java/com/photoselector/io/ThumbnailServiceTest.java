@@ -2,6 +2,7 @@ package com.photoselector.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -105,6 +106,29 @@ class ThumbnailServiceTest {
 
         assertEquals(1, service.cachedCount(), "预算只够一张，多余的应当被淘汰");
         assertTrue(service.cachedBytes() <= 300_000, "占用的字节数不该超出预算");
+    }
+
+    @Test
+    void 多个租约共享同一个像素对象_被租用的图不会被淘汰() throws Exception {
+        Path cacheDir = tempDir.resolve("cache");
+        Path first = TestImages.writeJpeg(tempDir.resolve("first.jpg"), 900, 600);
+        Path second = TestImages.writeJpeg(tempDir.resolve("second.jpg"), 900, 600);
+        // 预算只够一张 200px 缩略图
+        ThumbnailService service = new ThumbnailService(cacheDir, 300_000, 64L * 1024 * 1024, 200);
+
+        ThumbnailService.Lease held = service.acquire(first, 200);
+        ThumbnailService.Lease same = service.acquire(first, 200);
+        assertSame(held.image(), same.image(), "同一张图只能有一份共享像素数据");
+
+        service.thumbnail(second, 200); // 新图超预算，但第一张被租用，不能淘汰
+        ThumbnailService.Lease again = service.acquire(first, 200);
+        assertSame(held.image(), again.image(), "面板还需要的图不能被 LRU 淘汰");
+
+        again.close();
+        same.close();
+        held.close();
+        service.thumbnail(second, 200);
+        assertTrue(service.cachedBytes() <= 300_000, "租约全部关闭后才能重新按预算淘汰");
     }
 
     @Test

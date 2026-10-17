@@ -74,8 +74,24 @@ final class ThumbnailLoader {
         }
     }
 
+    private static final class LeasePending {
+        final long session;
+        final Consumer<ThumbnailService.Lease> callback;
+
+        LeasePending(long session, Consumer<ThumbnailService.Lease> callback) {
+            this.session = session;
+            this.callback = callback;
+        }
+    }
+
+    private static final class LeaseInFlight {
+        final List<LeasePending> listeners = new CopyOnWriteArrayList<>();
+        volatile boolean completed;
+    }
+
     /** 正在排队或正在解的图（键是路径 + 目标高度）。 */
     private final Map<String, InFlight> inFlight = new ConcurrentHashMap<>();
+    private final Map<String, LeaseInFlight> leaseInFlight = new ConcurrentHashMap<>();
 
     /**
      * 缩略图与大图各有一条轮次线。
@@ -104,6 +120,7 @@ final class ThumbnailLoader {
     void restart() {
         thumbnailSession.incrementAndGet();
         inFlight.entrySet().removeIf(entry -> !entry.getValue().full);
+        leaseInFlight.clear();
     }
 
     /**
@@ -136,6 +153,38 @@ final class ThumbnailLoader {
                 // 单张出意外不该影响别的图，丢掉即可
             } finally {
                 complete(key, task);
+            }
+        });
+    }
+
+    /**
+     * 请求一张带租约的缩略图。面板拿到后负责关闭租约。
+     *
+     * <p>同一张图的多个等待者会共享一次解码，但各自收到一个租约引用；
+     * 任何一个面板关闭自己的租约，都不会让另一个仍在显示的面板失去图。
+     */
+    void loadLease(Path photo, int maxHeight, Consumer<ThumbnailService.Lease> onReady) {
+        if (shutdown.get()) {
+            return;
+        }
+        long mySession = thumbnailSession.get();
+        String key = photo.toAbsolutePath() + "|lease|" + maxHeight;
+        LeaseInFlight task = joinLease(key, new LeasePending(mySession, onReady));
+        if (task == null) {
+            return;
+        }
+
+        submitLease(key, task, () -> {
+            try {
+                if (!hasCurrentLeaseWaiter(task)) {
+                    return;
+                }
+                ThumbnailService.Lease lease = service.acquire(photo, maxHeight);
+                deliverLeases(task, lease);
+            } catch (RuntimeException e) {
+                // 和普通缩略图一样：单张失败不拖垮整组
+            } finally {
+                completeLease(key, task);
             }
         });
     }
@@ -197,10 +246,30 @@ final class ThumbnailLoader {
         return owner.get() ? task : null;
     }
 
+    private LeaseInFlight joinLease(String key, LeasePending pending) {
+        java.util.concurrent.atomic.AtomicBoolean owner = new java.util.concurrent.atomic.AtomicBoolean();
+        LeaseInFlight task = leaseInFlight.compute(key, (ignored, existing) -> {
+            if (existing == null || existing.completed) {
+                LeaseInFlight fresh = new LeaseInFlight();
+                fresh.listeners.add(pending);
+                owner.set(true);
+                return fresh;
+            }
+            existing.listeners.add(pending);
+            return existing;
+        });
+        return owner.get() ? task : null;
+    }
+
     private void complete(String key, InFlight task) {
         task.completed = true;
         // 按值删除：restart 清空后可能有同键的新任务，别把新任务误删。
         inFlight.remove(key, task);
+    }
+
+    private void completeLease(String key, LeaseInFlight task) {
+        task.completed = true;
+        leaseInFlight.remove(key, task);
     }
 
     private void cancel(String key, Pending pending) {
@@ -222,6 +291,16 @@ final class ThumbnailLoader {
         return false;
     }
 
+    private boolean hasCurrentLeaseWaiter(LeaseInFlight task) {
+        long current = thumbnailSession.get();
+        for (LeasePending pending : task.listeners) {
+            if (pending.session == current) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 把任务交给线程池，并把"关闭恰好发生在检查之后"这一个极窄的竞态也收干净。
      *
@@ -234,6 +313,14 @@ final class ThumbnailLoader {
             pool.submit(task);
         } catch (RejectedExecutionException e) {
             complete(key, pending);
+        }
+    }
+
+    private void submitLease(String key, LeaseInFlight pending, Runnable task) {
+        try {
+            pool.submit(task);
+        } catch (RejectedExecutionException e) {
+            completeLease(key, pending);
         }
     }
 
@@ -254,9 +341,33 @@ final class ThumbnailLoader {
         });
     }
 
+    /**
+     * 把共享图交给每个等待者一份独立租约。
+     *
+     * <p>基础租约代表这次任务的临时占用；每投递一个面板就 retain 一次，
+     * 全部投递完再把基础租约关掉。面板何时关闭自己的租约由各自决定。
+     */
+    private void deliverLeases(LeaseInFlight task, ThumbnailService.Lease base) {
+        SwingUtilities.invokeLater(() -> {
+            long current = thumbnailSession.get();
+            for (LeasePending pending : task.listeners) {
+                if (pending.session != current) {
+                    continue;
+                }
+                ThumbnailService.Lease copy = base.retain();
+                try {
+                    pending.callback.accept(copy);
+                } catch (RuntimeException e) {
+                    copy.close();
+                }
+            }
+            base.close();
+        });
+    }
+
     /** 正在路上的图有多少张。排查卡顿时有用。 */
     int inFlightCount() {
-        return inFlight.size();
+        return inFlight.size() + leaseInFlight.size();
     }
 
     /**

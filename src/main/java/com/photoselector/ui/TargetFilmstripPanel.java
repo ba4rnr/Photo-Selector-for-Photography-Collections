@@ -31,9 +31,9 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Origin;
-import com.photoselector.core.PhotoTransforms;
 import com.photoselector.core.Session;
 import com.photoselector.core.TargetEntry;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
@@ -54,7 +54,8 @@ final class TargetFilmstripPanel extends JPanel {
     private static final int KEEP_SCREENS = 2;
 
     private final ThumbnailLoader loader;
-    private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
+    private final Map<Path, ThumbnailTile> thumbnails = new HashMap<>();
+    private long thumbnailGeneration;
 
     private Session session;
     private Path selectedPhoto;
@@ -71,6 +72,17 @@ final class TargetFilmstripPanel extends JPanel {
         setFocusable(true);
 
         addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                requestVisibleThumbnails();
+            }
+
+            @Override
+            public void componentHidden(ComponentEvent e) {
+                clearThumbnails();
+                repaint();
+            }
+
             @Override
             public void componentResized(ComponentEvent e) {
                 requestVisibleThumbnails();
@@ -101,7 +113,7 @@ final class TargetFilmstripPanel extends JPanel {
                 }
                 dropIndex = dropIndexAt(e.getX());
                 DragOut.showGhost(TargetFilmstripPanel.this, e.getPoint(),
-                        thumbnails.get(draggingPhoto));
+                        thumbnailImage(draggingPhoto));
                 repaint();
             }
 
@@ -148,7 +160,7 @@ final class TargetFilmstripPanel extends JPanel {
     void setSession(Session newSession) {
         this.session = newSession;
         selectedPhoto = null;
-        thumbnails.clear();
+        clearThumbnails();
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
@@ -171,12 +183,12 @@ final class TargetFilmstripPanel extends JPanel {
 
     /** 外部文件内容变了：先丢掉旧缩略图再取。 */
     void reloadThumbnails() {
-        thumbnails.clear();
+        clearThumbnails();
         refresh();
     }
 
     void reloadThumbnail(Path photo) {
-        if (photo != null && thumbnails.remove(photo) != null) {
+        if (photo != null && removeThumbnail(photo)) {
             repaint();
         }
         if (photo != null) {
@@ -367,21 +379,38 @@ final class TargetFilmstripPanel extends JPanel {
                 (visible.x + visible.width + margin - PAD) / cellWidth());
 
         Set<Path> keep = new HashSet<>();
+        long generation = ++thumbnailGeneration;
         for (int i = first; i <= last; i++) {
             Path photo = session.entryAt(i).source();
             keep.add(photo);
             if (!thumbnails.containsKey(photo)) {
-                loader.load(photo, THUMBNAIL_HEIGHT, image -> {
-                    BufferedImage display = session == null ? image
-                            : PhotoTransforms.apply(image, session.editsOf(photo));
-                    thumbnails.put(photo, display);
-                    repaint();
-                });
+                loader.loadLease(photo, THUMBNAIL_HEIGHT,
+                        lease -> onThumbnail(photo, lease, generation));
             }
         }
-        if (thumbnails.keySet().removeIf(photo -> !keep.contains(photo))) {
+        boolean removed = false;
+        for (Path photo : Set.copyOf(thumbnails.keySet())) {
+            if (!keep.contains(photo)) {
+                removed |= removeThumbnail(photo);
+            }
+        }
+        if (removed) {
             repaint();
         }
+    }
+
+    private void onThumbnail(Path photo, ThumbnailService.Lease lease,
+                             long generation) {
+        if (generation != thumbnailGeneration || session == null) {
+            lease.close();
+            return;
+        }
+        ThumbnailTile tile = ThumbnailTile.of(lease, session.editsOf(photo));
+        ThumbnailTile previous = thumbnails.put(photo, tile);
+        if (previous != null) {
+            previous.close();
+        }
+        repaint();
     }
 
     @Override
@@ -404,7 +433,7 @@ final class TargetFilmstripPanel extends JPanel {
             TargetEntry entry = session.entryAt(i);
             Rectangle cell = cellRect(i);
             boolean chosen = entry.source().equals(selectedPhoto);
-            Painters.thumbnailCell(g2, cell, thumbnails.get(entry.source()),
+            Painters.thumbnailCell(g2, cell, thumbnailImage(entry.source()),
                     chosen, null, false);
 
             g2.setFont(Theme.FONT_SMALL);
@@ -459,7 +488,29 @@ final class TargetFilmstripPanel extends JPanel {
     }
 
     BufferedImage thumbnailOf(Path photo) {
-        return thumbnails.get(photo);
+        return thumbnailImage(photo);
+    }
+
+    private BufferedImage thumbnailImage(Path photo) {
+        ThumbnailTile tile = thumbnails.get(photo);
+        return tile == null ? null : tile.image();
+    }
+
+    private void clearThumbnails() {
+        thumbnailGeneration++;
+        for (ThumbnailTile tile : thumbnails.values()) {
+            tile.close();
+        }
+        thumbnails.clear();
+    }
+
+    private boolean removeThumbnail(Path photo) {
+        ThumbnailTile removed = thumbnails.remove(photo);
+        if (removed != null) {
+            removed.close();
+            return true;
+        }
+        return false;
     }
 
     int viewPositionXForTest() {

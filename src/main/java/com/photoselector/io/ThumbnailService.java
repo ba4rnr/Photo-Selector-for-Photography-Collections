@@ -13,7 +13,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,8 @@ import javax.imageio.ImageIO;
  * <p>两层缓存各管一段：
  * <ul>
  *   <li><b>内存</b>：最近用过的若干张，按<b>字节数</b>限量。
- *       滚动看片时来回翻的都是附近那几张，命中率最高。</li>
+ *       滚动看片时来回翻的都是附近那几张，命中率最高。界面正在使用的图通过
+ *       {@link #acquire} 加租约，租约未关闭时不会被 LRU 淘汰。</li>
  *   <li><b>磁盘</b>：程序关掉也还在，总量有上限、超了就删最旧的。</li>
  * </ul>
  *
@@ -42,6 +42,10 @@ import javax.imageio.ImageIO;
  * <p><b>返回值是共享对象</b>：{@link #thumbnail} 交出去的图像就是缓存里那一份，
  * 请不要就地修改它（比如在上面画角标），否则会把缓存污染给后面的调用者。
  * 需要加工时先自己拷一份。
+ *
+ * <p>界面面板不应长期保存自己的 {@code Map<Path, BufferedImage>} 副本。使用
+ * {@link #acquire} 拿租约，滚出视野或隐藏面板时关闭租约；同一张图被多个面板使用，
+ * 也始终指向同一个 {@link BufferedImage}，只有最后一个租约释放后才允许淘汰。
  */
 public final class ThumbnailService {
 
@@ -64,10 +68,60 @@ public final class ThumbnailService {
      * 再配合 {@code removeEldestEntry}，就是最简的 LRU：
      * 超出预算时，最久没被用到的那个先被丢掉。
      */
-    private final Map<String, BufferedImage> memory = new LinkedHashMap<>(64, 0.75f, true);
+    private final Map<String, Entry> memory = new LinkedHashMap<>(64, 0.75f, true);
 
     private long memoryBytes;
     private int writesSincePrune;
+
+    /** 一份共享像素数据，以及当前有多少个面板租约正在使用它。 */
+    private static final class Entry {
+        final BufferedImage image;
+        final long bytes;
+        int pins;
+
+        Entry(BufferedImage image) {
+            this.image = image;
+            this.bytes = bytesOf(image);
+        }
+    }
+
+    /**
+     * 一张缩略图的租约。
+     *
+     * <p>各面板不再自己长期保存一份图，而是拿着租约。只要租约还在，
+     * 服务就不能把这张图从内存里淘汰；面板滚出视野或换会话时关闭租约，
+     * 最后一个租约关闭后它才重新变成可淘汰的普通缓存项。
+     */
+    public final class Lease implements AutoCloseable {
+        private final Entry entry;
+        private boolean closed;
+
+        private Lease(Entry entry) {
+            this.entry = entry;
+        }
+
+        public BufferedImage image() {
+            return entry.image;
+        }
+
+        /** 复制一个租约引用，给同一张图的另一个面板使用。 */
+        public synchronized Lease retain() {
+            if (closed) {
+                throw new IllegalStateException("租约已经关闭，不能继续 retain");
+            }
+            pin(entry);
+            return new Lease(entry);
+        }
+
+        @Override
+        public synchronized void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            release(entry);
+        }
+    }
 
     public ThumbnailService(Path cacheDir) {
         this(cacheDir, DEFAULT_MEMORY_BYTES, DEFAULT_DISK_BYTES, DEFAULT_PRUNE_INTERVAL);
@@ -91,18 +145,31 @@ public final class ThumbnailService {
      * 只有参数用错（比如高度为负）才会抛。
      */
     public BufferedImage thumbnail(Path photo, int maxHeight) {
+        try (Lease lease = acquire(photo, maxHeight)) {
+            return lease.image();
+        }
+    }
+
+    /**
+     * 获取一张带租约的缩略图。界面面板应当用这个方法，而不是 {@link #thumbnail}。
+     *
+     * <p>租约把这张图暂时钉在内存缓存里；关闭租约后才允许 LRU 淘汰。
+     * 同一张图发给多个面板时，它们拿到的是同一个 {@link BufferedImage} 对象。
+     */
+    public Lease acquire(Path photo, int maxHeight) {
         if (maxHeight < 1) {
             throw new IllegalArgumentException("目标高度必须为正：" + maxHeight);
         }
         if (!Files.isRegularFile(photo)) {
-            return placeholder(maxHeight); // 文件不在了，连缓存键都算不出来
+            // 文件不在了，连缓存键都算不出来；占位图独立交给调用者，不进入共享缓存。
+            return new Lease(new Entry(placeholder(maxHeight)));
         }
 
         String key = cacheKey(photo, maxHeight);
 
-        BufferedImage cached = lookupMemory(key);
+        Entry cached = pinIfCached(key);
         if (cached != null) {
-            return cached;
+            return new Lease(cached);
         }
 
         Path cacheFile = cacheDir.resolve(key + ".png");
@@ -113,8 +180,7 @@ public final class ThumbnailService {
             writeToDisk(cacheFile, image);
         }
 
-        putMemory(key, image);
-        return image;
+        return new Lease(storeAndPin(key, image));
     }
 
     /** 内存缓存里现在有多少张。 */
@@ -203,20 +269,36 @@ public final class ThumbnailService {
         return image;
     }
 
-    private synchronized BufferedImage lookupMemory(String key) {
-        return memory.get(key);
+    private synchronized Entry pinIfCached(String key) {
+        Entry entry = memory.get(key);
+        if (entry != null) {
+            entry.pins++;
+        }
+        return entry;
     }
 
-    private synchronized void putMemory(String key, BufferedImage image) {
-        long bytes = bytesOf(image);
-        if (bytes > memoryLimitBytes) {
-            return; // 单张就超过整个预算，缓存它没有意义
+    private synchronized Entry storeAndPin(String key, BufferedImage image) {
+        Entry existing = memory.get(key);
+        if (existing != null) {
+            existing.pins++;
+            return existing; // 另一只线程刚好先解完；共享那一份，丢掉这次重复的结果
         }
-        BufferedImage previous = memory.put(key, image);
-        if (previous != null) {
-            memoryBytes -= bytesOf(previous); // 同一个键换了内容，先把旧账销掉
+        Entry entry = new Entry(image);
+        memory.put(key, entry);
+        memoryBytes += entry.bytes;
+        entry.pins = 1;
+        evictOldestUntilWithinBudget();
+        return entry;
+    }
+
+    private synchronized void pin(Entry entry) {
+        entry.pins++;
+    }
+
+    private synchronized void release(Entry entry) {
+        if (entry.pins > 0) {
+            entry.pins--;
         }
-        memoryBytes += bytes;
         evictOldestUntilWithinBudget();
     }
 
@@ -227,11 +309,21 @@ public final class ThumbnailService {
      * 判定时还没把新图算进去，结果会常年超预算一张。
      */
     private void evictOldestUntilWithinBudget() {
-        Iterator<Map.Entry<String, BufferedImage>> oldestFirst = memory.entrySet().iterator();
-        while (memoryBytes > memoryLimitBytes && oldestFirst.hasNext()) {
-            Map.Entry<String, BufferedImage> eldest = oldestFirst.next();
-            memoryBytes -= bytesOf(eldest.getValue());
-            oldestFirst.remove();
+        while (memoryBytes > memoryLimitBytes) {
+            String victim = null;
+            for (Map.Entry<String, Entry> candidate : memory.entrySet()) {
+                if (candidate.getValue().pins == 0) {
+                    victim = candidate.getKey();
+                    break;
+                }
+            }
+            if (victim == null) {
+                break; // 剩下的全被面板租用；关掉租约后会再次尝试淘汰
+            }
+            Entry removed = memory.remove(victim);
+            if (removed != null) {
+                memoryBytes -= removed.bytes;
+            }
         }
     }
 

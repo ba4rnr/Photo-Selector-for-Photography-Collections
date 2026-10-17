@@ -36,7 +36,9 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.JViewport;
 
+import com.photoselector.core.EditState;
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
@@ -99,7 +101,8 @@ final class FilmstripPanel extends JPanel {
         static final Neighbors NONE = new Neighbors(null, null);
     }
 
-    private final Map<Path, BufferedImage> thumbnails = new HashMap<>();
+    private final Map<Path, ThumbnailTile> thumbnails = new HashMap<>();
+    private long thumbnailGeneration;
     private final Set<Path> collapsed = new HashSet<>();
 
     /**
@@ -127,6 +130,17 @@ final class FilmstripPanel extends JPanel {
         setFocusable(true); // 点照片时要把键盘焦点接过来，方向键过片才不会被目录树截走
 
         addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                requestVisibleThumbnails();
+            }
+
+            @Override
+            public void componentHidden(ComponentEvent e) {
+                clearThumbnails();
+                repaint();
+            }
+
             @Override
             public void componentResized(ComponentEvent e) {
                 requestVisibleThumbnails();
@@ -172,7 +186,7 @@ final class FilmstripPanel extends JPanel {
         this.thumbnailHeight = height;
         // 宽度由高度和格子比例算出来：格子是方框，所以宽 = 高
         this.cellWidth = Math.round(height / BOX_ASPECT) + GAP;
-        thumbnails.clear();
+        clearThumbnails();
         collapsed.clear();
         currentPhoto = null; // 换了一批照片，之前点中的那张就不算数了
         loader.restart();
@@ -198,7 +212,7 @@ final class FilmstripPanel extends JPanel {
             folders.add(group.folder());
         }
         collapsed.retainAll(folders);
-        thumbnails.clear();
+        clearThumbnails();
         loader.restart();
         if (keep != null && !containsPhoto(keep)) {
             currentPhoto = null;
@@ -304,12 +318,12 @@ final class FilmstripPanel extends JPanel {
 
     /** 当前照片的缩略图，给"跟着鼠标走的那张图"用；还没解好就是 null。 */
     BufferedImage currentThumbnail() {
-        return currentPhoto == null ? null : thumbnails.get(currentPhoto);
+        return currentPhoto == null ? null : thumbnailImage(currentPhoto);
     }
 
     /** 某张照片手里的缩略图；没解好就是 null。拖出提示图按"正在拖的那张"取。 */
     BufferedImage thumbnailOf(Path photo) {
-        return thumbnails.get(photo);
+        return thumbnailImage(photo);
     }
 
     /** 直接指定当前照片（测试用，等价于在那张照片上点一下）。 */
@@ -551,6 +565,7 @@ final class FilmstripPanel extends JPanel {
         int windowEnd = visible.x + visible.width + margin;
 
         Set<Path> keep = new HashSet<>();
+        long generation = ++thumbnailGeneration;
         for (GroupBox box : computeLayout()) {
             if (box.right() < windowStart || box.x() > windowEnd) {
                 continue;
@@ -562,7 +577,8 @@ final class FilmstripPanel extends JPanel {
                     Path first = photos.get(0);
                     keep.add(first);
                     if (!thumbnails.containsKey(first)) {
-                        loader.load(first, thumbnailHeight, image -> onThumbnail(first, image));
+                        loader.loadLease(first, thumbnailHeight,
+                                lease -> onThumbnail(first, lease, generation));
                     }
                 }
                 continue;
@@ -573,23 +589,61 @@ final class FilmstripPanel extends JPanel {
                 Path photo = photos.get(i);
                 keep.add(photo);
                 if (!thumbnails.containsKey(photo)) {
-                    loader.load(photo, thumbnailHeight, image -> onThumbnail(photo, image));
+                    loader.loadLease(photo, thumbnailHeight,
+                            lease -> onThumbnail(photo, lease, generation));
                 }
             }
         }
         forgetExcept(keep);
     }
 
-    private void onThumbnail(Path photo, BufferedImage image) {
-        thumbnails.put(photo, image);
+    private void onThumbnail(Path photo, ThumbnailService.Lease lease,
+                             long generation) {
+        if (generation != thumbnailGeneration) {
+            lease.close();
+            return;
+        }
+        ThumbnailTile tile = ThumbnailTile.of(lease, EditState.NONE);
+        ThumbnailTile previous = thumbnails.put(photo, tile);
+        if (previous != null) {
+            previous.close();
+        }
         repaint();
     }
 
     /** 离可见范围太远的图从手里丢掉；缩略图服务那边还有缓存，再要很快。 */
     private void forgetExcept(Set<Path> keep) {
-        if (!thumbnails.isEmpty() && thumbnails.keySet().removeIf(photo -> !keep.contains(photo))) {
+        boolean removed = false;
+        for (Path photo : Set.copyOf(thumbnails.keySet())) {
+            if (!keep.contains(photo)) {
+                removed |= removeThumbnail(photo);
+            }
+        }
+        if (removed) {
             repaint();
         }
+    }
+
+    private BufferedImage thumbnailImage(Path photo) {
+        ThumbnailTile tile = thumbnails.get(photo);
+        return tile == null ? null : tile.image();
+    }
+
+    private void clearThumbnails() {
+        thumbnailGeneration++;
+        for (ThumbnailTile tile : thumbnails.values()) {
+            tile.close();
+        }
+        thumbnails.clear();
+    }
+
+    private boolean removeThumbnail(Path photo) {
+        ThumbnailTile removed = thumbnails.remove(photo);
+        if (removed != null) {
+            removed.close();
+            return true;
+        }
+        return false;
     }
 
     private void handleClick(int x, int y) {
@@ -738,7 +792,7 @@ final class FilmstripPanel extends JPanel {
         if (group.photos().isEmpty()) {
             return;
         }
-        BufferedImage image = thumbnails.get(group.photos().get(0));
+        BufferedImage image = thumbnailImage(group.photos().get(0));
         if (image == null) {
             return; // 图还没解出来：先留一个空的文件夹轮廓
         }
@@ -764,7 +818,7 @@ final class FilmstripPanel extends JPanel {
     private void paintCell(Graphics2D g, PhotoGroup group, int index, int x, int y) {
         Path photo = group.photos().get(index);
         int boxWidth = cellWidth - GAP;
-        BufferedImage image = thumbnails.get(photo);
+        BufferedImage image = thumbnailImage(photo);
         boolean current = photo.equals(currentPhoto);
 
         // 高亮底、占位框、等比居中都走组件库：和目标栏、垃圾桶是同一个画法

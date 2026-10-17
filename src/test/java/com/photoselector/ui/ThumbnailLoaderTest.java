@@ -2,6 +2,7 @@ package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -157,6 +158,33 @@ class ThumbnailLoaderTest {
 
         assertTrue(fullDone.await(30, TimeUnit.SECONDS),
                 "缩略图换轮次不应取消当前大图或它的预读取");
+        loader.shutdown();
+    }
+
+    @Test
+    void 同一张图的多个租约共用像素_且各自可以独立关闭() throws Exception {
+        Path photo = TestImages.writeJpeg(tempDir.resolve("shared-lease.jpg"), 900, 600);
+        ThumbnailLoader loader = newLoader();
+
+        CountDownLatch delivered = new CountDownLatch(2);
+        AtomicReference<ThumbnailService.Lease> first = new AtomicReference<>();
+        AtomicReference<ThumbnailService.Lease> second = new AtomicReference<>();
+        loader.loadLease(photo, 100, lease -> {
+            first.set(lease);
+            delivered.countDown();
+        });
+        loader.loadLease(photo, 100, lease -> {
+            second.set(lease);
+            delivered.countDown();
+        });
+
+        assertTrue(delivered.await(30, TimeUnit.SECONDS));
+        assertSame(first.get().image(), second.get().image(),
+                "两个面板应当共享同一个 BufferedImage");
+        first.get().close();
+        assertTrue(second.get().image().getWidth() > 0,
+                "关闭一个租约不能影响另一个面板的图");
+        second.get().close();
         loader.shutdown();
     }
 }

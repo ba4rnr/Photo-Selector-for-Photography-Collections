@@ -1,6 +1,7 @@
 package com.photoselector.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,5 +35,17 @@ class PhotoFilesTest {
         assertEquals(child.getFileName().toString(), groups.get(1).name());
         assertEquals(List.of(childPhoto), groups.get(1).photos(),
                 "更深一层的子文件夹不会被递归塞进素材条");
+    }
+
+    @Test
+    void 当前版本不会把DNG当成可浏览照片() throws Exception {
+        Path folder = Files.createDirectories(tempDir.resolve("含DNG"));
+        Path jpg = TestImages.writeJpeg(folder.resolve("a.jpg"), 300, 200);
+        Path dng = folder.resolve("a.dng");
+        Files.write(dng, new byte[] {1, 2, 3, 4});
+
+        assertFalse(ImageSource.isSupported(dng), "DNG 还没有接入");
+        assertEquals(List.of(jpg), PhotoFiles.imagesIn(folder),
+                "含 DNG 的文件夹里，只应识别出 JPG");
     }
 }

@@ -22,7 +22,7 @@ import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.core.Session;
-import com.photoselector.core.PhotoTransforms;
+import com.photoselector.io.ThumbnailService;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.Theme;
 
@@ -61,7 +61,8 @@ abstract class ThumbnailGridPanel extends JPanel {
     protected static final float BOX_ASPECT = 1.0f;
 
     protected final ThumbnailLoader loader;
-    protected final Map<Path, BufferedImage> thumbnails = new HashMap<>();
+    protected final Map<Path, ThumbnailTile> thumbnails = new HashMap<>();
+    private long thumbnailGeneration;
 
     protected Session session;
 
@@ -88,6 +89,17 @@ abstract class ThumbnailGridPanel extends JPanel {
         setOpaque(true);
 
         addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentShown(ComponentEvent e) {
+                requestVisibleThumbnails();
+            }
+
+            @Override
+            public void componentHidden(ComponentEvent e) {
+                clearThumbnails();
+                repaint();
+            }
+
             @Override
             public void componentResized(ComponentEvent e) {
                 updateMetrics();
@@ -152,7 +164,7 @@ abstract class ThumbnailGridPanel extends JPanel {
     void setSession(Session newSession) {
         this.session = newSession;
         chosenIndex = -1;
-        thumbnails.clear();
+        clearThumbnails();
         updateMetrics();
         updatePreferredSize();
         repaint();
@@ -167,7 +179,8 @@ abstract class ThumbnailGridPanel extends JPanel {
 
     /** 某张照片手里有没有缩略图；拖动时拿它当"跟着鼠标的那张图"。 */
     BufferedImage thumbnailOf(Path photo) {
-        return thumbnails.get(photo);
+        ThumbnailTile tile = thumbnails.get(photo);
+        return tile == null ? null : tile.image();
     }
 
     /** 点中的那张照片；还没点过、或者换了中间商就是 null。 */
@@ -239,7 +252,7 @@ abstract class ThumbnailGridPanel extends JPanel {
      * 但外部替换了同名文件时，保留旧图就会一直显示旧内容。
      */
     void reloadThumbnails() {
-        thumbnails.clear();
+        clearThumbnails();
         updatePreferredSize();
         repaint();
         SwingUtilities.invokeLater(this::requestVisibleThumbnails);
@@ -247,7 +260,7 @@ abstract class ThumbnailGridPanel extends JPanel {
 
     /** 只让某一张的缩略图失效，例如它刚被旋转、裁切或重置。 */
     void reloadThumbnail(Path photo) {
-        if (photo != null && thumbnails.remove(photo) != null) {
+        if (photo != null && removeThumbnail(photo)) {
             repaint();
         }
         if (photo != null) {
@@ -286,7 +299,7 @@ abstract class ThumbnailGridPanel extends JPanel {
      */
     void setThumbnailWidth(int width) {
         this.boxWidth = Math.max(60, width);
-        thumbnails.clear();
+        clearThumbnails();
         updateMetrics();
         updatePreferredSize();
         repaint();
@@ -466,7 +479,8 @@ abstract class ThumbnailGridPanel extends JPanel {
                 }
                 Rectangle cell = new Rectangle(cellX(column), HEADER_HEIGHT + row * rowHeight(),
                         boxWidth, thumbnailHeight);
-                paintCellContent(g, index, cell, thumbnails.get(sourceAt(index)), isChosen(index));
+                ThumbnailTile tile = thumbnails.get(sourceAt(index));
+                paintCellContent(g, index, cell, tile == null ? null : tile.image(), isChosen(index));
             }
         }
     }
@@ -522,23 +536,55 @@ abstract class ThumbnailGridPanel extends JPanel {
         int last = Math.min(itemCount() - 1, (lastRow + 1) * columns - 1);
 
         Set<Path> keep = new HashSet<>();
+        long generation = ++thumbnailGeneration;
         for (int index = first; index <= last; index++) {
             Path source = sourceAt(index);
             keep.add(source);
             if (!thumbnails.containsKey(source)) {
-                loader.load(source, thumbnailHeight, image -> onThumbnail(source, image));
+                loader.loadLease(source, thumbnailHeight,
+                        lease -> onThumbnail(source, lease, generation));
             }
         }
-        if (!thumbnails.isEmpty() && thumbnails.keySet().removeIf(path -> !keep.contains(path))) {
+        boolean removed = false;
+        for (Path path : Set.copyOf(thumbnails.keySet())) {
+            if (!keep.contains(path)) {
+                removed |= removeThumbnail(path);
+            }
+        }
+        if (removed) {
             repaint();
         }
     }
 
-    private void onThumbnail(Path source, BufferedImage image) {
-        BufferedImage display = session == null ? image
-                : PhotoTransforms.apply(image, session.editsOf(source));
-        thumbnails.put(source, display);
+    private void onThumbnail(Path source, ThumbnailService.Lease lease,
+                             long generation) {
+        if (generation != thumbnailGeneration || session == null) {
+            lease.close();
+            return;
+        }
+        ThumbnailTile tile = ThumbnailTile.of(lease, session.editsOf(source));
+        ThumbnailTile previous = thumbnails.put(source, tile);
+        if (previous != null) {
+            previous.close();
+        }
         repaint();
+    }
+
+    private void clearThumbnails() {
+        thumbnailGeneration++;
+        for (ThumbnailTile tile : thumbnails.values()) {
+            tile.close();
+        }
+        thumbnails.clear();
+    }
+
+    private boolean removeThumbnail(Path photo) {
+        ThumbnailTile removed = thumbnails.remove(photo);
+        if (removed != null) {
+            removed.close();
+            return true;
+        }
+        return false;
     }
 
     // ─────────────────────────── 给测试的量尺 ───────────────────────────
