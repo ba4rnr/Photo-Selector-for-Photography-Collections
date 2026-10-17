@@ -4,6 +4,8 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Dimension;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
@@ -203,7 +205,17 @@ public final class MainPanel extends JPanel {
     private final JSplitPane outerSplit;
 
     private ViewMode mode = ViewMode.BROWSE;
-    private boolean bottomPlaced;
+
+    /**
+     * 底栏自身希望保持的高度（不含上方 4 像素分隔条）。
+     *
+     * <p>窗口尺寸变化时不能只把分隔条停在旧绝对坐标，否则放大窗口 / 最大化后，
+     * 多出来的高度会整块落进底栏。用户拖过底栏分隔条后，这个值会跟着更新，
+     * 后续再改窗口大小仍保留用户选的高度。
+     */
+    private int desiredBottomHeight = BOTTOM_HEIGHT;
+    private int lastOuterSplitHeight;
+    private boolean placingBottomDivider;
 
     /** 启动 / 切工作区时要恢复的照片，以及两条异步加载链是否已经完成。 */
     private Path pendingRestorePhoto;
@@ -309,6 +321,22 @@ public final class MainPanel extends JPanel {
         centerRight = Splitters.horizontal(centerArea, rightArea, 1.0);
         mainSplit = Splitters.horizontal(leftColumn(), centerRight, 0.0);
         outerSplit = Splitters.vertical(mainSplit, bottomArea, 1.0);
+        outerSplit.addPropertyChangeListener("dividerLocation", event -> {
+            // 只有分隔条在"同一窗口高度下"移动，才是用户自己拖的。
+            // 窗口 resize 引起的自动移动会在随后 placeBottomDivider() 里被纠正。
+            if (!placingBottomDivider && outerSplit.getHeight() == lastOuterSplitHeight
+                    && outerSplit.getHeight() > 0) {
+                desiredBottomHeight = clampBottomHeight(
+                        outerSplit.getHeight() - ((Integer) event.getNewValue()
+                                + outerSplit.getDividerSize()));
+            }
+        });
+        outerSplit.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                placeBottomDivider();
+            }
+        });
         // 分隔条默认把 ← / → 绑在"焦点组件之祖先"这一层（作用是挪分隔条），
         // 而这一层先于窗口级快捷键被检查——素材条长在里面，方向键会被它截走。
         // 这个程序里 ← / → 是"换照片"，所以把这几个绑定摘掉。
@@ -332,20 +360,34 @@ public final class MainPanel extends JPanel {
         setMode(ViewMode.BROWSE);
     }
 
-    /**
-     * 第一次布局时把底栏上方那条分隔条摆到位。
-     *
-     * <p>JSplitPane 的默认规则是"按上半部分的首选高度"决定横分隔条的位置，
-     * 照那样底栏会抢走大半高度。我们要的是"底栏固定高度、其余留给上方"，
-     * 所以显式摆一次；摆完就交给用户拖，不再干预。
-     */
+    /** 布局后重新把底栏高度对到用户上次选的值，窗口变高时不会让底栏跟着长胖。 */
     @Override
     public void doLayout() {
         super.doLayout();
-        if (!bottomPlaced && outerSplit.getHeight() > 0) {
-            bottomPlaced = true;
-            outerSplit.setDividerLocation(Math.max(0, outerSplit.getHeight() - BOTTOM_HEIGHT));
+        placeBottomDivider();
+    }
+
+    private void placeBottomDivider() {
+        int height = outerSplit.getHeight();
+        if (height <= 0) {
+            return;
         }
+        int shownHeight = clampBottomHeight(desiredBottomHeight);
+        int location = Math.max(0, height - shownHeight - outerSplit.getDividerSize());
+        if (outerSplit.getDividerLocation() != location) {
+            placingBottomDivider = true;
+            try {
+                outerSplit.setDividerLocation(location);
+            } finally {
+                placingBottomDivider = false;
+            }
+        }
+        lastOuterSplitHeight = outerSplit.getHeight();
+    }
+
+    private int clampBottomHeight(int height) {
+        int maximum = Math.max(0, outerSplit.getHeight() - outerSplit.getDividerSize());
+        return Math.max(0, Math.min(height, maximum));
     }
 
     /** 切换视图模式：三块区域同时换卡片，工具栏按钮文字同步。 */
@@ -668,8 +710,10 @@ public final class MainPanel extends JPanel {
      * 所以必须先换根、再把剔除项设回去。
      */
     public void applyWorkspace(Workspace newWorkspace) {
+        // 旧工作区的照片不能继续留在中央、也不能让它的预读取读跑完再盖回来。
+        // 新工作区的 lastViewedPhoto 会在两条异步扫描完成后重新显示。
+        viewer.showPhoto(null);
         this.workspace = newWorkspace;
-        viewer.clearFullImageCache(); // 新工作区的路径与邻居顺序都换了，旧原图不能再复用
         pendingRestorePhoto = newWorkspace.lastViewedPhoto();
         sourceLoadFinished = false;
         targetLoadFinished = false;
@@ -1411,6 +1455,17 @@ public final class MainPanel extends JPanel {
     /** 素材条上已经拿到缩略图的张数。给测试和排查用。 */
     int loadedThumbnails() {
         return filmstrip.loadedCount();
+    }
+
+    /** 底栏当前实际高度；验证窗口缩放不会把它拉高。 */
+    int bottomAreaHeightForTest() {
+        return bottomArea.getHeight();
+    }
+
+    /** 模拟用户把底栏拖到指定高度。 */
+    void setBottomAreaHeightForTest(int height) {
+        int location = outerSplit.getHeight() - height - outerSplit.getDividerSize();
+        outerSplit.setDividerLocation(Math.max(0, location));
     }
 
     /** 素材条上现在有几组。给测试和排查用。 */

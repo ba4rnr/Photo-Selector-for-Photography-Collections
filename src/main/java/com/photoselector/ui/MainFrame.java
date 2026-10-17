@@ -5,6 +5,8 @@ import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Insets;
 import java.awt.Rectangle;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
@@ -23,6 +25,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
 import com.photoselector.core.Workspace;
@@ -46,6 +49,8 @@ public final class MainFrame extends JFrame {
     private final WorkspaceStore workspaceStore;
     private final AppSettings settings;
     private boolean restoreMaximizedOnOpen;
+    private Rectangle normalWindowBounds;
+    private boolean normalBoundsCapturePending;
 
     /** 菜单里那两项：灰亮状态跟着撤销 / 重做的历史走。 */
     public MainFrame(WorkspaceStore workspaceStore, AppSettings settings) {
@@ -99,6 +104,18 @@ public final class MainFrame extends JFrame {
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
+        normalWindowBounds = getBounds();
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentMoved(ComponentEvent e) {
+                scheduleNormalBoundsCapture();
+            }
+
+            @Override
+            public void componentResized(ComponentEvent e) {
+                scheduleNormalBoundsCapture();
+            }
+        });
         restoreWindowState();
     }
 
@@ -126,6 +143,7 @@ public final class MainFrame extends JFrame {
             target.y = usable.y + (usable.height - target.height) / 2;
         }
         setBounds(target);
+        normalWindowBounds = target;
         restoreMaximizedOnOpen = state.maximized();
     }
 
@@ -331,13 +349,39 @@ public final class MainFrame extends JFrame {
 
     /** 记下当前窗口边界；最大化状态单独存，打开时先落位再重新最大化。 */
     private void rememberWindowState() {
-        Rectangle bounds = getBounds();
+        int state = getExtendedState();
+        boolean maximized = (state & MAXIMIZED_BOTH) != 0;
+        Rectangle bounds = state == NORMAL || normalWindowBounds == null
+                ? getBounds()
+                : normalWindowBounds;
         if (bounds.width <= 0 || bounds.height <= 0) {
             return;
         }
-        boolean maximized = (getExtendedState() & MAXIMIZED_BOTH) != 0;
         settings.setWindowState(new AppSettings.WindowState(
                 bounds.x, bounds.y, bounds.width, bounds.height, maximized));
+    }
+
+    /**
+     * 延迟一拍再记普通窗口边界。
+     *
+     * <p>最大化时组件尺寸也会变化；如果当场记，会把整块屏幕误当成“还原后的尺寸”。
+     * 等本轮事件走完再看扩展状态，就能把最大化 / 最小化的中间态排除掉。
+     */
+    private void scheduleNormalBoundsCapture() {
+        if (normalBoundsCapturePending) {
+            return;
+        }
+        normalBoundsCapturePending = true;
+        SwingUtilities.invokeLater(() -> {
+            normalBoundsCapturePending = false;
+            if (getExtendedState() != NORMAL) {
+                return;
+            }
+            Rectangle bounds = getBounds();
+            if (bounds.width > 0 && bounds.height > 0) {
+                normalWindowBounds = bounds;
+            }
+        });
     }
 
     /**
