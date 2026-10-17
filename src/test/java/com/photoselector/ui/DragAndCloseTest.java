@@ -494,6 +494,45 @@ class DragAndCloseTest {
     }
 
     @Test
+    void 整理模式拖动时_提示图来自正在拖的那块网格() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
+        TestWindow window = new TestWindow();
+        try {
+            window.show();
+            SwingUtilities.invokeAndWait(() -> {
+                window.panel.setMode(ViewMode.ARRANGE);
+                window.frame.validate();
+            });
+            TargetPanel arrange = window.panel.arrangePanelForTest();
+            TargetPanel target = window.panel.targetPanelForTest();
+            Path dragged = arrange.session().entryAt(0).source();
+            waitUntil(() -> arrange.isLoaded(dragged), "整理模式的缩略图");
+
+            // 右侧目标栏在整理模式里是隐藏的。主动清掉它的缩略图后它不会再取，
+            // 这样就能确定地复现旧问题：提示图不该再从这块看不见的面板里拿。
+            SwingUtilities.invokeAndWait(() -> target.setThumbnailWidth(150));
+            assertFalse(target.isLoaded(dragged), "隐藏的右栏手里没有这张缩略图");
+
+            Point onFirstCell = new Point(arrange.cellXForTest(0) + 20, 54);
+            SwingUtilities.invokeAndWait(() -> {
+                press(arrange, onFirstCell);
+                drag(arrange, new Point(onFirstCell.x + 12, onFirstCell.y));
+            });
+
+            Rectangle ghost = DragOut.ghostBoundsForTest(arrange);
+            assertNotNull(ghost, "拖动时应当有缩略图跟着鼠标走");
+            assertTrue(ghost.width > 100,
+                    "提示图应当用整理模式已解出的照片，而不是退化成 60 像素宽的灰块：" + ghost);
+
+            SwingUtilities.invokeAndWait(() ->
+                    release(arrange, new Point(onFirstCell.x + 12, onFirstCell.y)));
+            assertNull(DragOut.ghostBoundsForTest(arrange), "松手之后提示图要收起来");
+        } finally {
+            window.dispose();
+        }
+    }
+
+    @Test
     void 从目标栏拖到主大图区_照片进垃圾桶() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "没有显示器就测不了真窗口");
         TestWindow window = new TestWindow();

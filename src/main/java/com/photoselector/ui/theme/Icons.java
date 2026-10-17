@@ -344,21 +344,6 @@ public final class Icons {
         };
     }
 
-    /**
-     * 把某个工具的图标形状画在一张更大的画布上（坐标仍按 18×18 设计稿）。
-     *
-     * <p>给"鼠标光标"用：光标就是同一枚图标放大画出来的，按钮和光标永远一致。
-     */
-    public static void paintShape(com.photoselector.ui.CursorTool tool, Graphics2D g) {
-        switch (tool) {
-            case SELECT -> paintSelect(g);
-            case PAN -> paintPan(g);
-            case CROP -> paintCrop(g);
-            case ROTATE -> paintRotate(g);
-            case FLIP -> paintFlip(g);
-        }
-    }
-
     private static void paintSelect(Graphics2D g) {
         Path2D path = new Path2D.Double();
         path.moveTo(3.5, 2);

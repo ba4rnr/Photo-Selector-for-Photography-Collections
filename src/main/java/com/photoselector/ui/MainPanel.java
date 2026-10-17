@@ -224,9 +224,9 @@ public final class MainPanel extends JPanel {
         // 这两块是"同一个序列的两个视图"（选图模式的窄栏、展开排序模式的大网格），
         // 拖哪一块都是改同一个中间商的顺序。
         // 另外：选图模式下拖到中间的大图区 = 丢垃圾桶（只记指针，保存时才真删）。
-        DragOut.install(targetPanel, targetPanel::selectedPhoto, this::thumbnailOfTargetPhoto,
+        DragOut.install(targetPanel, targetPanel::selectedPhoto, targetPanel::thumbnailOf,
                 () -> true, this::reorder, null, this::dropOnViewer, viewer);
-        DragOut.install(arrangePanel, arrangePanel::selectedPhoto, this::thumbnailOfTargetPhoto,
+        DragOut.install(arrangePanel, arrangePanel::selectedPhoto, arrangePanel::thumbnailOf,
                 () -> true, this::reorder, null, this::dropOnViewer, viewer);
 
         // 垃圾桶里的照片可以拖回目标栏：
@@ -240,7 +240,6 @@ public final class MainPanel extends JPanel {
         // 开局同步一次：没有历史时那两颗按钮该是灰的
         historyChanged();
         // 旋转 / 翻转是"点一下马上生效"的工具：选中它的同时也对当前这张做一次。
-        // 光标跟着工具变成对应的图标——按的是什么，鼠标就是什么。
         toolBar.setOnToolChanged(tool -> {
             viewer.setCursorTool(tool);
             if (tool == CursorTool.ROTATE) {
@@ -676,11 +675,6 @@ public final class MainPanel extends JPanel {
     /** 重做键；同上。 */
     static KeyStroke redoKeyStroke() {
         return REDO_KEY;
-    }
-
-    /** 目标序列里某张照片的缩略图，给跟着鼠标的提示图用。 */
-    private java.awt.image.BufferedImage thumbnailOfTargetPhoto(Path photo) {
-        return targetPanel.thumbnailOf(photo);
     }
 
     /**

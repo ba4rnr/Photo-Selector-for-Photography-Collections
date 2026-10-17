@@ -1,8 +1,6 @@
 package com.photoselector.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Dimension;
@@ -51,7 +49,7 @@ class ImageEditTest {
     }
 
     @Test
-    void 点旋转_画面转90度_光标换成旋转图标() throws Exception {
+    void 点旋转_画面转90度() throws Exception {
         MainPanel panel = panelWithOnePhoto();
         ViewerPanel viewer = panel.viewerForTest();
         Dimension before = viewer.imageSizeForTest();
@@ -64,8 +62,6 @@ class ImageEditTest {
         assertEquals(before.width, after.height);
         assertEquals(1, viewer.edits().quarters());
         assertEquals(CursorTool.ROTATE, panel.toolBar().activeTool(), "按钮进入旋转状态");
-        assertNotEquals(java.awt.Cursor.DEFAULT_CURSOR, viewer.getCursor().getType(),
-                "光标该换成旋转工具的图标，而不是默认箭头");
         panel.shutdown();
     }
 
@@ -130,14 +126,17 @@ class ImageEditTest {
     }
 
     @Test
-    void 每个工具的鼠标光标都是自己那枚图标() throws Exception {
-        Theme.install();
+    void 点任何功能按钮都不会改变鼠标形状() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        ViewerPanel viewer = panel.viewerForTest();
+
         for (CursorTool tool : CursorTool.values()) {
-            java.awt.Cursor cursor = tool.cursor();
-            assertNotNull(cursor);
-            assertNotEquals(java.awt.Cursor.DEFAULT_CURSOR, cursor.getType(),
-                    tool.label() + " 工具应当有自己的鼠标光标");
+            SwingUtilities.invokeAndWait(() ->
+                    panel.toolBar().setActiveToolForTest(tool));
+            assertEquals(java.awt.Cursor.DEFAULT_CURSOR, viewer.getCursor().getType(),
+                    tool.label() + " 按钮也不该再换掉系统默认光标");
         }
+        panel.shutdown();
     }
 
     private static void waitUntil(BooleanSupplier condition, String what) throws Exception {

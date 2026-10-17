@@ -488,24 +488,14 @@ final class ViewerPanel extends JPanel {
     }
 
     /**
-     * 换光标工具。
+     * 换当前工具。
      *
-     * <p>工具栏上的"选择 / 平移"就是干这个的：选择时拖动是拖照片出去，
-     * 平移时拖动才是搬画面。
+     * <p>工具只改变拖动行为，不再改变鼠标形状：鼠标始终使用系统默认箭头，
+     * 只有真正按住平移时临时显示系统的移动光标。
      */
     void setCursorTool(CursorTool cursorTool) {
         this.tool = cursorTool;
-        // 光标就用工具栏上那个图标放大画出来：按的是什么，鼠标就是什么
-        setCursor(customCursor(cursorTool));
-    }
-
-    /** 拿工具对应的光标；个别系统不让自定义光标时退回默认箭头。 */
-    private static Cursor customCursor(CursorTool cursorTool) {
-        try {
-            return cursorTool.cursor();
-        } catch (RuntimeException e) {
-            return Cursor.getDefaultCursor();
-        }
+        setCursor(Cursor.getDefaultCursor());
     }
 
     /** 现在拖动是不是"把照片拖出去"。 */
