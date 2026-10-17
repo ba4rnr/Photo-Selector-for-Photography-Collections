@@ -145,6 +145,34 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 表头缩放胶囊点得中_并真的切换显示模式() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 900, 600);
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(500, 400);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+        render(viewer); // 控件位置在绘制时确定
+
+        java.awt.Rectangle actual = viewer.zoomChipBoundsForTest(1);
+        java.awt.Rectangle fit = viewer.zoomChipBoundsForTest(0);
+        assertTrue(actual != null && fit != null, "画过之后应当能拿到两枚胶囊的矩形");
+        assertEquals(500 - 12, actual.x + actual.width, "整组胶囊应当贴着表头右侧留白");
+
+        clickAt(viewer, actual);
+        assertEquals(100, viewer.zoomPercent(), "点 100% 应当按一图片像素对一屏幕像素显示");
+
+        clickAt(viewer, fit);
+        assertTrue(viewer.isFitToWindow(), "点适应之后应当切回按窗口大小显示");
+        loader.shutdown();
+    }
+
+    @Test
     void 滚轮在整百倍率之间跳() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
@@ -323,5 +351,13 @@ class ViewerPanelTest {
                 layoutTree(nested);
             }
         }
+    }
+
+    private static void clickAt(ViewerPanel viewer, java.awt.Rectangle bounds) throws Exception {
+        SwingUtilities.invokeAndWait(() -> viewer.dispatchEvent(new java.awt.event.MouseEvent(
+                viewer, java.awt.event.MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(),
+                java.awt.event.MouseEvent.BUTTON1_DOWN_MASK,
+                bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 1, false,
+                java.awt.event.MouseEvent.BUTTON1)));
     }
 }

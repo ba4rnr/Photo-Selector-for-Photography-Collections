@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,7 +79,7 @@ final class ThumbnailLoader {
             return; // 同一张已经在路上了
         }
 
-        pool.submit(() -> {
+        submit(key, () -> {
             try {
                 BufferedImage image = service.thumbnail(photo, maxHeight);
                 deliver(mySession, () -> onReady.accept(image));
@@ -106,7 +107,7 @@ final class ThumbnailLoader {
             return;
         }
 
-        pool.submit(() -> {
+        submit(key, () -> {
             try {
                 BufferedImage image = ImageSource.open(photo).loadFull();
                 deliver(mySession, () -> onReady.accept(image));
@@ -116,6 +117,21 @@ final class ThumbnailLoader {
                 inFlight.remove(key);
             }
         });
+    }
+
+    /**
+     * 把任务交给线程池，并把"关闭恰好发生在检查之后"这一个极窄的竞态也收干净。
+     *
+     * <p>只靠 {@link #shutdown} 标记还不够：线程可能在看到"还没关"之后、
+     * 真正 {@code submit} 之前被另一条线程关掉线程池。此时线程池会拒绝任务，
+     * 这只是一种迟到的正常情况，不该让异常从界面事件里冒出来。
+     */
+    private void submit(String key, Runnable task) {
+        try {
+            pool.submit(task);
+        } catch (RejectedExecutionException e) {
+            inFlight.remove(key);
+        }
     }
 
     /** 把结果送回界面线程；期间换过文件夹的话直接作废。 */

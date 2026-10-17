@@ -9,6 +9,7 @@ import java.nio.file.Path;
 
 import com.photoselector.core.Origin;
 import com.photoselector.core.TargetEntry;
+import com.photoselector.ui.theme.ChipGroup;
 import com.photoselector.ui.theme.Painters;
 import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
@@ -29,8 +30,8 @@ final class TargetPanel extends ThumbnailGridPanel {
     /** 表头右侧给「展开」按钮预留的宽度；路径再长也不许占过来。 */
     private static final int HEADER_BUTTON_SPACE = 76;
 
-    /** 表头右侧那个「展开 / 收起」按钮的位置；绘制时算出来，点击时用它做命中判断。 */
-    private Rectangle expandButtonBounds;
+    /** 表头右侧那个「展开 / 收起」按钮；绘制与命中共用这一组几何。 */
+    private ChipGroup expandButton;
 
     /** 现在是不是展开状态，决定按钮上写"展开"还是"收起"。 */
     private boolean expanded;
@@ -38,11 +39,27 @@ final class TargetPanel extends ThumbnailGridPanel {
     /** 点「展开 / 收起」时通知外部去切换模式。 */
     private Runnable onToggleExpanded = () -> { };
 
+    /** 指针当前悬停的表头胶囊；-1 表示没悬停。 */
+    private int hoveredHeaderChip = -1;
+
     /** 点中某一格时通知外部（大图视图据此显示它）。 */
     private java.util.function.Consumer<Path> onPhotoChosen = photo -> { };
 
     TargetPanel(ThumbnailLoader loader) {
         super(loader);
+        java.awt.event.MouseAdapter hover = new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseMoved(java.awt.event.MouseEvent e) {
+                setHoveredHeaderChip(expandButton == null ? -1 : expandButton.indexAt(e.getPoint()));
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                setHoveredHeaderChip(-1);
+            }
+        };
+        addMouseListener(hover);
+        addMouseMotionListener(hover);
     }
 
     // ─────────────────────────── 基类要的"数据从哪来" ───────────────────────────
@@ -64,7 +81,7 @@ final class TargetPanel extends ThumbnailGridPanel {
 
     @Override
     protected boolean onHeaderClick(Point point) {
-        if (expandButtonBounds != null && expandButtonBounds.contains(point)) {
+        if (expandButton != null && expandButton.indexAt(point) == 0) {
             onToggleExpanded.run();
             return true;
         }
@@ -89,7 +106,7 @@ final class TargetPanel extends ThumbnailGridPanel {
 
     /** 表头按钮的位置，测试用。 */
     Rectangle expandButtonBoundsForTest() {
-        return expandButtonBounds;
+        return expandButton == null ? null : expandButton.boundsAt(0);
     }
 
     /** 第 index 条将来在磁盘上叫什么名字。测试用。 */
@@ -173,17 +190,14 @@ final class TargetPanel extends ThumbnailGridPanel {
      */
     private void paintExpandButton(Graphics2D g, FontMetrics metrics) {
         String label = expanded ? "收起" : "展开";
-        int width = metrics.stringWidth(label) + 30;
-        int height = 20;
-        int x = getWidth() - PADDING - Math.max(width, HEADER_BUTTON_SPACE - 12);
-        int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
-        // 胶囊底由组件库统一画；这里只负责在它左边加一枚小三角，
-        // 命中判断用的矩形也从同一处来
-        int fullWidth = metrics.stringWidth("  " + label) + 26;
-        expandButtonBounds = new Rectangle(x, y, fullWidth, height);
-        Painters.chip(g, expandButtonBounds, metrics, "  " + label, true, false);
-        int arrowX = expandButtonBounds.x + 9;
-        int arrowY = expandButtonBounds.y + height / 2;
+        int y = (HEADER_HEIGHT - 8 - ChipGroup.HEIGHT) / 2 + 2;
+        // 34 像素的横向留白比普通胶囊多，左边空出的位置正好放小三角。
+        // 胶囊底、激活态和命中矩形都由 ChipGroup 统一管理。
+        expandButton = ChipGroup.rightAligned(metrics, getWidth() - PADDING, y, 34, label);
+        expandButton.paint(g, metrics, 0, hoveredHeaderChip);
+        Rectangle bounds = expandButton.boundsAt(0);
+        int arrowX = bounds.x + 9;
+        int arrowY = bounds.y + bounds.height / 2;
         g.setColor(Theme.TEXT_MUTED);
         if (expanded) {
             g.fillPolygon(new int[] {arrowX, arrowX, arrowX + 6},
@@ -191,6 +205,13 @@ final class TargetPanel extends ThumbnailGridPanel {
         } else {
             g.fillPolygon(new int[] {arrowX + 6, arrowX + 6, arrowX},
                     new int[] {arrowY - 5, arrowY + 5, arrowY}, 3);
+        }
+    }
+
+    private void setHoveredHeaderChip(int index) {
+        if (hoveredHeaderChip != index) {
+            hoveredHeaderChip = index;
+            repaint();
         }
     }
 

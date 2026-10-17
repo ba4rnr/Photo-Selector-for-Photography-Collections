@@ -19,7 +19,7 @@ import javax.swing.SwingUtilities;
 
 import com.photoselector.io.ImageSource;
 import com.photoselector.core.EditState;
-import com.photoselector.ui.theme.Painters;
+import com.photoselector.ui.theme.ChipGroup;
 import com.photoselector.ui.theme.TextStyles;
 import com.photoselector.ui.theme.Theme;
 
@@ -126,9 +126,15 @@ final class ViewerPanel extends JPanel {
     /** 当前的光标工具。它决定在大图上按住左键拖动是什么意思。 */
     private CursorTool tool = CursorTool.SELECT;
 
-    /** 表头上两个按钮的位置，画的时候算出来，点击时做命中判断。 */
-    private Rectangle fitButtonBounds;
-    private Rectangle actualButtonBounds;
+    /**
+     * 表头右侧「适应 / 100%」这一组胶囊。
+     *
+     * <p>位置、激活态和命中判断都由组件库统一管理，面板不再自己量两遍矩形。
+     */
+    private ChipGroup zoomControls;
+
+    /** 指针当前悬停的缩放胶囊；-1 表示没悬停。 */
+    private int hoveredZoomChip = -1;
 
     /** 缩放状态变了时通知外部（菜单里的勾选跟着变）。 */
     private Runnable onZoomChanged = () -> { };
@@ -144,9 +150,10 @@ final class ViewerPanel extends JPanel {
                 if (!SwingUtilities.isLeftMouseButton(e)) {
                     return;
                 }
-                if (hit(e.getPoint(), fitButtonBounds)) {
+                int chip = zoomChipAt(e.getPoint());
+                if (chip == 0) {
                     fitToWindow();
-                } else if (hit(e.getPoint(), actualButtonBounds)) {
+                } else if (chip == 1) {
                     actualSize();
                 } else if (canPan()) {
                     dragStart = e.getPoint();
@@ -169,6 +176,16 @@ final class ViewerPanel extends JPanel {
             public void mouseReleased(MouseEvent e) {
                 dragStart = null;
                 setCursor(Cursor.getDefaultCursor());
+            }
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                setHoveredZoomChip(zoomChipAt(e.getPoint()));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                setHoveredZoomChip(-1);
             }
 
             @Override
@@ -517,8 +534,16 @@ final class ViewerPanel extends JPanel {
         return small;
     }
 
-    private static boolean hit(Point point, Rectangle bounds) {
-        return bounds != null && bounds.contains(point);
+    /** 指针命中了哪个缩放胶囊；没画过或点在空隙里都返回 -1。 */
+    private int zoomChipAt(Point point) {
+        return zoomControls == null ? -1 : zoomControls.indexAt(point);
+    }
+
+    private void setHoveredZoomChip(int index) {
+        if (hoveredZoomChip != index) {
+            hoveredZoomChip = index;
+            repaint();
+        }
     }
 
     // ─────────────────────────── 绘制 ───────────────────────────
@@ -571,8 +596,7 @@ final class ViewerPanel extends JPanel {
 
         // 右边留给缩放控件
         paintZoomControls(g, metrics);
-        int controlsWidth = (fitButtonBounds == null ? 0 : fitButtonBounds.width)
-                + (actualButtonBounds == null ? 0 : actualButtonBounds.width) + 12;
+        int controlsWidth = zoomControls == null ? 0 : zoomControls.width() + 12;
 
         g.setColor(Theme.TEXT_MUTED);
         String text;
@@ -594,28 +618,20 @@ final class ViewerPanel extends JPanel {
         String percent = image == null ? "" : zoomPercent() + "%";
         int percentWidth = percent.isEmpty() ? 0 : metrics.stringWidth(percent) + 10;
 
-        int actualWidth = metrics.stringWidth("100%") + 18;
-        int fitWidth = metrics.stringWidth("适应") + 18;
-        int height = 20;
-        int y = (HEADER_HEIGHT - 8 - height) / 2 + 2;
-        int x = getWidth() - PADDING - actualWidth;
-        actualButtonBounds = new Rectangle(x, y, actualWidth, height);
-        x -= fitWidth + 6;
-        fitButtonBounds = new Rectangle(x, y, fitWidth, height);
-
-        paintChip(g, fitButtonBounds, "适应", metrics, fitToWindow);
-        paintChip(g, actualButtonBounds, "100%", metrics, !fitToWindow && customScale == 1.0);
+        int y = (HEADER_HEIGHT - 8 - ChipGroup.HEIGHT) / 2 + 2;
+        zoomControls = ChipGroup.rightAligned(metrics, getWidth() - PADDING, y, "适应", "100%");
+        int active = fitToWindow ? 0 : customScale == 1.0 ? 1 : -1;
+        zoomControls.paint(g, metrics, active, hoveredZoomChip);
 
         if (!percent.isEmpty()) {
             g.setColor(Theme.TEXT_MUTED);
-            g.drawString(percent, fitButtonBounds.x - percentWidth, 17);
+            g.drawString(percent, zoomControls.left() - percentWidth, 17);
         }
     }
 
-    /** 一个小圆角块：当前生效的那个用亮一点的底色。 */
-    private void paintChip(Graphics2D g, Rectangle bounds, String label, FontMetrics metrics,
-                           boolean active) {
-        Painters.chip(g, bounds, metrics, label, active, false);
+    /** 第 index 个缩放胶囊的位置；给离屏渲染测试核对命中区域用。 */
+    Rectangle zoomChipBoundsForTest(int index) {
+        return zoomControls == null ? null : zoomControls.boundsAt(index);
     }
 
     private void paintImageArea(Graphics2D g) {

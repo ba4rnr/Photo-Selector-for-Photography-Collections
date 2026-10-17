@@ -49,6 +49,12 @@ class ComponentLibraryRenderTest {
         Painters.chip(g, new Rectangle(140, 72, 110, 24), metrics, "悬停", false, true);
         Painters.chip(g, new Rectangle(260, 72, 110, 24), metrics, "普通", false, false);
 
+        // 胶囊组负责"从右往左排"和"同一个矩形管绘制与命中"，
+        // 这里顺手画出真实的两枚缩放按钮，免得验货图漏掉新组件。
+        g.drawString("胶囊组：右对齐", 430, 60);
+        ChipGroup zoomChips = ChipGroup.rightAligned(metrics, width - 20, 72, "适应", "100%");
+        zoomChips.paint(g, metrics, 1, 0);
+
         // 2) 缩略图格子：普通 / 选中 / 占位（还没有图）
         g.drawString("缩略图格子：普通 / 选中 / 占位", 20, 130);
         BufferedImage photo = demoImage(160, 120);
