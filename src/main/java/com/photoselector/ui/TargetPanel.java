@@ -27,11 +27,15 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial")
 final class TargetPanel extends ThumbnailGridPanel {
 
-    /** 表头右侧给「展开」按钮预留的宽度；路径再长也不许占过来。 */
-    private static final int HEADER_BUTTON_SPACE = 76;
+    /** 编排模式表头的快捷尺寸档位（像素）。 */
+    private static final int[] THUMBNAIL_WIDTH_STEPS =
+            {160, 200, 240, 280, 320, 360, 420};
 
     /** 表头右侧那个「展开 / 收起」按钮；绘制与命中共用这一组几何。 */
     private ChipGroup expandButton;
+
+    /** 编排模式里「− 当前尺寸 +」这组快捷控制。 */
+    private ChipGroup sizeStepper;
 
     /** 现在是不是展开状态，决定按钮上写"展开"还是"收起"。 */
     private boolean expanded;
@@ -39,8 +43,8 @@ final class TargetPanel extends ThumbnailGridPanel {
     /** 点「展开 / 收起」时通知外部去切换模式。 */
     private Runnable onToggleExpanded = () -> { };
 
-    /** 指针当前悬停的表头胶囊；-1 表示没悬停。 */
-    private int hoveredHeaderChip = -1;
+    private int hoveredExpandChip = -1;
+    private int hoveredSizeChip = -1;
 
     /** 点中某一格时通知外部（大图视图据此显示它）。 */
     private java.util.function.Consumer<Path> onPhotoChosen = photo -> { };
@@ -50,12 +54,14 @@ final class TargetPanel extends ThumbnailGridPanel {
         java.awt.event.MouseAdapter hover = new java.awt.event.MouseAdapter() {
             @Override
             public void mouseMoved(java.awt.event.MouseEvent e) {
-                setHoveredHeaderChip(expandButton == null ? -1 : expandButton.indexAt(e.getPoint()));
+                setHoveredHeaderChip(
+                        expandButton == null ? -1 : expandButton.indexAt(e.getPoint()),
+                        sizeStepper == null ? -1 : sizeStepper.indexAt(e.getPoint()));
             }
 
             @Override
             public void mouseExited(java.awt.event.MouseEvent e) {
-                setHoveredHeaderChip(-1);
+                setHoveredHeaderChip(-1, -1);
             }
         };
         addMouseListener(hover);
@@ -81,6 +87,20 @@ final class TargetPanel extends ThumbnailGridPanel {
 
     @Override
     protected boolean onHeaderClick(Point point) {
+        if (sizeStepper != null) {
+            int chip = sizeStepper.indexAt(point);
+            if (chip == 0) {
+                changeArrangeThumbnailWidth(-1);
+                return true;
+            }
+            if (chip == 2) {
+                changeArrangeThumbnailWidth(1);
+                return true;
+            }
+            if (chip == 1) {
+                return true; // 中间只是当前尺寸读数，不触发别的动作
+            }
+        }
         if (expandButton != null && expandButton.indexAt(point) == 0) {
             onToggleExpanded.run();
             return true;
@@ -107,6 +127,11 @@ final class TargetPanel extends ThumbnailGridPanel {
     /** 表头按钮的位置，测试用。 */
     Rectangle expandButtonBoundsForTest() {
         return expandButton == null ? null : expandButton.boundsAt(0);
+    }
+
+    /** 快捷尺寸控制里第 index 个胶囊的位置，测试用。 */
+    Rectangle sizeStepperBoundsForTest(int index) {
+        return sizeStepper == null ? null : sizeStepper.boundsAt(index);
     }
 
     /** 第 index 条将来在磁盘上叫什么名字。测试用。 */
@@ -158,10 +183,11 @@ final class TargetPanel extends ThumbnailGridPanel {
         String path = session == null ? "还没选" : session.targetFolder().toString();
         String count = session == null ? "" : "共 " + session.size() + " 张";
 
-        // 右侧先给「展开」按钮留一块地方，张数贴着它左边放、永远看得见；
+        // 右侧先给「展开 / 收起」和编排尺寸控制留地方，张数贴着控件左边放；
         // 路径只能占"标签之后、张数之前"的那一段，超长就在中间用省略号掐掉
         int pathX = PADDING + metrics.stringWidth(label);
-        int rightEdge = Math.max(pathX + 24, getWidth() - PADDING - HEADER_BUTTON_SPACE);
+        int controlsLeft = paintHeaderControls(g, metrics);
+        int rightEdge = Math.max(pathX + 24, controlsLeft - GAP);
         int countWidth = count.isEmpty() ? 0 : metrics.stringWidth(count) + GAP;
         boolean showCount = rightEdge - countWidth - pathX >= 40;
         if (!showCount) {
@@ -179,22 +205,33 @@ final class TargetPanel extends ThumbnailGridPanel {
 
         g.setColor(Theme.BORDER);
         g.fillRect(PADDING, HEADER_HEIGHT - 7, Math.max(0, getWidth() - PADDING * 2), 1);
-        paintExpandButton(g, metrics);
     }
 
     /**
-     * 画表头右侧那个「展开 / 收起」按钮。
+     * 画表头右侧的控件，并返回它们最左边的 x。
      *
      * <p>用一块实心底色加文字、不描边——一像素的边框在缩放显示下左右宽度会不一样，
-     * 这个坑在交接说明里记着。位置正好落在表头为它留出的 {@code HEADER_BUTTON_SPACE} 里。
+     * 这个坑在交接说明里记着。
      */
-    private void paintExpandButton(Graphics2D g, FontMetrics metrics) {
+    private int paintHeaderControls(Graphics2D g, FontMetrics metrics) {
         String label = expanded ? "收起" : "展开";
         int y = (HEADER_HEIGHT - 8 - ChipGroup.HEIGHT) / 2 + 2;
+        int right = getWidth() - PADDING;
         // 34 像素的横向留白比普通胶囊多，左边空出的位置正好放小三角。
         // 胶囊底、激活态和命中矩形都由 ChipGroup 统一管理。
-        expandButton = ChipGroup.rightAligned(metrics, getWidth() - PADDING, y, 34, label);
-        expandButton.paint(g, metrics, 0, hoveredHeaderChip);
+        expandButton = ChipGroup.rightAligned(metrics, right, y, 34, label);
+        int controlsLeft = expandButton.left();
+
+        sizeStepper = null;
+        if (expanded) {
+            sizeStepper = ChipGroup.rightAligned(metrics, expandButton.left() - GAP, y, 10,
+                    "−", Integer.toString(boxWidth), "+");
+            sizeStepper.paint(g, metrics, -1,
+                    hoveredSizeChip == 1 ? -1 : hoveredSizeChip);
+            controlsLeft = sizeStepper.left();
+        }
+
+        expandButton.paint(g, metrics, 0, hoveredExpandChip);
         Rectangle bounds = expandButton.boundsAt(0);
         int arrowX = bounds.x + 9;
         int arrowY = bounds.y + bounds.height / 2;
@@ -206,11 +243,37 @@ final class TargetPanel extends ThumbnailGridPanel {
             g.fillPolygon(new int[] {arrowX + 6, arrowX + 6, arrowX},
                     new int[] {arrowY - 5, arrowY + 5, arrowY}, 3);
         }
+        return controlsLeft;
     }
 
-    private void setHoveredHeaderChip(int index) {
-        if (hoveredHeaderChip != index) {
-            hoveredHeaderChip = index;
+    private void setHoveredHeaderChip(int expandChip, int sizeChip) {
+        if (hoveredExpandChip != expandChip || hoveredSizeChip != sizeChip) {
+            hoveredExpandChip = expandChip;
+            hoveredSizeChip = sizeChip;
+            repaint();
+        }
+    }
+
+    /** 编排模式快捷调整缩略图尺寸。两边到头就停住，不循环到另一极端。 */
+    private void changeArrangeThumbnailWidth(int direction) {
+        int next = boxWidth;
+        if (direction > 0) {
+            for (int width : THUMBNAIL_WIDTH_STEPS) {
+                if (width > boxWidth) {
+                    next = width;
+                    break;
+                }
+            }
+        } else {
+            for (int i = THUMBNAIL_WIDTH_STEPS.length - 1; i >= 0; i--) {
+                if (THUMBNAIL_WIDTH_STEPS[i] < boxWidth) {
+                    next = THUMBNAIL_WIDTH_STEPS[i];
+                    break;
+                }
+            }
+        }
+        if (next != boxWidth) {
+            setThumbnailWidth(next);
             repaint();
         }
     }

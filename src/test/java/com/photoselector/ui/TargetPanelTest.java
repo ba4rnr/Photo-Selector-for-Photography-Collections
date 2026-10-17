@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentEvent;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 
 import javax.swing.JScrollPane;
@@ -101,6 +103,49 @@ class TargetPanelTest {
         assertTrue(shortened.startsWith("C:\\"), "盘符要留着");
         assertTrue(shortened.endsWith("摄影集_大时代"), "尾部（文件夹名）最有用，不许掐掉");
         assertEquals(path, TargetPanel.shortenMiddle(path, metrics, 4000), "放得下就原样显示");
+    }
+
+    @Test
+    void 编排表头的尺寸按钮在收起左侧并可以按档调整() throws Exception {
+        Theme.install();
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path photo = TestImages.writeJpeg(target.resolve("a.jpg"), 300, 200);
+        Session session = new Session(target, NumberingRule.DEFAULT);
+        session.seedExisting(List.of(photo));
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        TargetPanel panel = new TargetPanel(loader);
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setSize(800, 400);
+            panel.setSession(session);
+            panel.setExpanded(true);
+            panel.setThumbnailWidth(240);
+            layoutTree(panel);
+        });
+        render(panel, Path.of("target", "ui-arrange-size-control.png"));
+
+        Rectangle minus = panel.sizeStepperBoundsForTest(0);
+        Rectangle value = panel.sizeStepperBoundsForTest(1);
+        Rectangle plus = panel.sizeStepperBoundsForTest(2);
+        Rectangle collapse = panel.expandButtonBoundsForTest();
+        assertTrue(minus != null && value != null && plus != null && collapse != null,
+                "编排表头应当有 − / 尺寸 / + 和收起按钮");
+        assertTrue(plus.x + plus.width < collapse.x,
+                "快捷尺寸控制必须整体位于收起按钮左侧");
+
+        SwingUtilities.invokeAndWait(() -> clickAt(panel, plus));
+        assertEquals(280, panel.thumbnailWidth(), "点 + 应当升到下一档");
+        render(panel, Path.of("target", "ui-arrange-size-control-280.png"));
+        SwingUtilities.invokeAndWait(() -> clickAt(panel, panel.sizeStepperBoundsForTest(0)));
+        assertEquals(240, panel.thumbnailWidth(), "点 − 应当降回上一档");
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.setExpanded(false);
+            layoutTree(panel);
+        });
+        render(panel, Path.of("target", "ui-arrange-size-control-collapsed.png"));
+        assertNull(panel.sizeStepperBoundsForTest(0),
+                "选图模式的右栏不显示编排专用尺寸控制");
+        loader.shutdown();
     }
 
     @Test
@@ -510,6 +555,14 @@ class TargetPanelTest {
         g.dispose();
         Files.createDirectories(output.getParent());
         javax.imageio.ImageIO.write(image, "png", output.toFile());
+    }
+
+    private static void clickAt(javax.swing.JComponent component, Rectangle bounds) {
+        component.dispatchEvent(new java.awt.event.MouseEvent(
+                component, java.awt.event.MouseEvent.MOUSE_PRESSED,
+                System.currentTimeMillis(), java.awt.event.MouseEvent.BUTTON1_DOWN_MASK,
+                bounds.x + bounds.width / 2, bounds.y + bounds.height / 2,
+                1, false, java.awt.event.MouseEvent.BUTTON1));
     }
 
     private static void layoutTree(java.awt.Container container) {
