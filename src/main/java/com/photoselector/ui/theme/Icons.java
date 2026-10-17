@@ -160,17 +160,13 @@ public final class Icons {
     }
 
     /**
-     * 旋转：逆时针的圆弧箭头，中间一个加号，右下角带一个下拉小三角（参照 C1）。
+     * 旋转：逆时针的圆弧箭头，中间一个加号（参照 C1）。
      *
      * <p>缺口留在左上，箭头从缺口处指进去——"转一下"的意思一眼能看出来；
-     * 中间的加号把它和别的弧线图标区分开；右下角那个小三角是按钮上
-     * "这里还挂着菜单"的记号。光标只画工具本身的形状，不带这个小三角。
+     * 中间的加号把它和别的弧线图标区分开。
      */
     public static Icon rotate() {
-        return stroke(g -> {
-            paintRotate(g);
-            paintRotateMenuCaret(g);
-        });
+        return stroke(Icons::paintRotate);
     }
 
     /** 翻转：中轴两侧的镜像三角。 */
@@ -396,26 +392,16 @@ public final class Icons {
     }
 
     private static void paintRotate(Graphics2D g) {
-        // 圆心 (8.4, 8.4)、半径 5.1：弧从 195° 逆时针绕到 135°，缺口留在左侧；
+        // 圆心 (9, 9)、半径 5.1：弧从 195° 逆时针绕到 135°，缺口留在左上；
         // 末端压一枚实心三角箭头——C1 那个箭头是实心的，18 像素下比 V 形干净
-        g.draw(new Arc2D.Double(3.3, 3.3, 10.2, 10.2, 195, 300, Arc2D.OPEN));
+        g.draw(new Arc2D.Double(3.9, 3.9, 10.2, 10.2, 195, 300, Arc2D.OPEN));
         double headRad = Math.toRadians(135);
-        double x = 8.4 + 5.1 * Math.cos(headRad);
-        double y = 8.4 - 5.1 * Math.sin(headRad);
+        double x = 9 + 5.1 * Math.cos(headRad);
+        double y = 9 - 5.1 * Math.sin(headRad);
         solidArrowHead(g, x, y, -Math.sin(headRad), -Math.cos(headRad), 3.2, 1.7);
         // 中间的加号：和圆环同心，别贴着圈
-        g.draw(new Line2D.Double(8.4, 6.5, 8.4, 10.3));
-        g.draw(new Line2D.Double(6.5, 8.4, 10.3, 8.4));
-    }
-
-    /** 旋转按钮右下角的下拉小三角；光标不画它。 */
-    private static void paintRotateMenuCaret(Graphics2D g) {
-        Path2D caret = new Path2D.Double();
-        caret.moveTo(13.4, 12.9);
-        caret.lineTo(16.4, 12.9);
-        caret.lineTo(14.9, 14.7);
-        caret.closePath();
-        g.fill(caret);
+        g.draw(new Line2D.Double(9, 7.1, 9, 10.9));
+        g.draw(new Line2D.Double(7.1, 9, 10.9, 9));
     }
 
     private static void paintFlip(Graphics2D g) {
