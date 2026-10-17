@@ -36,6 +36,35 @@ class MessageDialogTest {
     Path tempDir;
 
     @Test
+    void 两个按钮的消息框_点哪个就返回哪个() throws Exception {
+        Theme.install();
+
+        MessageDialog dialog = new MessageDialog(null, "还没保存",
+                "目标文件夹里还有没保存的改动。\n关掉之前要保存吗？（选“不保存”的话，文件保持原样、什么都不会丢）",
+                "保存", "不保存");
+        dialog.setSize(dialog.getPreferredSize());
+        Container content = dialog.getContentPane();
+        layoutTree(content);
+
+        BufferedImage image = new BufferedImage(Math.max(1, content.getWidth()),
+                Math.max(1, content.getHeight()), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        content.paint(g);
+        g.dispose();
+        ImageIO.write(image, "png", Path.of("target", "ui-confirm-save.png").toFile());
+
+        AbstractButton save = findButton(dialog.getContentPane(), "保存");
+        AbstractButton discard = findButton(dialog.getContentPane(), "不保存");
+        assertNotNull(save, "应当有保存按钮");
+        assertNotNull(discard, "应当有不保存按钮");
+        assertEquals("保存", dialog.getRootPane().getDefaultButton().getText(), "回车默认选保存");
+
+        discard.doClick();
+        assertEquals(1, dialog.choice(), "点「不保存」应当记成第二个按钮");
+        dialog.dispose();
+    }
+
+    @Test
     void 保存完成的消息框是深色的_正文和确定按钮都在() throws Exception {
         Theme.install();
 

@@ -40,16 +40,20 @@ final class MessageDialog extends JDialog {
     /** 正文最多这么高；保存的失败清单可能很长，再多就出滚动条。 */
     private static final int MAX_TEXT_HEIGHT = 320;
 
-    MessageDialog(Window owner, String title, String message) {
+    /** 点了第几个按钮（从 0 起）；直接关掉窗口是 -1。 */
+    private int choice = -1;
+
+    MessageDialog(Window owner, String title, String message, String... labels) {
         super(owner, title, ModalityType.APPLICATION_MODAL);
         setResizable(false);
 
+        String[] buttons = labels.length == 0 ? new String[] {"确定"} : labels;
         JPanel content = new JPanel(new BorderLayout());
         content.setBackground(Theme.PANEL);
         content.setBorder(BorderFactory.createLineBorder(Theme.BORDER));
         content.add(buildHeader(title), BorderLayout.NORTH);
         content.add(buildBody(message), BorderLayout.CENTER);
-        content.add(buildFooter(), BorderLayout.SOUTH);
+        content.add(buildFooter(buttons), BorderLayout.SOUTH);
         setContentPane(content);
 
         // Esc = 关掉。回车交给默认按钮"确定"
@@ -63,9 +67,19 @@ final class MessageDialog extends JDialog {
 
     /** 弹一个消息框，等用户点"确定"（或按回车 / Esc）。 */
     static void show(Window owner, String title, String message) {
-        MessageDialog dialog = new MessageDialog(owner, title, message);
+        showChoice(owner, title, message, "确定");
+    }
+
+    /**
+     * 弹一个带若干按钮的消息框。
+     *
+     * @return 点了第几个按钮（从 0 起）；直接关掉窗口返回 -1
+     */
+    static int showChoice(Window owner, String title, String message, String... labels) {
+        MessageDialog dialog = new MessageDialog(owner, title, message, labels);
         dialog.setVisible(true);
         dialog.dispose();
+        return dialog.choice;
     }
 
     private static JComponent buildHeader(String title) {
@@ -168,13 +182,23 @@ final class MessageDialog extends JDialog {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    private JComponent buildFooter() {
-        FlatButton ok = new FlatButton("确定", true);
-        ok.addActionListener(e -> dispose());
-
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+    private JComponent buildFooter(String... labels) {
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         buttons.setBackground(Theme.PANEL);
-        buttons.add(ok);
+
+        FlatButton first = null;
+        for (int i = 0; i < labels.length; i++) {
+            int index = i;
+            FlatButton button = new FlatButton(labels[i], true);
+            button.addActionListener(e -> {
+                choice = index;
+                dispose();
+            });
+            buttons.add(button);
+            if (first == null) {
+                first = button;
+            }
+        }
 
         JPanel footer = new JPanel(new BorderLayout());
         footer.setBackground(Theme.PANEL);
@@ -183,7 +207,14 @@ final class MessageDialog extends JDialog {
                 BorderFactory.createEmptyBorder(10, PAD, 10, PAD)));
         footer.add(buttons, BorderLayout.EAST);
 
-        getRootPane().setDefaultButton(ok);
+        if (first != null) {
+            getRootPane().setDefaultButton(first); // 回车 = 第一个按钮
+        }
         return footer;
+    }
+
+    /** 只留给测试用：点了第几个按钮。 */
+    int choice() {
+        return choice;
     }
 }

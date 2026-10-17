@@ -24,9 +24,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import javax.swing.AbstractAction;
-import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -1533,31 +1531,26 @@ public final class MainPanel extends JPanel {
         this.confirmSaveOnClose = confirm == null ? MainPanel::askToSave : confirm;
     }
 
-    /** 默认的问法。返回值取 {@link JOptionPane} 那几样：YES 保存、NO 不保存、CLOSED 取消。 */
+    /**
+     * 默认的问法：和别处同一套深色消息框，两个按钮。
+     *
+     * <p>返回值取 {@link JOptionPane} 那几样：YES 保存、NO 不保存、CLOSED 取消
+     * （直接关掉窗口或按 Esc 就是取消）。
+     */
     private static int askToSave(java.awt.Component owner) {
-        JButton save = new JButton("保存");
-        JButton discard = new JButton("不保存");
-        // 必须自己建面板、自己接线：塞进 JOptionPane 的按钮只负责显示，
-        // 点下去**不会**把"选了哪个"写回对话框的值——不接线的话它什么都不会发生，
-        // 对话框以"被关掉"收场，调用方当成取消，于是点"不保存"毫无反应。
-        JOptionPane pane = new JOptionPane(
+        // 传进来的可能是面板，也可能直接是个窗口（关窗流程与测试两种叫法）
+        java.awt.Window window = owner instanceof java.awt.Window w
+                ? w
+                : SwingUtilities.getWindowAncestor(owner);
+        int picked = MessageDialog.showChoice(window,
+                "还没保存",
                 "目标文件夹里还有没保存的改动。\n关掉之前要保存吗？（选“不保存”的话，文件保持原样、什么都不会丢）",
-                JOptionPane.QUESTION_MESSAGE, JOptionPane.YES_NO_OPTION,
-                null, new Object[] {save, discard}, save);
-        save.addActionListener(e -> pane.setValue(save));
-        discard.addActionListener(e -> pane.setValue(discard));
-
-        JDialog dialog = pane.createDialog(owner, "还没保存");
-        dialog.setVisible(true);
-        dialog.dispose();
-        Object value = pane.getValue();
-        if (value == save) {
-            return JOptionPane.YES_OPTION;
-        }
-        if (value == discard) {
-            return JOptionPane.NO_OPTION;
-        }
-        return JOptionPane.CLOSED_OPTION; // 直接把窗口关掉 = 取消
+                "保存", "不保存");
+        return switch (picked) {
+            case 0 -> JOptionPane.YES_OPTION;
+            case 1 -> JOptionPane.NO_OPTION;
+            default -> JOptionPane.CLOSED_OPTION; // 直接关掉窗口 = 取消
+        };
     }
 
     /** 问一次"要不要保存"；给测试直接验按钮行为用。 */
