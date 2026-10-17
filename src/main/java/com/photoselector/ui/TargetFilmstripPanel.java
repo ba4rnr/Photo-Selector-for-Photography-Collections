@@ -193,9 +193,27 @@ final class TargetFilmstripPanel extends JPanel {
     }
 
     void selectPhoto(Path photo) {
+        selectPhoto(photo, false);
+    }
+
+    /**
+     * 选中照片并把它的缩略图放到视口正中；只给启动恢复用。
+     *
+     * <p>普通点击和键盘选片仍走 {@link #selectPhoto(Path)} 的最小滚动，
+     * 否则每换一张照片，整条底栏都会大幅移动。
+     */
+    void selectPhotoCentered(Path photo) {
+        selectPhoto(photo, true);
+    }
+
+    private void selectPhoto(Path photo, boolean center) {
         selectedPhoto = photo;
         if (photo != null) {
-            scrollToPhoto(photo);
+            if (center) {
+                centerPhoto(photo);
+            } else {
+                scrollToPhoto(photo);
+            }
         }
         repaint();
     }
@@ -318,6 +336,23 @@ final class TargetFilmstripPanel extends JPanel {
         }
     }
 
+    /** 把目标照片的格子中心对准视口中心，再夹进合法的横向滚动范围。 */
+    private void centerPhoto(Path photo) {
+        int index = session == null ? -1 : session.indexOf(photo);
+        if (index < 0 || !(getParent() instanceof JViewport viewport)) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            Rectangle cell = cellRect(index);
+            int extent = viewport.getExtentSize().width;
+            int content = getPreferredSize().width;
+            int center = cell.x + cell.width / 2;
+            int x = Math.max(0, Math.min(Math.max(0, content - extent),
+                    center - extent / 2));
+            viewport.setViewPosition(new Point(x, viewport.getViewPosition().y));
+        });
+    }
+
     private void requestVisibleThumbnails() {
         if (!isVisible() || session == null || count() == 0) {
             return;
@@ -412,6 +447,11 @@ final class TargetFilmstripPanel extends JPanel {
 
     int cellWidthForTest() {
         return cellWidth();
+    }
+
+    int photoCenterInViewForTest(Path photo) {
+        int index = session == null ? -1 : session.indexOf(photo);
+        return index < 0 ? -1 : cellRect(index).x + THUMBNAIL_HEIGHT / 2;
     }
 
     boolean isLoaded(Path photo) {

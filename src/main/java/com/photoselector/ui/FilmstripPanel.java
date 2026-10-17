@@ -293,7 +293,7 @@ final class FilmstripPanel extends JPanel {
             for (Path candidate : group.photos()) {
                 if (candidate.toAbsolutePath().normalize().equals(normalized)) {
                     setCurrentPhoto(candidate);
-                    scrollToPhoto(candidate);
+                    centerPhoto(candidate);
                     return true;
                 }
             }
@@ -359,6 +359,36 @@ final class FilmstripPanel extends JPanel {
         }
     }
 
+    /**
+     * 把某张照片放到视口正中间；启动恢复专用。
+     *
+     * <p>普通过片用 {@link #scrollToPhoto}，只需要“滚到看得见”，
+     * 不能让每按一次方向键画面都大幅居中跳动。
+     */
+    private void centerPhoto(Path photo) {
+        if (!(getParent() instanceof JViewport viewport)) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            for (GroupBox box : computeLayout()) {
+                if (box.collapsed()) {
+                    continue;
+                }
+                int index = groups.get(box.index()).photos().indexOf(photo);
+                if (index < 0) {
+                    continue;
+                }
+                int center = box.x() + PAD + index * cellWidth + (cellWidth - GAP) / 2;
+                int extent = viewport.getExtentSize().width;
+                int content = getPreferredSize().width;
+                int x = Math.max(0, Math.min(Math.max(0, content - extent),
+                        center - extent / 2));
+                viewport.setViewPosition(new Point(x, viewport.getViewPosition().y));
+                return;
+            }
+        });
+    }
+
     /** 只留给测试用：每一组当前占的矩形（外圈边框的范围）。 */
     List<Rectangle> groupBoundsForTest() {
         List<Rectangle> bounds = new ArrayList<>();
@@ -396,10 +426,16 @@ final class FilmstripPanel extends JPanel {
             }
             int index = groups.get(box.index()).photos().indexOf(photo);
             if (index >= 0) {
-                return box.x() + index * cellWidth;
+                return box.x() + PAD + index * cellWidth;
             }
         }
         return -1;
+    }
+
+    /** 某张照片在素材条坐标系里的中心 x；居中恢复测试用。 */
+    int photoCenterInViewForTest(Path photo) {
+        int left = photoLeftInViewForTest(photo);
+        return left < 0 ? -1 : left + (cellWidth - GAP) / 2;
     }
 
     /**

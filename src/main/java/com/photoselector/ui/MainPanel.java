@@ -767,7 +767,7 @@ public final class MainPanel extends JPanel {
             if (session != null && session.indexOf(photo) >= 0) {
                 targetPanel.selectPhoto(photo);
                 arrangePanel.selectPhoto(photo);
-                targetFilmstrip.selectPhoto(photo);
+                targetFilmstrip.selectPhotoCentered(photo);
                 showPhotoInViewer(photo);
             } else {
                 filmstrip.selectPhoto(photo);

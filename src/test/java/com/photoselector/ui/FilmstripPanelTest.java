@@ -474,6 +474,40 @@ class FilmstripPanelTest {
         loader.shutdown();
     }
 
+    @Test
+    void 恢复照片时素材条把目标照片放在视口正中() throws Exception {
+        Theme.install();
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            photos.add(TestImages.writeJpeg(tempDir.resolve("center-" + i + ".jpg"), 900, 600));
+        }
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        JScrollPane scroll = filmstrip.wrapInScrollPane();
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(500, 190);
+            filmstrip.setGroups(oneGroup("照片", photos), 120);
+            layoutTree(scroll);
+        });
+
+        Path target = photos.get(10);
+        SwingUtilities.invokeAndWait(() -> filmstrip.selectPhoto(target));
+        long deadline = System.currentTimeMillis() + 5_000;
+        int position = filmstrip.viewPositionXForTest();
+        while (position == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+            position = filmstrip.viewPositionXForTest();
+        }
+
+        int extent = scroll.getViewport().getExtentSize().width;
+        int expected = Math.max(0, Math.min(
+                filmstrip.getPreferredSize().width - extent,
+                filmstrip.photoCenterInViewForTest(target) - extent / 2));
+        assertEquals(expected, position, 2, "恢复的照片应当落在可见区域中央");
+        awaitIdle(loader);
+        loader.shutdown();
+    }
+
     private static void waitUntilLoaded(FilmstripPanel filmstrip, int expected) throws Exception {
         long deadline = System.currentTimeMillis() + 30_000;
         while (filmstrip.loadedCount() < expected && System.currentTimeMillis() < deadline) {
