@@ -19,8 +19,10 @@ import java.util.regex.Pattern;
  * “unknown”原始字节。重新组装树容易丢字段，也容易被编码器重新排序。这里直接保留
  * 段字节，只对 EXIF 的方向字段做必要修改，其他内容一个字节都不碰。
  *
- * <p>只处理 APPn（0xE1…0xEF）和 COM（0xFE）；DQT / DHT / SOF / SOS 属于图像编码，
- * 必须由新的编码器自己生成。APP0/JFIF 也不搬，避免和新文件头重复。
+ * <p>只搬有明确语义、且不依赖旧文件偏移的段：
+ * EXIF / XMP（APP1）、ICC（APP2）、IPTC / Photoshop（APP13）和注释（COM）。
+ * APP14、MPF 等段与旧文件的颜色变换或多图偏移绑定，不能直接复制；
+ * DQT / DHT / SOF / SOS 也必须由新的编码器自己生成。
  */
 final class JpegMetadataSegments {
 
@@ -29,11 +31,19 @@ final class JpegMetadataSegments {
     private static final int SOS = 0xDA;
     private static final int APP0 = 0xE0;
     private static final int APP1 = 0xE1;
+    private static final int APP2 = 0xE2;
+    private static final int APP13 = 0xED;
     private static final int COM = 0xFE;
 
     /** XMP 的 APP1 前缀；用于和 EXIF 的 APP1 区分。 */
     private static final byte[] XMP_PREFIX =
             "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] EXTENDED_XMP_PREFIX =
+            "http://ns.adobe.com/xmp/extension/\0".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] ICC_PREFIX =
+            "ICC_PROFILE\0".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] IPTC_PREFIX =
+            "Photoshop 3.0\0".getBytes(StandardCharsets.US_ASCII);
 
     /** XMP 里可能同时记录方向；属性写法和元素写法都要归一成 1。 */
     private static final Pattern XMP_ATTRIBUTE_ORIENTATION = Pattern.compile(
@@ -82,7 +92,7 @@ final class JpegMetadataSegments {
                 break; // 段损坏；能保下来的已经保下来了
             }
             int segmentMarker = marker;
-            if ((segmentMarker >= APP1 && segmentMarker <= 0xEF) || segmentMarker == COM) {
+            if (shouldKeep(segmentMarker, data, pos, total)) {
                 byte[] segment = Arrays.copyOfRange(data, pos, pos + total);
                 if (segmentMarker == APP1) {
                     if (isExif(segment)) {
@@ -96,6 +106,42 @@ final class JpegMetadataSegments {
             pos += total;
         }
         return segments;
+    }
+
+    private static boolean shouldKeep(int marker, byte[] data, int offset, int total) {
+        if (marker == COM) {
+            return true;
+        }
+        if (marker == APP1) {
+            return hasPrefix(data, offset, total, XMP_PREFIX)
+                    || hasPrefix(data, offset, total, EXTENDED_XMP_PREFIX)
+                    || isExifBytes(data, offset, total);
+        }
+        if (marker == APP2) {
+            return hasPrefix(data, offset, total, ICC_PREFIX);
+        }
+        return marker == APP13 && hasPrefix(data, offset, total, IPTC_PREFIX);
+    }
+
+    private static boolean hasPrefix(byte[] data, int offset, int total, byte[] prefix) {
+        if (total < 4 + prefix.length) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length; i++) {
+            if (data[offset + 4 + i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isExifBytes(byte[] data, int offset, int total) {
+        if (total < 10) {
+            return false;
+        }
+        int at = offset + 4;
+        return data[at] == 'E' && data[at + 1] == 'x' && data[at + 2] == 'i'
+                && data[at + 3] == 'f' && data[at + 4] == 0 && data[at + 5] == 0;
     }
 
     /**

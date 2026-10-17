@@ -3,6 +3,7 @@ package com.photoselector.io;
 import java.io.IOException;
 import java.nio.file.ClosedWatchServiceException;
 import java.nio.file.FileSystems;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
@@ -22,6 +23,9 @@ public final class TargetFolderWatcher implements AutoCloseable {
 
     /** 一串文件事件停止多久之后算稳定。 */
     static final long DEBOUNCE_MILLIS = 300;
+
+    /** 目录失效后，每隔多久试一次重新注册。 */
+    private static final long RECOVERY_MILLIS = 500;
 
     /** 文件夹内容变了。回调在监听线程上执行，调用方要自己切回界面线程。 */
     @FunctionalInterface
@@ -52,16 +56,7 @@ public final class TargetFolderWatcher implements AutoCloseable {
         }
 
         Path normalized = folder.toAbsolutePath().normalize();
-        WatchService next = FileSystems.getDefault().newWatchService();
-        try {
-            normalized.register(next,
-                    StandardWatchEventKinds.ENTRY_CREATE,
-                    StandardWatchEventKinds.ENTRY_DELETE,
-                    StandardWatchEventKinds.ENTRY_MODIFY);
-        } catch (IOException | RuntimeException e) {
-            next.close();
-            throw e;
-        }
+        WatchService next = open(normalized);
 
         service = next;
         watchedFolder = normalized;
@@ -86,23 +81,49 @@ public final class TargetFolderWatcher implements AutoCloseable {
         try {
             while (myGeneration == generation) {
                 WatchKey key = watcher.take();
-                boolean changed = drain(key);
+                Drain first = drain(key);
+                boolean changed = first.changed();
+                boolean valid = first.valid();
                 if (!changed) {
-                    continue;
+                    // 目录本身失效时 key.reset() 会是 false，即使没有文件事件也必须处理。
+                    if (valid) {
+                        continue;
+                    }
+                } else {
+                    // 静默期里还可能继续来事件；等完再排空一次，尽量只通知一轮。
+                    TimeUnit.MILLISECONDS.sleep(DEBOUNCE_MILLIS);
+                    WatchKey extra;
+                    while ((extra = watcher.poll()) != null) {
+                        Drain next = drain(extra);
+                        changed |= next.changed();
+                        valid &= next.valid();
+                    }
+                }
+                if ((changed || !valid) && myGeneration == generation) {
+                    notifyChanged(folder, myGeneration);
                 }
 
-                // 静默期里还可能继续来事件；等完再排空一次，尽量只通知一轮。
-                TimeUnit.MILLISECONDS.sleep(DEBOUNCE_MILLIS);
-                WatchKey extra;
-                while ((extra = watcher.poll()) != null) {
-                    changed |= drain(extra);
-                }
-                if (changed && myGeneration == generation) {
-                    try {
-                        listener.changed(folder);
-                    } catch (RuntimeException ignored) {
-                        // 上层回调出问题不该让监听线程永久退出。
+                if (!valid) {
+                    // 目录被删除 / 改名：先告诉上层，再等它重新出现并重新注册。
+                    synchronized (this) {
+                        if (service == watcher) {
+                            service = null;
+                        }
                     }
+                    closeQuietly(watcher);
+                    WatchService recovered = recover(folder, myGeneration);
+                    if (recovered == null) {
+                        return;
+                    }
+                    watcher = recovered;
+                    synchronized (this) {
+                        if (myGeneration != generation) {
+                            closeQuietly(recovered);
+                            return;
+                        }
+                        service = recovered;
+                    }
+                    notifyChanged(folder, myGeneration);
                 }
             }
         } catch (InterruptedException e) {
@@ -112,10 +133,55 @@ public final class TargetFolderWatcher implements AutoCloseable {
         }
     }
 
-    private static boolean drain(WatchKey key) {
+    private record Drain(boolean changed, boolean valid) {
+    }
+
+    private static Drain drain(WatchKey key) {
         boolean changed = !key.pollEvents().isEmpty();
-        key.reset();
-        return changed;
+        boolean valid = key.reset();
+        return new Drain(changed, valid);
+    }
+
+    private WatchService recover(Path folder, long myGeneration) {
+        while (myGeneration == generation) {
+            try {
+                TimeUnit.MILLISECONDS.sleep(RECOVERY_MILLIS);
+                if (Files.isDirectory(folder)) {
+                    return open(folder);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            } catch (IOException | RuntimeException ignored) {
+                // 目录刚回来时可能还没注册成功，下一轮再试
+            }
+        }
+        return null;
+    }
+
+    private static WatchService open(Path folder) throws IOException {
+        WatchService service = FileSystems.getDefault().newWatchService();
+        try {
+            folder.register(service,
+                    StandardWatchEventKinds.ENTRY_CREATE,
+                    StandardWatchEventKinds.ENTRY_DELETE,
+                    StandardWatchEventKinds.ENTRY_MODIFY);
+            return service;
+        } catch (IOException | RuntimeException e) {
+            service.close();
+            throw e;
+        }
+    }
+
+    private void notifyChanged(Path folder, long myGeneration) {
+        if (myGeneration != generation) {
+            return;
+        }
+        try {
+            listener.changed(folder);
+        } catch (RuntimeException ignored) {
+            // 上层回调出问题不该让监听线程永久退出。
+        }
     }
 
     private void stopCurrent() {
@@ -133,5 +199,13 @@ public final class TargetFolderWatcher implements AutoCloseable {
             thread = null;
         }
         watchedFolder = null;
+    }
+
+    private static void closeQuietly(WatchService watcher) {
+        try {
+            watcher.close();
+        } catch (IOException ignored) {
+            // 已经失效或关闭
+        }
     }
 }

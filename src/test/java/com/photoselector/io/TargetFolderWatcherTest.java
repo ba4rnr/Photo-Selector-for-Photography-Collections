@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
@@ -36,5 +37,37 @@ class TargetFolderWatcherTest {
             assertTrue(changed.await(10, TimeUnit.SECONDS), "监听到外部变化");
             assertEquals(folder.toAbsolutePath().normalize(), reported.get());
         }
+    }
+
+    @Test
+    void 目录消失后会等待并重新注册监听() throws Exception {
+        Path folder = Files.createDirectories(tempDir.resolve("会重建的目录"));
+        AtomicInteger changes = new AtomicInteger();
+        AtomicReference<Path> reported = new AtomicReference<>();
+        try (TargetFolderWatcher watcher = new TargetFolderWatcher(path -> {
+            reported.set(path);
+            changes.incrementAndGet();
+        })) {
+            watcher.watch(folder);
+
+            Files.delete(folder);
+            waitUntil(() -> changes.get() >= 1, "目录失效通知");
+
+            Files.createDirectories(folder);
+            waitUntil(() -> changes.get() >= 2, "目录重建并重新注册");
+
+            Files.writeString(folder.resolve("new.tmp"), "x");
+            waitUntil(() -> changes.get() >= 3, "重新注册后还能收到事件");
+            assertEquals(folder.toAbsolutePath().normalize(), reported.get());
+        }
+    }
+
+    private static void waitUntil(java.util.function.BooleanSupplier condition, String what)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(30);
+        }
+        assertTrue(condition.getAsBoolean(), "等不到：" + what);
     }
 }

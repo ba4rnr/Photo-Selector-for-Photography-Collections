@@ -83,6 +83,7 @@ final class DragOut {
         MouseAdapter handler = new MouseAdapter() {
 
             private Point pressedAt;
+            private Path pressedPhoto;
             private final DropTarget[] hinted = new DropTarget[MAX_HINTS];
             private int hintedCount;
             private boolean hintedTrash;
@@ -92,6 +93,9 @@ final class DragOut {
             @Override
             public void mousePressed(MouseEvent e) {
                 pressedAt = SwingUtilities.isLeftMouseButton(e) ? e.getPoint() : null;
+                // 面板自己的 mousePressed 先执行，选中项已经更新；此刻锁定被拖照片，
+                // 后续即便当前项被别的事件改掉，松手也不会换成另一张。
+                pressedPhoto = pressedAt == null ? null : photo.get();
                 ghostPhoto = null;
                 ghostImage = null;
             }
@@ -101,7 +105,7 @@ final class DragOut {
                 if (pressedAt == null || e.getPoint().distance(pressedAt) <= THRESHOLD) {
                     return;
                 }
-                Path dragging = photo.get();
+                Path dragging = pressedPhoto;
                 if (dragging == null) {
                     return;
                 }
@@ -120,7 +124,7 @@ final class DragOut {
                 Point start = pressedAt;
                 pressedAt = null;
                 hideGhost(source);
-                Path dragging = photo.get();
+                Path dragging = pressedPhoto;
                 DropTarget target = dragging == null
                         ? null : resolveTarget(source, e.getPoint(), dragging, accept);
                 int index = target == null
@@ -130,6 +134,7 @@ final class DragOut {
                 clearHint();
                 ghostPhoto = null;
                 ghostImage = null;
+                pressedPhoto = null;
                 if (start == null || !SwingUtilities.isLeftMouseButton(e)
                         || e.getPoint().distance(start) <= THRESHOLD || !enabled.getAsBoolean()
                         || dragging == null) {
@@ -444,6 +449,7 @@ final class DragOut {
         MouseAdapter handler = new MouseAdapter() {
 
             private Point pressedAt;
+            private Path pressedPhoto;
             private TargetPanel hinted;
             private Path ghostPhoto;
             private BufferedImage ghostImage;
@@ -451,6 +457,7 @@ final class DragOut {
             @Override
             public void mousePressed(MouseEvent e) {
                 pressedAt = SwingUtilities.isLeftMouseButton(e) ? e.getPoint() : null;
+                pressedPhoto = pressedAt == null ? null : photo.get();
                 ghostPhoto = null;
                 ghostImage = null;
             }
@@ -460,7 +467,7 @@ final class DragOut {
                 if (pressedAt == null || e.getPoint().distance(pressedAt) <= THRESHOLD) {
                     return;
                 }
-                Path dragging = photo.get();
+                Path dragging = pressedPhoto;
                 if (dragging == null) {
                     return;
                 }
@@ -477,13 +484,14 @@ final class DragOut {
                 Point start = pressedAt;
                 pressedAt = null;
                 hideGhost(source);
-                Path dragging = photo.get();
+                Path dragging = pressedPhoto;
                 TargetPanel panel = dragging == null ? null : resolvePanel(source, e.getPoint());
                 int index = panel == null
                         ? -1 : panel.dropIndexAt(toPanelPoint(source, panel, e.getPoint()));
                 clearHint();
                 ghostPhoto = null;
                 ghostImage = null;
+                pressedPhoto = null;
                 if (start == null || !SwingUtilities.isLeftMouseButton(e)
                         || e.getPoint().distance(start) <= THRESHOLD || dragging == null) {
                     return;

@@ -236,7 +236,8 @@ public final class Saver {
                 }
                 copied++;
             } catch (IOException | RuntimeException e) {
-                problems.add("复制或写图失败：" + item.source().getFileName());
+                problems.add("复制或写图失败：" + item.source().getFileName()
+                        + "（" + e.getMessage() + "）");
                 failedSources.add(item.source());
             }
         }
