@@ -24,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 import javax.imageio.ImageIO;
 
 import com.photoselector.core.EditState;
+import com.photoselector.core.CropRect;
 import com.photoselector.core.NumberingRule;
 import com.photoselector.core.Session;
 import com.photoselector.testing.TestImages;
@@ -256,6 +257,23 @@ class SaverTest {
                 "IFD0 / Exif SubIFD 的宽高都应当跟上旋转后的像素");
         assertFalse(ExifOrientation.hasThumbnailIfd(tiff),
                 "旧缩略图 IFD 不能再挂在 EXIF 链上");
+    }
+
+    @Test
+    void 裁切会真正写进保存的JPG() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path source = TestImages.writeJpeg(tempDir.resolve("原图.jpg"), 400, 300);
+
+        Session session = sessionFor(target);
+        session.add(source);
+        session.setEdits(source, EditState.NONE.withCrop(
+                new CropRect(0.25, 0.25, 0.5, 0.5)));
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+        BufferedImage saved = ImageIO.read(target.resolve("010.jpg").toFile());
+        assertEquals(200, saved.getWidth());
+        assertEquals(150, saved.getHeight());
     }
 
     private static boolean containsSegment(List<byte[]> segments, int marker, byte[] payload) {

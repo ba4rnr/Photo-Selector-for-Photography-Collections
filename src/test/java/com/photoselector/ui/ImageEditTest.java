@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.EditState;
+import com.photoselector.core.CropRect;
 import com.photoselector.core.Workspace;
 import com.photoselector.testing.TestImages;
 import com.photoselector.ui.theme.Theme;
@@ -176,6 +177,51 @@ class ImageEditTest {
         panel.shutdown();
     }
 
+    @Test
+    void 工具栏裁切完成后进入中间商历史_重置和撤销都能处理() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        ViewerPanel viewer = panel.viewerForTest();
+        Path photo = viewer.photo();
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            layoutTree(viewer);
+            panel.beginCrop();
+        });
+        assertTrue(viewer.isCropModeForTest(), "菜单 / 按钮进入裁切模式");
+
+        java.awt.Rectangle image = viewer.imageDrawRectForTest();
+        Point from = new Point(image.x + image.width / 4, image.y + image.height / 4);
+        Point to = new Point(image.x + image.width * 3 / 4,
+                image.y + image.height * 3 / 4);
+        SwingUtilities.invokeAndWait(() -> {
+            sendMouse(viewer, from, MouseEvent.MOUSE_PRESSED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, to, MouseEvent.MOUSE_DRAGGED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, to, MouseEvent.MOUSE_RELEASED, 0);
+        });
+
+        CropRect crop = panel.targetPanelForTest().session().editsOf(photo).crop();
+        assertTrue(crop != null, "裁切要记在中间商里");
+        assertEquals(CursorTool.SELECT, panel.toolBar().activeTool(),
+                "完成裁切后回到选择工具");
+
+        SwingUtilities.invokeAndWait(panel::undo);
+        assertTrue(panel.targetPanelForTest().session().editsOf(photo).crop() == null,
+                "撤销裁切应当恢复整张画面");
+        panel.shutdown();
+    }
+
+    @Test
+    void 工具栏网格按钮切换三分辅助线() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        ViewerPanel viewer = panel.viewerForTest();
+
+        SwingUtilities.invokeAndWait(() -> panel.toolBar().gridButton().doClick(0));
+        assertTrue(viewer.isGridVisible(), "第一次点击打开网格");
+        SwingUtilities.invokeAndWait(() -> panel.toolBar().gridButton().doClick(0));
+        assertTrue(!viewer.isGridVisible(), "再点一次关闭网格");
+        panel.shutdown();
+    }
+
     private static void waitUntil(BooleanSupplier condition, String what) throws Exception {
         long deadline = System.currentTimeMillis() + 20_000;
         while (!condition.getAsBoolean() && System.currentTimeMillis() < deadline) {
@@ -199,5 +245,11 @@ class ImageEditTest {
                 layoutTree(nested);
             }
         }
+    }
+
+    private static void sendMouse(ViewerPanel viewer, Point point, int id, int modifiers) {
+        int button = id == MouseEvent.MOUSE_DRAGGED ? MouseEvent.NOBUTTON : MouseEvent.BUTTON1;
+        viewer.dispatchEvent(new MouseEvent(viewer, id, System.currentTimeMillis(), modifiers,
+                point.x, point.y, id == MouseEvent.MOUSE_PRESSED ? 1 : 0, false, button));
     }
 }

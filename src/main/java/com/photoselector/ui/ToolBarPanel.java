@@ -41,6 +41,7 @@ final class ToolBarPanel extends JPanel {
     private final ToolButton undoButton = new ToolButton("撤销", Icons.undo());
     private final ToolButton redoButton = new ToolButton("重做", Icons.redo());
     private final ToolButton fitButton = new ToolButton("适应窗口", Icons.fitToWindow());
+    private final ToolButton gridButton = new ToolButton("网格", Icons.grid());
 
     ToolBarPanel() {
         super(new FlowLayout(FlowLayout.LEFT, 4, 5));
@@ -68,7 +69,7 @@ final class ToolBarPanel extends JPanel {
         add(Box.createHorizontalStrut(28));
 
         // 右组 · 视图辅助
-        add(new ToolButton("网格", Icons.grid()));
+        add(gridButton);
         add(fitButton);
         add(modeButton);
     }
@@ -106,6 +107,11 @@ final class ToolBarPanel extends JPanel {
     /** 供外部挂监听：大图适应窗口。 */
     ToolButton fitButton() {
         return fitButton;
+    }
+
+    /** 三分网格开关。 */
+    ToolButton gridButton() {
+        return gridButton;
     }
 
     /** 当前选中的光标工具。 */

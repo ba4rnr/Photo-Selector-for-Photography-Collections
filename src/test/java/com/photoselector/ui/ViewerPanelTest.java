@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
@@ -21,6 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.core.CropRect;
+import com.photoselector.core.EditState;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.testing.TestImages;
 import com.photoselector.ui.theme.Theme;
@@ -195,6 +201,80 @@ class ViewerPanelTest {
         assertTrue(viewer.hasImage(), "当前代次的结果应当正常上屏");
         assertEquals(40, viewer.imageSizeForTest().width);
         assertEquals(10, viewer.imageSizeForTest().height);
+    }
+
+    @Test
+    void 裁切工具拖出选框并显示裁切后的画面() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 400, 300);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        AtomicReference<CropRect> chosen = new AtomicReference<>();
+        viewer.setOnCropCommitted(chosen::set);
+        SwingUtilities.invokeAndWait(() -> viewer.setCursorTool(CursorTool.CROP));
+        assertTrue(viewer.isCropModeForTest());
+
+        Rectangle image = viewer.imageDrawRectForTest();
+        Point from = new Point(image.x + image.width / 4, image.y + image.height / 4);
+        Point to = new Point(image.x + image.width * 3 / 4,
+                image.y + image.height * 3 / 4);
+        SwingUtilities.invokeAndWait(() -> {
+            sendMouse(viewer, from, MouseEvent.MOUSE_PRESSED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, to, MouseEvent.MOUSE_DRAGGED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, to, MouseEvent.MOUSE_RELEASED, 0);
+        });
+
+        CropRect crop = chosen.get();
+        assertTrue(crop != null, "拖动后应当提交一块裁切区域");
+        assertEquals(0.25, crop.x(), 0.03);
+        assertEquals(0.25, crop.y(), 0.03);
+        assertEquals(0.50, crop.width(), 0.03);
+        assertEquals(0.50, crop.height(), 0.03);
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setEdits(EditState.NONE.withCrop(crop));
+            viewer.setGridVisible(true);
+        });
+        Path output = Path.of("target", "ui-crop-grid.png");
+        Files.createDirectories(output.getParent());
+        ImageIO.write(render(viewer), "png", output.toFile());
+
+        SwingUtilities.invokeAndWait(() -> viewer.setCursorTool(CursorTool.SELECT));
+        assertEquals(200, viewer.imageSizeForTest().width);
+        assertEquals(150, viewer.imageSizeForTest().height);
+        loader.shutdown();
+    }
+
+    @Test
+    void 三分网格只画在图片范围内() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 400, 300);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+        viewer.setGridVisible(true);
+        Rectangle image = viewer.imageDrawRectForTest();
+        BufferedImage rendered = render(viewer);
+
+        int y = image.y + image.height / 2;
+        int x = image.x + image.width / 3;
+        assertTrue(rendered.getRGB(x, y) != rendered.getRGB(x + 2, y),
+                "三分之一处应当看到一条辅助线");
+        assertTrue(rendered.getRGB(image.x - 4, y) != rendered.getRGB(x, y),
+                "图片外的留白不应被网格铺满");
+        loader.shutdown();
     }
 
     @Test
@@ -384,5 +464,11 @@ class ViewerPanelTest {
                 java.awt.event.MouseEvent.BUTTON1_DOWN_MASK,
                 bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 1, false,
                 java.awt.event.MouseEvent.BUTTON1)));
+    }
+
+    private static void sendMouse(ViewerPanel viewer, Point point, int id, int modifiers) {
+        int button = id == MouseEvent.MOUSE_DRAGGED ? MouseEvent.NOBUTTON : MouseEvent.BUTTON1;
+        viewer.dispatchEvent(new MouseEvent(viewer, id, System.currentTimeMillis(), modifiers,
+                point.x, point.y, id == MouseEvent.MOUSE_PRESSED ? 1 : 0, false, button));
     }
 }

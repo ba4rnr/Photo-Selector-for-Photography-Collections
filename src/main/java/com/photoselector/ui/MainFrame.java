@@ -175,7 +175,9 @@ public final class MainFrame extends JFrame {
         flip.add(imageAction(mainPanel, "水平翻转", mainPanel::flipCurrentPhotoHorizontally));
         flip.add(imageAction(mainPanel, "垂直翻转", mainPanel::flipCurrentPhotoVertically));
         image.add(flip);
-        image.add(pending("裁切"));
+        JMenuItem crop = new JMenuItem("裁切");
+        crop.addActionListener(e -> mainPanel.beginCrop());
+        image.add(crop);
         JMenuItem reset = new JMenuItem("重置");
         reset.addActionListener(e -> mainPanel.resetCurrentPhotoEdits());
         image.add(reset);
@@ -370,17 +372,4 @@ public final class MainFrame extends JFrame {
         return item;
     }
 
-    /** 尚未实现的菜单项：先禁用占位。 */
-    private static JMenuItem pending(String text) {
-        return pending(text, null);
-    }
-
-    private static JMenuItem pending(String text, KeyStroke accelerator) {
-        JMenuItem item = new JMenuItem(text);
-        if (accelerator != null) {
-            item.setAccelerator(accelerator);
-        }
-        item.setEnabled(false);
-        return item;
-    }
 }

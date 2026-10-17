@@ -53,4 +53,25 @@ class EditStateTest {
         assertTrue(flipped.flipVertical(), "翻转位被反过来");
         assertFalse(flipped.isNone());
     }
+
+    @Test
+    void 裁切框跟着旋转保持在同一块画面上() {
+        CropRect crop = new CropRect(0.1, 0.2, 0.3, 0.4);
+        EditState rotated = EditState.NONE.withCrop(crop).rotate(1);
+
+        assertEquals(new CropRect(0.4, 0.1, 0.4, 0.3), rotated.crop(),
+                "顺时针转画面，选框也要跟着转，不能留在原来的坐标");
+        assertEquals(crop, rotated.rotate(-1).crop(),
+                "再逆时针转回来，选框应当回到原位");
+    }
+
+    @Test
+    void 裁切框跟着镜像翻转() {
+        CropRect crop = new CropRect(0.1, 0.2, 0.3, 0.4);
+        EditState h = EditState.NONE.withCrop(crop).flipHorizontal();
+        EditState v = EditState.NONE.withCrop(crop).flipVertically();
+
+        assertEquals(new CropRect(0.6, 0.2, 0.3, 0.4), h.crop());
+        assertEquals(new CropRect(0.1, 0.4, 0.3, 0.4), v.crop());
+    }
 }

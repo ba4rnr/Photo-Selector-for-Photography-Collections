@@ -12,13 +12,16 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
+import java.awt.geom.Area;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.io.ImageSource;
+import com.photoselector.core.CropRect;
 import com.photoselector.core.EditState;
 import com.photoselector.core.PhotoTransforms;
 import com.photoselector.ui.theme.ChipGroup;
@@ -101,6 +104,9 @@ final class ViewerPanel extends JPanel {
      * 而不是在前一版结果上叠——叠来叠去既会糊，撤销时也找不回来。
      */
     private BufferedImage rawImage;
+
+    /** 只套旋转 / 翻转、还没裁切的画面；裁切工具要在它上面画完整选区。 */
+    private BufferedImage orientedImage;
     private boolean loading;
     private boolean failed;
 
@@ -136,6 +142,17 @@ final class ViewerPanel extends JPanel {
     /** 当前的光标工具。它决定在大图上按住左键拖动是什么意思。 */
     private CursorTool tool = CursorTool.SELECT;
 
+    /** 裁切模式：显示未裁切的完整画面，用拖动框选新的裁切区域。 */
+    private boolean cropMode;
+    private Point cropDragStart;
+    private CropRect cropPreview;
+
+    /** 三分网格只是查看辅助，不进入编辑历史。 */
+    private boolean gridVisible;
+
+    /** 用户完成一次裁切框选后通知外部。 */
+    private Consumer<CropRect> onCropCommitted = crop -> { };
+
     /**
      * 表头右侧「适应 / 100%」这一组胶囊。
      *
@@ -165,6 +182,10 @@ final class ViewerPanel extends JPanel {
                     fitToWindow();
                 } else if (chip == 1) {
                     actualSize();
+                } else if (cropMode && imageDrawRect().contains(e.getPoint())) {
+                    cropDragStart = clampToImage(e.getPoint());
+                    cropPreview = null;
+                    repaint();
                 } else if (canPan()) {
                     dragStart = e.getPoint();
                     dragOffsetX = offsetX;
@@ -175,6 +196,11 @@ final class ViewerPanel extends JPanel {
 
             @Override
             public void mouseDragged(MouseEvent e) {
+                if (cropDragStart != null) {
+                    cropPreview = normalizedCrop(cropDragStart, e.getPoint());
+                    repaint();
+                    return;
+                }
                 if (dragStart == null) {
                     return;
                 }
@@ -184,6 +210,16 @@ final class ViewerPanel extends JPanel {
 
             @Override
             public void mouseReleased(MouseEvent e) {
+                if (cropDragStart != null) {
+                    CropRect selected = normalizedCrop(cropDragStart, e.getPoint());
+                    cropDragStart = null;
+                    cropPreview = null;
+                    if (selected != null) {
+                        onCropCommitted.accept(selected);
+                    }
+                    repaint();
+                    return;
+                }
                 dragStart = null;
                 setCursor(Cursor.getDefaultCursor());
             }
@@ -215,7 +251,10 @@ final class ViewerPanel extends JPanel {
         long request = ++loadVersion;
         this.photo = newPhoto;
         this.image = null;
+        this.orientedImage = null;
         this.rawImage = null;
+        this.cropDragStart = null;
+        this.cropPreview = null;
         this.failed = false;
         this.loading = newPhoto != null;
         resetView(); // 换片把位置收回中间；缩放比例保留，方便连着看一堆细节
@@ -247,9 +286,11 @@ final class ViewerPanel extends JPanel {
     private void rebuildImageFromEdits() {
         if (rawImage == null) {
             image = null;
+            orientedImage = null;
             return;
         }
-        image = PhotoTransforms.apply(rawImage, edits);
+        orientedImage = PhotoTransforms.applyOrientation(rawImage, edits);
+        image = PhotoTransforms.applyCrop(orientedImage, edits.crop());
     }
 
     /** 适应窗口：按当前窗口大小现算比例，偏移归零。 */
@@ -307,7 +348,7 @@ final class ViewerPanel extends JPanel {
      * @param anchor    以屏幕上的哪一点为基准
      */
     void zoomStep(int direction, Point anchor) {
-        if (image == null) {
+        if (displayImage() == null) {
             return;
         }
         double current = fitToWindow ? fitScale() : customScale;
@@ -366,7 +407,7 @@ final class ViewerPanel extends JPanel {
      * <p>给"以鼠标为基准缩放"用的，测试也拿它验证"光标下始终是同一个像素"。
      */
     Point imagePointAt(Point screenPoint) {
-        if (image == null) {
+        if (displayImage() == null) {
             return null;
         }
         Rectangle area = imageArea();
@@ -421,7 +462,7 @@ final class ViewerPanel extends JPanel {
 
     /** 当前显示比例（百分比）。表头和测试用。 */
     int zoomPercent() {
-        if (image == null) {
+        if (displayImage() == null) {
             return 100;
         }
         return (int) Math.round(currentScale() * 100);
@@ -459,12 +500,13 @@ final class ViewerPanel extends JPanel {
 
     /** 适应窗口时该用多大比例。 */
     private double fitScale() {
-        if (image == null) {
+        BufferedImage display = displayImage();
+        if (display == null) {
             return 1.0;
         }
         Rectangle area = imageArea();
-        return Math.min((double) area.width / image.getWidth(),
-                (double) area.height / image.getHeight());
+        return Math.min((double) area.width / display.getWidth(),
+                (double) area.height / display.getHeight());
     }
 
     private double currentScale() {
@@ -473,9 +515,13 @@ final class ViewerPanel extends JPanel {
 
     /** 图片画出来之后占多大。 */
     private Dimension scaledSize() {
+        BufferedImage display = displayImage();
+        if (display == null) {
+            return new Dimension(1, 1);
+        }
         double scale = currentScale();
-        return new Dimension(Math.max(1, (int) Math.round(image.getWidth() * scale)),
-                Math.max(1, (int) Math.round(image.getHeight() * scale)));
+        return new Dimension(Math.max(1, (int) Math.round(display.getWidth() * scale)),
+                Math.max(1, (int) Math.round(display.getHeight() * scale)));
     }
 
     /**
@@ -485,7 +531,7 @@ final class ViewerPanel extends JPanel {
      * 不然能把照片拖出视野，只剩一片黑。
      */
     private void clampOffset() {
-        if (image == null) {
+        if (displayImage() == null) {
             offsetX = 0;
             offsetY = 0;
             return;
@@ -500,7 +546,7 @@ final class ViewerPanel extends JPanel {
 
     /** 现在能不能拖：图片在某个方向上比窗口大就行。 */
     boolean canPan() {
-        if (image == null) {
+        if (displayImage() == null) {
             return false;
         }
         if (tool != CursorTool.PAN) {
@@ -519,7 +565,32 @@ final class ViewerPanel extends JPanel {
      */
     void setCursorTool(CursorTool cursorTool) {
         this.tool = cursorTool;
+        boolean nextCropMode = cursorTool == CursorTool.CROP;
+        if (cropMode != nextCropMode) {
+            cropMode = nextCropMode;
+            cropDragStart = null;
+            cropPreview = null;
+            // 裁切要尽量看到完整画面，进入时自动适应窗口。
+            fitToWindow();
+        }
         setCursor(Cursor.getDefaultCursor());
+    }
+
+    /** 裁切完成时的回调；MainPanel 负责把它记进中间商。 */
+    void setOnCropCommitted(Consumer<CropRect> listener) {
+        this.onCropCommitted = listener == null ? crop -> { } : listener;
+    }
+
+    /** 三分网格开关。 */
+    void setGridVisible(boolean visible) {
+        if (gridVisible != visible) {
+            gridVisible = visible;
+            repaint();
+        }
+    }
+
+    boolean isGridVisible() {
+        return gridVisible;
     }
 
     /** 现在拖动是不是"把照片拖出去"。 */
@@ -617,7 +688,9 @@ final class ViewerPanel extends JPanel {
         if (photo == null) {
             text = "还没有选中照片";
         } else {
-            String pixels = image == null ? "…" : image.getWidth() + " × " + image.getHeight() + " 像素";
+            BufferedImage display = displayImage();
+            String pixels = display == null ? "…"
+                    : display.getWidth() + " × " + display.getHeight() + " 像素";
             text = photo.getFileName() + "    " + pixels + "    " + photo.getParent();
         }
         g.drawString(shortenMiddle(text, metrics, getWidth() - PADDING * 2 - controlsWidth),
@@ -629,7 +702,7 @@ final class ViewerPanel extends JPanel {
 
     /** 表头右侧的缩放控件：适应窗口、1:1，以及当前百分比。 */
     private void paintZoomControls(Graphics2D g, FontMetrics metrics) {
-        String percent = image == null ? "" : zoomPercent() + "%";
+        String percent = displayImage() == null ? "" : zoomPercent() + "%";
         int percentWidth = percent.isEmpty() ? 0 : metrics.stringWidth(percent) + 10;
 
         int y = (HEADER_HEIGHT - 8 - ChipGroup.HEIGHT) / 2 + 2;
@@ -649,7 +722,7 @@ final class ViewerPanel extends JPanel {
     }
 
     private void paintImageArea(Graphics2D g) {
-        if (image != null) {
+        if (displayImage() != null) {
             paintImage(g);
             return;
         }
@@ -685,8 +758,115 @@ final class ViewerPanel extends JPanel {
         // 不裁的话它会从表头上方一路盖过去，把文件名和缩放控件全糊掉
         Graphics2D clipped = (Graphics2D) g.create();
         clipped.clip(area);
-        clipped.drawImage(image, x, y, size.width, size.height, null);
+        BufferedImage display = displayImage();
+        clipped.drawImage(display, x, y, size.width, size.height, null);
+        if (gridVisible) {
+            paintThirdsGrid(clipped, imageDrawRect());
+        }
+        if (cropMode) {
+            paintCropOverlay(clipped, imageDrawRect());
+        }
         clipped.dispose();
+    }
+
+    /** 当前应该上屏的图：裁切模式下用未裁切的完整画面，其余时候用最终编辑结果。 */
+    private BufferedImage displayImage() {
+        return cropMode ? orientedImage : image;
+    }
+
+    /** 图片在屏幕上的实际绘制矩形（不含四周留白）。 */
+    private Rectangle imageDrawRect() {
+        BufferedImage display = displayImage();
+        if (display == null) {
+            return new Rectangle(0, 0, 0, 0);
+        }
+        Rectangle area = imageArea();
+        Dimension size = scaledSize();
+        return new Rectangle(area.x + (area.width - size.width) / 2 + offsetX,
+                area.y + (area.height - size.height) / 2 + offsetY,
+                size.width, size.height);
+    }
+
+    private Point clampToImage(Point point) {
+        Rectangle bounds = imageDrawRect();
+        return new Point(
+                Math.max(bounds.x, Math.min(bounds.x + bounds.width - 1, point.x)),
+                Math.max(bounds.y, Math.min(bounds.y + bounds.height - 1, point.y)));
+    }
+
+    /** 屏幕上的两个角点换成相对完整画面的裁切矩形；太小的拖动视为误触。 */
+    private CropRect normalizedCrop(Point start, Point end) {
+        Rectangle image = imageDrawRect();
+        if (image.width <= 0 || image.height <= 0) {
+            return null;
+        }
+        Point a = clampToImage(start);
+        Point b = clampToImage(end);
+        int left = Math.min(a.x, b.x);
+        int right = Math.max(a.x, b.x);
+        int top = Math.min(a.y, b.y);
+        int bottom = Math.max(a.y, b.y);
+        if (right - left < 6 || bottom - top < 6) {
+            return null;
+        }
+        return new CropRect(
+                (left - image.x) / (double) image.width,
+                (top - image.y) / (double) image.height,
+                (right - left) / (double) image.width,
+                (bottom - top) / (double) image.height);
+    }
+
+    private Rectangle cropScreenRect(CropRect crop) {
+        Rectangle image = imageDrawRect();
+        int left = image.x + (int) Math.round(crop.x() * image.width);
+        int top = image.y + (int) Math.round(crop.y() * image.height);
+        int right = image.x + (int) Math.round((crop.x() + crop.width()) * image.width);
+        int bottom = image.y + (int) Math.round((crop.y() + crop.height()) * image.height);
+        return new Rectangle(left, top, Math.max(1, right - left), Math.max(1, bottom - top));
+    }
+
+    private void paintThirdsGrid(Graphics2D g, Rectangle image) {
+        if (image.width <= 2 || image.height <= 2) {
+            return;
+        }
+        g.setColor(Theme.GRID_LINE);
+        int x1 = image.x + image.width / 3;
+        int x2 = image.x + image.width * 2 / 3;
+        int y1 = image.y + image.height / 3;
+        int y2 = image.y + image.height * 2 / 3;
+        g.fillRect(x1, image.y, 1, image.height);
+        g.fillRect(x2, image.y, 1, image.height);
+        g.fillRect(image.x, y1, image.width, 1);
+        g.fillRect(image.x, y2, image.width, 1);
+    }
+
+    private void paintCropOverlay(Graphics2D g, Rectangle image) {
+        CropRect selection = cropPreview != null ? cropPreview : edits.crop();
+        if (selection == null || image.width <= 0 || image.height <= 0) {
+            return;
+        }
+        Rectangle selected = cropScreenRect(selection);
+        Area mask = new Area(image);
+        mask.subtract(new Area(selected));
+        g.setColor(Theme.CROP_MASK);
+        g.fill(mask);
+
+        Graphics2D border = (Graphics2D) g.create();
+        border.setColor(Theme.TEXT);
+        border.setStroke(new java.awt.BasicStroke(1f));
+        border.drawRect(selected.x, selected.y,
+                Math.max(0, selected.width - 1), Math.max(0, selected.height - 1));
+        border.dispose();
+    }
+
+    /** 图片绘制矩形；给裁切 / 网格测试用。 */
+    Rectangle imageDrawRectForTest() {
+        return imageDrawRect();
+    }
+
+    /** 眼下是不是裁切模式。 */
+    boolean isCropModeForTest() {
+        return cropMode;
     }
 
     /** 留给图片的那块地方：表头以下、四周留白以内。 */

@@ -24,7 +24,14 @@ public final class PhotoTransforms {
      * 像素只经过一次重采样，画质损失最小。
      */
     public static BufferedImage apply(BufferedImage source, EditState edits) {
-        if (source == null || edits == null || edits.isNone()) {
+        BufferedImage oriented = applyOrientation(source, edits);
+        return applyCrop(oriented, edits == null ? null : edits.crop());
+    }
+
+    /** 只应用旋转 / 翻转，不裁切；裁切工具需要拿未裁切的完整画面做选区预览。 */
+    public static BufferedImage applyOrientation(BufferedImage source, EditState edits) {
+        if (source == null || edits == null
+                || (edits.quarters() == 0 && !edits.flipVertical())) {
             return source;
         }
         int w = source.getWidth();
@@ -54,5 +61,31 @@ public final class PhotoTransforms {
         g.drawImage(source, t, null);
         g.dispose();
         return out;
+    }
+
+    /** 按相对坐标裁切；没有裁切时原样返回。 */
+    public static BufferedImage applyCrop(BufferedImage source, CropRect crop) {
+        if (source == null || crop == null) {
+            return source;
+        }
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int left = clamp((int) Math.round(crop.x() * width), 0, width - 1);
+        int top = clamp((int) Math.round(crop.y() * height), 0, height - 1);
+        int right = clamp((int) Math.round((crop.x() + crop.width()) * width),
+                left + 1, width);
+        int bottom = clamp((int) Math.round((crop.y() + crop.height()) * height),
+                top + 1, height);
+
+        BufferedImage out = new BufferedImage(right - left, bottom - top,
+                BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.drawImage(source, -left, -top, null);
+        g.dispose();
+        return out;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

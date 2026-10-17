@@ -35,6 +35,7 @@ import com.photoselector.io.Saver;
 import com.photoselector.io.TargetFolderWatcher;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.core.CropRect;
 import com.photoselector.core.EditState;
 import com.photoselector.core.NumberingRule;
 import com.photoselector.core.Session;
@@ -279,6 +280,12 @@ public final class MainPanel extends JPanel {
         toolBar.undoButton().addActionListener(e -> undo());
         toolBar.redoButton().addActionListener(e -> redo());
         toolBar.resetButton().addActionListener(e -> resetCurrentPhotoEdits());
+        toolBar.gridButton().addActionListener(e -> {
+            boolean next = !viewer.isGridVisible();
+            viewer.setGridVisible(next);
+            toolBar.gridButton().setActive(next);
+        });
+        viewer.setOnCropCommitted(this::applyCropToCurrentPhoto);
 
         buildAreas();
 
@@ -481,6 +488,26 @@ public final class MainPanel extends JPanel {
                 historyChanged();
             }
         });
+    }
+
+    /** 从菜单进入裁切：工具切到裁切后，在图片上拖出目标区域。 */
+    public void beginCrop() {
+        if (canEditCurrentPhoto()) {
+            toolBar.selectTool(CursorTool.CROP);
+        }
+    }
+
+    /** 裁切框选完成：写入中间商、刷新画面，并回到选择工具。 */
+    private void applyCropToCurrentPhoto(CropRect crop) {
+        editingPhoto().ifPresent(photo -> {
+            Session session = targetPanel.session();
+            EditState next = session.editsOf(photo).withCrop(crop);
+            if (session.setEdits(photo, next)) {
+                viewer.setEdits(next);
+                historyChanged();
+            }
+        });
+        toolBar.selectTool(CursorTool.SELECT);
     }
 
     /** 有没有选中的照片、有没有目标文件夹——两个都有才谈得上编辑。 */
@@ -824,6 +851,7 @@ public final class MainPanel extends JPanel {
         boolean canEdit = canEditCurrentPhoto();
         toolBar.toolButton(CursorTool.ROTATE).setEnabled(canEdit);
         toolBar.toolButton(CursorTool.FLIP).setEnabled(canEdit);
+        toolBar.toolButton(CursorTool.CROP).setEnabled(canEdit);
         toolBar.resetButton().setEnabled(canEdit);
         onHistoryChanged.run();
     }

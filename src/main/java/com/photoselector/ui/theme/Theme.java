@@ -52,6 +52,12 @@ public final class Theme {
     /** 指针压到分隔条上时的提示色：一条细白线，等于"这里可以拖"。 */
     public static final Color DIVIDER_HINT = new Color(0xFFFFFF);
 
+    /** 裁切时盖在选区外的半透明遮罩。 */
+    public static final Color CROP_MASK = new Color(0, 0, 0, 145);
+
+    /** 三分网格辅助线：轻一点，只提示构图，不抢照片本身。 */
+    public static final Color GRID_LINE = new Color(255, 255, 255, 85);
+
     /** 界面主字体。微软雅黑在中文环境下显示最端正。 */
     public static final Font FONT = new Font("Microsoft YaHei UI", Font.PLAIN, 12);
 

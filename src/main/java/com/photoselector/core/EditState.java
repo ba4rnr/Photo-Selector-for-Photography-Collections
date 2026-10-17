@@ -11,18 +11,30 @@ package com.photoselector.core;
  * <p>左右翻（镜像）不单独存，转成"转 180° + 上下翻"来记：
  * 因为 {[1,0;0,-1] · R180} 正好等于水平镜像矩阵。所以连续点翻转也不会越记越乱。
  */
-public record EditState(int quarters, boolean flipVertical) {
+public record EditState(int quarters, boolean flipVertical, CropRect crop) {
 
     /** 没动过的状态：不转、不翻。 */
-    public static final EditState NONE = new EditState(0, false);
+    public static final EditState NONE = new EditState(0, false, null);
 
     public EditState {
         quarters = Math.floorMod(quarters, 4); // 0..3，转四圈回到原样
     }
 
+    /** 兼容只描述旋转 / 翻转的调用；没有裁切。 */
+    public EditState(int quarters, boolean flipVertical) {
+        this(quarters, flipVertical, null);
+    }
+
     /** 顺（逆）时针转一个直角。 */
     public EditState rotate(int quarterTurns) {
-        return new EditState(quarters + quarterTurns, flipVertical);
+        CropRect nextCrop = crop;
+        if (nextCrop != null) {
+            int turns = Math.floorMod(quarterTurns, 4);
+            for (int i = 0; i < turns; i++) {
+                nextCrop = nextCrop.rotateClockwise();
+            }
+        }
+        return new EditState(quarters + quarterTurns, flipVertical, nextCrop);
     }
 
     /**
@@ -32,16 +44,23 @@ public record EditState(int quarters, boolean flipVertical) {
      * "转 180° 并把上下翻反过来"。这样无论之前怎么转过，翻出来的都是你要的那一侧。
      */
     public EditState flipHorizontal() {
-        return new EditState(quarters + 2, !flipVertical);
+        return new EditState(quarters + 2, !flipVertical,
+                crop == null ? null : crop.flipHorizontally());
     }
 
     /** 上下镜像。 */
     public EditState flipVertically() {
-        return new EditState(quarters, !flipVertical);
+        return new EditState(quarters, !flipVertical,
+                crop == null ? null : crop.flipVertically());
+    }
+
+    /** 换一块裁切；传 null 表示恢复整张画面。 */
+    public EditState withCrop(CropRect nextCrop) {
+        return new EditState(quarters, flipVertical, nextCrop);
     }
 
     /** 是不是什么都没改。 */
     public boolean isNone() {
-        return quarters == 0 && !flipVertical;
+        return quarters == 0 && !flipVertical && crop == null;
     }
 }

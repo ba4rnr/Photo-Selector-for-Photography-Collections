@@ -76,4 +76,14 @@ class PhotoTransformsTest {
             }
         }
     }
+
+    @Test
+    void 裁切只留下选框里的像素() {
+        BufferedImage cropped = PhotoTransforms.apply(corners(),
+                EditState.NONE.withCrop(new CropRect(0.5, 2.0 / 3.0, 0.5, 1.0 / 3.0)));
+
+        assertEquals(1, cropped.getWidth());
+        assertEquals(1, cropped.getHeight());
+        assertEquals(0xFFFF00, rgb(cropped, 0, 0), "右下角那块应当是黄色");
+    }
 }
