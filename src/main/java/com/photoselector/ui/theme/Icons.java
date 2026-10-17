@@ -146,79 +146,33 @@ public final class Icons {
 
     /** 选择：经典箭头光标。 */
     public static Icon select() {
-        return stroke(g -> {
-            Path2D path = new Path2D.Double();
-            path.moveTo(3.5, 2);
-            path.lineTo(3.5, 13);
-            path.lineTo(6.5, 10.2);
-            path.lineTo(8.6, 15);
-            path.lineTo(10.4, 14.2);
-            path.lineTo(8.4, 9.6);
-            path.lineTo(12.4, 9.4);
-            path.closePath();
-            g.draw(path);
-        });
+        return stroke(Icons::paintSelect);
     }
 
     /** 平移：一只手。 */
     public static Icon pan() {
-        return stroke(g -> {
-            g.draw(new RoundRectangle2D.Double(4.6, 9, 9.6, 6.6, 3.4, 3.4));
-            // 三根手指的底边正好落在掌沿上，于是线条自然连成一体
-            finger(g, 6.0, 4.6);
-            finger(g, 8.4, 3.4);
-            finger(g, 10.8, 4.6);
-            // 拇指
-            Path2D thumb = new Path2D.Double();
-            thumb.moveTo(4.6, 11.6);
-            thumb.quadTo(2.2, 11.4, 2.4, 9.4);
-            thumb.quadTo(2.6, 7.8, 4.6, 8.6);
-            g.draw(thumb);
-        });
+        return stroke(Icons::paintPan);
     }
 
     /** 裁切：两道直角裁切标。 */
     public static Icon crop() {
-        return stroke(g -> {
-            g.draw(new Line2D.Double(5, 2, 5, 13));
-            g.draw(new Line2D.Double(5, 13, 16, 13));
-            g.draw(new Line2D.Double(2, 5, 13, 5));
-            g.draw(new Line2D.Double(13, 5, 13, 16));
-        });
+        return stroke(Icons::paintCrop);
     }
 
-    /** 旋转：相片上方一道弧形箭头。 */
+    /**
+     * 旋转：逆时针的圆弧箭头，中间一个加号（参照 C1 的图标）。
+     *
+     * <p>弧不画满一圈，缺口留在左上，箭头从缺口处指回起点——"转一下"的意思
+     * 一眼能看出来；中间的加号是 C1 用来区分"旋转"和别的弧线图标的记号。
+     * 下拉小三角等做旋转菜单时再加。
+     */
     public static Icon rotate() {
-        return stroke(g -> {
-            // 中间是相片，外面绕一圈带箭头的弧，一眼能看出"把这张转一下"
-            g.draw(new Rectangle2D.Double(5.5, 5.5, 7, 7));
-            arcArrow(g, 9, 9, 7, 20, 140);
-        });
+        return stroke(Icons::paintRotate);
     }
 
     /** 翻转：中轴两侧的镜像三角。 */
     public static Icon flip() {
-        return stroke(g -> {
-            // 中轴画成虚线，一眼就能看出"沿这条线翻"
-            g.setStroke(new BasicStroke(STROKE, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
-                    1f, new float[] {2.5f, 2.5f}, 0f));
-            g.draw(new Line2D.Double(9, 2, 9, 16));
-            g.setStroke(new BasicStroke(STROKE, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-
-            Path2D left = new Path2D.Double();
-            left.moveTo(2, 4.5);
-            left.lineTo(7, 9);
-            left.lineTo(2, 13.5);
-            left.closePath();
-            g.draw(left);
-
-            Path2D right = new Path2D.Double();
-            right.moveTo(16, 4.5);
-            right.lineTo(11, 9);
-            right.lineTo(16, 13.5);
-            right.closePath();
-            g.draw(right);
-        });
+        return stroke(Icons::paintFlip);
     }
 
     // ─────────────────────────── 右组：视图辅助 ───────────────────────────
@@ -389,6 +343,79 @@ public final class Icons {
                 return SIZE;
             }
         };
+    }
+
+    /**
+     * 把某个工具的图标形状画在一张更大的画布上（坐标仍按 18×18 设计稿）。
+     *
+     * <p>给"鼠标光标"用：光标就是同一枚图标放大画出来的，按钮和光标永远一致。
+     */
+    public static void paintShape(com.photoselector.ui.CursorTool tool, Graphics2D g) {
+        switch (tool) {
+            case SELECT -> paintSelect(g);
+            case PAN -> paintPan(g);
+            case CROP -> paintCrop(g);
+            case ROTATE -> paintRotate(g);
+            case FLIP -> paintFlip(g);
+        }
+    }
+
+    private static void paintSelect(Graphics2D g) {
+        Path2D path = new Path2D.Double();
+        path.moveTo(3.5, 2);
+        path.lineTo(3.5, 13);
+        path.lineTo(6.5, 10.2);
+        path.lineTo(8.6, 15);
+        path.lineTo(10.4, 14.2);
+        path.lineTo(8.4, 9.6);
+        path.lineTo(12.4, 9.4);
+        path.closePath();
+        g.draw(path);
+    }
+
+    private static void paintPan(Graphics2D g) {
+        g.draw(new RoundRectangle2D.Double(4.6, 9, 9.6, 6.6, 3.4, 3.4));
+        finger(g, 6.0, 4.6);
+        finger(g, 8.4, 3.4);
+        finger(g, 10.8, 4.6);
+        Path2D thumb = new Path2D.Double();
+        thumb.moveTo(4.6, 11.6);
+        thumb.quadTo(2.2, 11.4, 2.4, 9.4);
+        thumb.quadTo(2.6, 7.8, 4.6, 8.6);
+        g.draw(thumb);
+    }
+
+    private static void paintCrop(Graphics2D g) {
+        g.draw(new Line2D.Double(5, 2, 5, 13));
+        g.draw(new Line2D.Double(5, 13, 16, 13));
+        g.draw(new Line2D.Double(2, 5, 13, 5));
+        g.draw(new Line2D.Double(13, 5, 13, 16));
+    }
+
+    private static void paintRotate(Graphics2D g) {
+        g.draw(new Arc2D.Double(2.6, 2.6, 12.8, 12.8, -40, 300, Arc2D.OPEN));
+        arrowHead(g, 4.4, 4.6, -1, -0.35, 3.2);
+        g.draw(new Line2D.Double(9, 6.6, 9, 11.4));
+        g.draw(new Line2D.Double(6.6, 9, 11.4, 9));
+    }
+
+    private static void paintFlip(Graphics2D g) {
+        g.setStroke(new BasicStroke(STROKE, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                1f, new float[] {2.5f, 2.5f}, 0f));
+        g.draw(new Line2D.Double(9, 2, 9, 16));
+        g.setStroke(new BasicStroke(STROKE, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        Path2D left = new Path2D.Double();
+        left.moveTo(2, 4.5);
+        left.lineTo(7, 9);
+        left.lineTo(2, 13.5);
+        left.closePath();
+        g.draw(left);
+        Path2D right = new Path2D.Double();
+        right.moveTo(16, 4.5);
+        right.lineTo(11, 9);
+        right.lineTo(16, 13.5);
+        right.closePath();
+        g.draw(right);
     }
 
     /** 和 {@link #stroke} 一样，只是把颜色填满而不是描边。 */

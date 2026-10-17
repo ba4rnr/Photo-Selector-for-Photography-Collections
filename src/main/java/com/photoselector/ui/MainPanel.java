@@ -32,6 +32,7 @@ import com.photoselector.io.PhotoFiles;
 import com.photoselector.io.Saver;
 import com.photoselector.io.ThumbnailService;
 import com.photoselector.core.PhotoGroup;
+import com.photoselector.core.EditState;
 import com.photoselector.core.NumberingRule;
 import com.photoselector.core.Session;
 import com.photoselector.core.Workspace;
@@ -238,11 +239,21 @@ public final class MainPanel extends JPanel {
         arrangePanel.setOnChanged(this::historyChanged);
         // 开局同步一次：没有历史时那两颗按钮该是灰的
         historyChanged();
-        toolBar.setOnToolChanged(viewer::setCursorTool);
+        // 旋转 / 翻转是"点一下马上生效"的工具：选中它的同时也对当前这张做一次。
+        // 光标跟着工具变成对应的图标——按的是什么，鼠标就是什么。
+        toolBar.setOnToolChanged(tool -> {
+            viewer.setCursorTool(tool);
+            if (tool == CursorTool.ROTATE) {
+                rotateCurrentPhoto(true);
+            } else if (tool == CursorTool.FLIP) {
+                flipCurrentPhotoHorizontally();
+            }
+        });
         // 撤销 / 重做是这块面板自己的逻辑，接线也放在这儿：谁拿到面板，
         // 这两颗按钮都是活的（只接到主窗口去的话，单独用面板的地方就没人管了）
         toolBar.undoButton().addActionListener(e -> undo());
         toolBar.redoButton().addActionListener(e -> redo());
+        toolBar.resetButton().addActionListener(e -> resetCurrentPhotoEdits());
 
         buildAreas();
 
@@ -261,8 +272,16 @@ public final class MainPanel extends JPanel {
         // 目录树里点一个文件夹，素材条滚到那一组；勾选变化则重新筛选组
         sourceTree.setOnFolderChosen(filmstrip::scrollToGroup);
         sourceTree.setOnInclusionChanged(this::inclusionChanged);
-        // 素材条里点中一张，中间的大图就换成它
-        filmstrip.setOnCurrentPhotoChanged(viewer::showPhoto);
+        // 素材条里点中一张，中间的大图就换成它；顺手把这张的虚拟编辑灌进去
+        filmstrip.setOnCurrentPhotoChanged(photo -> {
+            viewer.showPhoto(photo);
+            Session session = targetPanel.session();
+            if (session != null) {
+                viewer.setEdits(session.editsOf(photo));
+            }
+            // 选中的照片换了，"能不能编辑"也跟着变：旋转 / 翻转 / 重置要跟着亮 / 灰
+            historyChanged();
+        });
         bindKeys();
 
         add(toolBar, BorderLayout.NORTH);
@@ -394,6 +413,69 @@ public final class MainPanel extends JPanel {
         viewer.actualSize();
     }
 
+    // ─────────────────────────── 图像编辑 ───────────────────────────
+
+    /**
+     * 把当前这张照片顺时针转一个直角（{@code clockwise} 为 false 就是逆时针）。
+     *
+     * <p>只改中间商和画面，磁盘上的 JPG 要等「保存」才重写——和挑片、排序一样，
+     * 都属于"虚拟编辑"。撤销 / 重做也走同一条历史。
+     */
+    public void rotateCurrentPhoto(boolean clockwise) {
+        editingPhoto().ifPresent(photo -> {
+            Session session = targetPanel.session();
+            session.setEdits(photo, session.editsOf(photo).rotate(clockwise ? 1 : -1));
+            viewer.setEdits(session.editsOf(photo));
+        });
+    }
+
+    /** 左右镜像当前这张。 */
+    public void flipCurrentPhotoHorizontally() {
+        editingPhoto().ifPresent(photo -> {
+            Session session = targetPanel.session();
+            session.setEdits(photo, session.editsOf(photo).flipHorizontal());
+            viewer.setEdits(session.editsOf(photo));
+        });
+    }
+
+    /** 上下镜像当前这张。 */
+    public void flipCurrentPhotoVertically() {
+        editingPhoto().ifPresent(photo -> {
+            Session session = targetPanel.session();
+            session.setEdits(photo, session.editsOf(photo).flipVertically());
+            viewer.setEdits(session.editsOf(photo));
+        });
+    }
+
+    /** 「重置」：把当前这张照片的旋转 / 翻转全部清掉。 */
+    public void resetCurrentPhotoEdits() {
+        editingPhoto().ifPresent(photo -> {
+            Session session = targetPanel.session();
+            session.clearEdits(photo);
+            viewer.setEdits(EditState.NONE);
+        });
+    }
+
+    /** 有没有选中的照片、有没有目标文件夹——两个都有才谈得上编辑。 */
+    public boolean canEditCurrentPhoto() {
+        return editingPhoto().isPresent();
+    }
+
+    /** 当前正在看的那张（跟素材条的"当前照片"是同一个）。 */
+    private java.util.Optional<Path> editingPhoto() {
+        Session session = targetPanel.session();
+        Path photo = filmstrip.currentPhoto();
+        if (photo == null) {
+            // 从目标栏点中的那张也可能不在素材条里（比如别的批次挑进去的），
+            // 那就以目标栏的选中项为准——反正编辑跟着"眼前这一张"走
+            photo = targetPanel.selectedPhoto();
+        }
+        if (session == null || photo == null) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(photo);
+    }
+
     /** 大图的当前比例（百分比），菜单里显示用。 */
     public int viewerZoomPercent() {
         return viewer.zoomPercent();
@@ -518,6 +600,7 @@ public final class MainPanel extends JPanel {
             // 撤销的可能是"丢进垃圾桶"或者"从垃圾桶捡回来"，
             // 两种都会改变垃圾桶的内容——不刷新的话那块面板会停在旧画面上
             trashPanel.refresh();
+            syncViewerEdits();
         }
     }
 
@@ -528,7 +611,22 @@ public final class MainPanel extends JPanel {
             targetPanel.refresh();
             arrangePanel.refresh();
             trashPanel.refresh();
+            syncViewerEdits();
         }
+    }
+
+    /** 撤销 / 重做可能改的是"旋转 / 翻转"，把大图上的编辑跟着中间商对一下。 */
+    private void syncViewerEdits() {
+        Path photo = viewer.photo();
+        Session session = targetPanel.session();
+        if (photo == null || session == null) {
+            return;
+        }
+        if (session.indexOf(photo) < 0) {
+            viewer.setEdits(EditState.NONE);
+            return;
+        }
+        viewer.setEdits(session.editsOf(photo));
     }
 
     /**
@@ -543,6 +641,11 @@ public final class MainPanel extends JPanel {
     private void historyChanged() {
         toolBar.undoButton().setEnabled(canUndo());
         toolBar.redoButton().setEnabled(canRedo());
+        // 没选中照片（或者还没有目标文件夹）时，旋转 / 翻转 / 重置无从谈起，灰着
+        boolean canEdit = canEditCurrentPhoto();
+        toolBar.toolButton(CursorTool.ROTATE).setEnabled(canEdit);
+        toolBar.toolButton(CursorTool.FLIP).setEnabled(canEdit);
+        toolBar.resetButton().setEnabled(canEdit);
         onHistoryChanged.run();
     }
 

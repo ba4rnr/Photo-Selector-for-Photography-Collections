@@ -164,10 +164,20 @@ public final class MainFrame extends JFrame {
         edit.add(redoItem);
 
         JMenu image = menu("图像");
-        image.add(pending("旋转"));
-        image.add(pending("翻转"));
+        // 旋转 / 翻转都先给左右（上下）两项；点完之后把工具拨回"选择"，
+        // 免得光标一直停在旋转图标上——菜单是一次性动作，不是模式
+        JMenu rotate = menu("旋转");
+        rotate.add(imageAction(mainPanel, "向左转 90°", () -> mainPanel.rotateCurrentPhoto(false)));
+        rotate.add(imageAction(mainPanel, "向右转 90°", () -> mainPanel.rotateCurrentPhoto(true)));
+        image.add(rotate);
+        JMenu flip = menu("翻转");
+        flip.add(imageAction(mainPanel, "水平翻转", mainPanel::flipCurrentPhotoHorizontally));
+        flip.add(imageAction(mainPanel, "垂直翻转", mainPanel::flipCurrentPhotoVertically));
+        image.add(flip);
         image.add(pending("裁切"));
-        image.add(pending("重置"));
+        JMenuItem reset = new JMenuItem("重置");
+        reset.addActionListener(e -> mainPanel.resetCurrentPhotoEdits());
+        image.add(reset);
 
         JMenu view = menu("查看");
         JMenuItem browse = new JMenuItem(ViewMode.BROWSE.label());
@@ -255,6 +265,16 @@ public final class MainFrame extends JFrame {
         // 菜单的高度看的是边框的衬边（PreferredSize 里用的是 getInsets），不是 margin
         menu.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
         return menu;
+    }
+
+    /** 「图像」菜单里的一项：点一下做件事，并把光标工具拨回"选择"。 */
+    private static JMenuItem imageAction(MainPanel mainPanel, String text, Runnable action) {
+        JMenuItem item = new JMenuItem(text);
+        item.addActionListener(e -> {
+            action.run();
+            mainPanel.toolBar().setActiveToolForTest(CursorTool.SELECT);
+        });
+        return item;
     }
 
     /**

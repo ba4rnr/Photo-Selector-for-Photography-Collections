@@ -5,7 +5,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -38,6 +40,15 @@ public final class Session {
      * 两支都能简单地写成 lambda，不必为每个操作建一个类。
      */
     private final Deque<Action> undoStack = new ArrayDeque<>();
+
+    /**
+     * 每张照片的虚拟编辑，按来源路径记。
+     *
+     * <p>为什么不塞进 {@link TargetEntry}：条目是"哪张照片、从哪来"的纯值，
+     * 会被到处传递、比较；编辑是随照片走的附加状态，单独记一份更清爽，
+     * 保存之后整份清掉也就是"编辑已经烧进 JPG 了"。
+     */
+    private final Map<Path, EditState> edits = new LinkedHashMap<>();
 
     /**
      * 重做栈：撤销过的动作原样扣在这儿，重做时再执行一遍它的"正向动作"。
@@ -185,6 +196,7 @@ public final class Session {
         trash.clear();
         undoStack.clear();
         redoStack.clear();
+        edits.clear();
         // 铺底之后，中间商和磁盘是同一份东西——保存也刚走过这一步，
         // 所以"干净"要在最后统一置位，不能跟着前面的 clear 走
         dirty = false;
@@ -312,6 +324,55 @@ public final class Session {
         return true;
     }
 
+    /**
+     * 某张照片现在的虚拟编辑；没动过就是 {@link EditState#NONE}。
+     *
+     * <p>按规范化路径查——照片可能先躺在素材里、后被复制进目标文件夹，
+     * 但"是不是同一张"始终按路径判。
+     */
+    public EditState editsOf(Path source) {
+        if (source == null) {
+            return EditState.NONE;
+        }
+        return edits.getOrDefault(source.toAbsolutePath().normalize(), EditState.NONE);
+    }
+
+    /**
+     * 给照片换一组编辑，并记进撤销历史。
+     *
+     * <p>这是"虚拟编辑"的核心：只改内存，画面上立刻能看到；磁盘上的 JPG
+     * 要等「保存」才重写。撤销 / 重做也走这条——它记的是前后两组状态。
+     *
+     * @return 是否真的变了（和原来一样就不产生历史）
+     */
+    public boolean setEdits(Path source, EditState next) {
+        Objects.requireNonNull(source, "source 不能为空");
+        Objects.requireNonNull(next, "next 不能为空");
+        Path key = source.toAbsolutePath().normalize();
+        EditState before = edits.getOrDefault(key, EditState.NONE);
+        if (before.equals(next)) {
+            return false;
+        }
+        applyEdits(key, next);
+        dirty = true; // 图像内容将来要跟着变，和磁盘不一样了
+        pushAction(() -> applyEdits(key, before), () -> applyEdits(key, next));
+        return true;
+    }
+
+    /** 清空某张照片的全部编辑（「重置」用）。 */
+    public boolean clearEdits(Path source) {
+        return setEdits(source, EditState.NONE);
+    }
+
+    /** 真正写进/移出编辑表：不记历史，撤销与重做都复用它。 */
+    private void applyEdits(Path key, EditState state) {
+        if (state.isNone()) {
+            edits.remove(key); // 回到原样就别占着一格
+        } else {
+            edits.put(key, state);
+        }
+    }
+
     public boolean canUndo() {
         return !undoStack.isEmpty();
     }
@@ -331,6 +392,7 @@ public final class Session {
         trash.clear();
         undoStack.clear();
         redoStack.clear();
+        edits.clear();
         dirty = false;
     }
 

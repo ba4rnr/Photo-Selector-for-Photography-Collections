@@ -59,11 +59,11 @@ final class ToolBarPanel extends JPanel {
         // 中组 · 光标工具
         for (CursorTool cursorTool : CursorTool.values()) {
             ToolButton button = new ToolButton(cursorTool.label(), iconFor(cursorTool));
-            button.addActionListener(e -> activate(button));
+            button.addActionListener(e -> activate(button, cursorTool));
             cursorTools.add(button);
             add(button);
         }
-        activate(cursorTools.get(0)); // 默认选中"选择"
+        activate(cursorTools.get(0), CursorTool.SELECT); // 默认选中"选择"
 
         add(Box.createHorizontalStrut(28));
 
@@ -120,7 +120,12 @@ final class ToolBarPanel extends JPanel {
 
     /** 直接选中某个工具。给测试用，等价于点了那个按钮。 */
     void setActiveToolForTest(CursorTool tool) {
-        activate(cursorTools.get(tool.ordinal()));
+        activate(cursorTools.get(tool.ordinal()), tool);
+    }
+
+    /** 取某个工具的按钮（中组那一排）。给测试用。 */
+    ToolButton toolButton(CursorTool tool) {
+        return cursorTools.get(tool.ordinal());
     }
 
     /** 切换模式后，更新按钮上的文字，让它显示"点了会去哪"。 */
@@ -128,13 +133,24 @@ final class ToolBarPanel extends JPanel {
         modeButton.setText(mode == ViewMode.BROWSE ? "整理模式" : "浏览模式");
     }
 
-    private void activate(ToolButton tool) {
+    /**
+     * 选中一个工具。
+     *
+     * <p>旋转 / 翻转是"点一下马上做一次"的动作型工具：再点一次同一个按钮
+     * 也要再做一次（所以动作型工具每次都通知外部）。选择 / 平移是"模式"，
+     * 点在已经选中的那颗上不必重复通知。
+     */
+    private void activate(ToolButton tool, CursorTool which) {
+        boolean isAction = which == CursorTool.ROTATE || which == CursorTool.FLIP;
+        if (!isAction && activeTool == which) {
+            return;
+        }
         for (ToolButton other : cursorTools) {
             other.setActive(other == tool);
         }
         int index = cursorTools.indexOf(tool);
         if (index >= 0) {
-            activeTool = CursorTool.values()[index];
+            activeTool = which;
             onToolChanged.accept(activeTool);
         }
     }

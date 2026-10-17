@@ -18,6 +18,7 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import com.photoselector.io.ImageSource;
+import com.photoselector.core.EditState;
 import com.photoselector.ui.theme.Theme;
 
 /**
@@ -88,8 +89,19 @@ final class ViewerPanel extends JPanel {
 
     private Path photo;
     private BufferedImage image;
+
+    /**
+     * 原图（只按 EXIF 摆正过，没有套旋转 / 翻转）。
+     *
+     * <p>旋转和翻转是"虚拟编辑"：每次改动都从原图重新生成 {@link #image}，
+     * 而不是在前一版结果上叠——叠来叠去既会糊，撤销时也找不回来。
+     */
+    private BufferedImage rawImage;
     private boolean loading;
     private boolean failed;
+
+    /** 当前照片的虚拟编辑；由 {@link #setEdits} 从中间商那边灌进来。 */
+    private EditState edits = EditState.NONE;
 
     /** 是不是"适应窗口"。默认不是——默认按 {@link #defaultScale} 显示。 */
     private boolean fitToWindow;
@@ -173,6 +185,7 @@ final class ViewerPanel extends JPanel {
     void showPhoto(Path newPhoto) {
         this.photo = newPhoto;
         this.image = null;
+        this.rawImage = null;
         this.failed = false;
         this.loading = newPhoto != null;
         resetView(); // 换片把位置收回中间；缩放比例保留，方便连着看一堆细节
@@ -180,6 +193,33 @@ final class ViewerPanel extends JPanel {
         if (newPhoto != null) {
             loader.loadFull(newPhoto, this::onLoaded);
         }
+    }
+
+    /**
+     * 套用一组虚拟编辑（旋转 / 翻转）后重新显示；传 null 表示回到原样。
+     *
+     * <p>只重算画面，不重读文件——旋转和翻转都是在已经解出来的原图上做的。
+     * 换片时 {@link #showPhoto} 会把编辑清成"没动过"，等外面再把新照片的编辑灌进来。
+     */
+    void setEdits(EditState newEdits) {
+        this.edits = newEdits == null ? EditState.NONE : newEdits;
+        rebuildImageFromEdits();
+        resetView(); // 宽高可能换了，位置收回中间
+        repaint();
+    }
+
+    /** 当前生效的虚拟编辑。给测试和排查用。 */
+    EditState edits() {
+        return edits;
+    }
+
+    /** 用原图 + 当前的编辑重算显示图；没原图就什么都不做。 */
+    private void rebuildImageFromEdits() {
+        if (rawImage == null) {
+            image = null;
+            return;
+        }
+        image = PhotoTransforms.apply(rawImage, edits);
     }
 
     /** 适应窗口：按当前窗口大小现算比例，偏移归零。 */
@@ -340,6 +380,11 @@ final class ViewerPanel extends JPanel {
         return photo;
     }
 
+    /** 屏幕上那张图现在的像素尺寸；还没有图就是 null。给测试用。 */
+    java.awt.Dimension imageSizeForTest() {
+        return image == null ? null : new java.awt.Dimension(image.getWidth(), image.getHeight());
+    }
+
     boolean hasImage() {
         return image != null;
     }
@@ -357,7 +402,8 @@ final class ViewerPanel extends JPanel {
     private void onLoaded(BufferedImage loaded) {
         loading = false;
         failed = loaded == null;
-        image = loaded;
+        rawImage = loaded;
+        rebuildImageFromEdits();
         resetView();
         repaint();
     }
@@ -430,9 +476,17 @@ final class ViewerPanel extends JPanel {
      */
     void setCursorTool(CursorTool cursorTool) {
         this.tool = cursorTool;
-        setCursor(cursorTool == CursorTool.PAN
-                ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                : Cursor.getDefaultCursor());
+        // 光标就用工具栏上那个图标放大画出来：按的是什么，鼠标就是什么
+        setCursor(customCursor(cursorTool));
+    }
+
+    /** 拿工具对应的光标；个别系统不让自定义光标时退回默认箭头。 */
+    private static Cursor customCursor(CursorTool cursorTool) {
+        try {
+            return cursorTool.cursor();
+        } catch (RuntimeException e) {
+            return Cursor.getDefaultCursor();
+        }
     }
 
     /** 现在拖动是不是"把照片拖出去"。 */
