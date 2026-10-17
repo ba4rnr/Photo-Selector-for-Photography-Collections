@@ -14,7 +14,6 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 
@@ -121,14 +120,12 @@ final class WorkspaceDialog extends JDialog {
     private void confirmAndClose() {
         Path root = textOf(sourceField);
         if (root == null || !Files.isDirectory(root)) {
-            JOptionPane.showMessageDialog(this, "请先选一个存在的素材根文件夹。",
-                    "还差一步", JOptionPane.WARNING_MESSAGE);
+            MessageDialog.show(this, "还差一步", "请先选一个存在的素材根文件夹。");
             return;
         }
         Path target = textOf(targetField);
         if (target != null && !Files.isDirectory(target)) {
-            JOptionPane.showMessageDialog(this, "目标文件夹不存在：" + target,
-                    "还差一步", JOptionPane.WARNING_MESSAGE);
+            MessageDialog.show(this, "还差一步", "目标文件夹不存在：" + target);
             return;
         }
 

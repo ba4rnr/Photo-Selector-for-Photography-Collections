@@ -22,7 +22,6 @@ import javax.swing.JFrame;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
@@ -312,9 +311,8 @@ public final class MainFrame extends JFrame {
 
     /** 上次的素材文件夹不见了时的提示。 */
     public void warnMissingSourceRoot(Path missing) {
-        JOptionPane.showMessageDialog(this,
-                "上次打开的素材文件夹找不到了：\n" + missing + "\n\n请重新选一个。",
-                "工作区", JOptionPane.WARNING_MESSAGE);
+        MessageDialog.show(this, "工作区",
+                "上次打开的素材文件夹找不到了：\n" + missing + "\n\n请重新选一个。");
     }
 
     /** 保存结束了：把做了什么、以及没做成什么告诉用户。 */
@@ -329,8 +327,7 @@ public final class MainFrame extends JFrame {
             text += "\n\n有 " + result.problems().size() + " 处没能完成：\n· "
                     + String.join("\n· ", result.problems());
         }
-        JOptionPane.showMessageDialog(this, text, "保存",
-                result.hasProblems() ? JOptionPane.WARNING_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
+        MessageDialog.show(this, "保存", text);
     }
 
     /** 真正退出：收掉后台线程池，再关窗口。 */
@@ -399,8 +396,7 @@ public final class MainFrame extends JFrame {
     /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */
     private void folderOpened(Path folder, int count) {
         if (count < 0) {
-            JOptionPane.showMessageDialog(this, "读不了这个文件夹：\n" + folder,
-                    "打开失败", JOptionPane.ERROR_MESSAGE);
+            MessageDialog.show(this, "打开失败", "读不了这个文件夹：\n" + folder);
             return;
         }
         setTitle("摄影集照片筛选器 — " + folder.getFileName() + "（" + count + " 张）");
@@ -408,10 +404,9 @@ public final class MainFrame extends JFrame {
 
     /** 目标文件夹读不了时明确报错，并保持中间商为空。 */
     private void targetFolderFailed(Path folder) {
-        JOptionPane.showMessageDialog(this,
+        MessageDialog.show(this, "目标文件夹",
                 "读不了或无法监听目标文件夹：\n" + folder
-                        + "\n\n请检查目录是否存在、是否有读取权限。",
-                "目标文件夹", JOptionPane.ERROR_MESSAGE);
+                        + "\n\n请检查目录是否存在、是否有读取权限。");
     }
 
     private void showSaveResiduals(java.util.List<Path> files) {
@@ -421,11 +416,10 @@ public final class MainFrame extends JFrame {
         if (files.size() > 8) {
             names += "\n· …还有 " + (files.size() - 8) + " 个";
         }
-        JOptionPane.showMessageDialog(this,
+        MessageDialog.show(this, "保存残留",
                 "发现上次保存中断留下的临时文件，已暂时排除在照片列表之外：\n\n"
                         + names
-                        + "\n\n它们没有自动删除，请确认内容后手工处理。",
-                "保存残留", JOptionPane.WARNING_MESSAGE);
+                        + "\n\n它们没有自动删除，请确认内容后手工处理。");
     }
 
     private static JMenu menu(String text) {
