@@ -2,7 +2,6 @@ package com.photoselector.ui;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
@@ -99,6 +98,7 @@ public final class MainPanel extends JPanel {
     private final TargetPanel targetPanel;
     private final TargetPanel arrangePanel;
     private final TrashPanel trashPanel;
+    private final TargetFilmstripPanel targetFilmstrip;
     private final ViewerPanel viewer;
     private final SourceTreePanel sourceTree = new SourceTreePanel();
 
@@ -223,13 +223,18 @@ public final class MainPanel extends JPanel {
         targetPanel = new TargetPanel(targetLoader);
         arrangePanel = new TargetPanel(targetLoader);
         trashPanel = new TrashPanel(targetLoader);
+        targetFilmstrip = new TargetFilmstripPanel(targetLoader);
         arrangePanel.setThumbnailWidth(ARRANGE_THUMBNAIL_WIDTH);
         targetPanel.setOnToggleExpanded(this::toggleMode);
         arrangePanel.setOnToggleExpanded(this::toggleMode);
         viewer = new ViewerPanel(thumbnailLoader);
         // 点目标文件夹里的某张，大图就换成它，并套用这张已有的虚拟编辑。
-        targetPanel.setOnPhotoChosen(this::showPhotoInViewer);
-        arrangePanel.setOnPhotoChosen(this::showPhotoInViewer);
+        targetPanel.setOnPhotoChosen(photo -> {
+            showPhotoInViewer(photo);
+            targetFilmstrip.selectPhoto(photo);
+        });
+        arrangePanel.setOnPhotoChosen(this::arrangePhotoChosen);
+        targetFilmstrip.setOnPhotoChosen(this::chooseFromTargetStrip);
 
         // 从素材条、或者从正在看的大图上，都可以直接把照片拖到目标文件夹面板里。
         // 拖动时跟着鼠标走的那张图：素材条用已经解好的缩略图，大图临时缩一张
@@ -347,6 +352,8 @@ public final class MainPanel extends JPanel {
         targetPanel.setExpanded(expanded);
         arrangePanel.setExpanded(expanded);
         arrangePanel.refresh();
+        targetFilmstrip.refresh();
+        targetFilmstrip.selectPhoto(arrangePanel.selectedPhoto());
     }
 
     public ViewMode mode() {
@@ -365,7 +372,9 @@ public final class MainPanel extends JPanel {
         JScrollPane filmstripScroll = filmstrip.wrapInScrollPane();
         filmstripScroll.setPreferredSize(new Dimension(100, BOTTOM_HEIGHT));
         bottomArea.add(filmstripScroll, ViewMode.BROWSE.name());
-        bottomArea.add(placeholder("目标文件夹的照片", 100, 170, Theme.PANEL), ViewMode.ARRANGE.name());
+        JScrollPane targetStripScroll = targetFilmstrip.wrapInScrollPane();
+        targetStripScroll.setPreferredSize(new Dimension(100, BOTTOM_HEIGHT));
+        bottomArea.add(targetStripScroll, ViewMode.ARRANGE.name());
     }
 
     /**
@@ -534,6 +543,20 @@ public final class MainPanel extends JPanel {
         historyChanged();
     }
 
+    /** 中间整理网格点中一张：大图状态和底部目标带一起跟上。 */
+    private void arrangePhotoChosen(Path photo) {
+        showPhotoInViewer(photo);
+        targetFilmstrip.selectPhoto(photo);
+    }
+
+    /** 底栏目标照片带点中一张：选中中间网格里的同一张，并滚到它。 */
+    private void chooseFromTargetStrip(Path photo) {
+        showPhotoInViewer(photo);
+        targetPanel.selectPhoto(photo);
+        arrangePanel.selectPhoto(photo);
+        targetFilmstrip.selectPhoto(photo);
+    }
+
     /** 大图的当前比例（百分比），菜单里显示用。 */
     public int viewerZoomPercent() {
         return viewer.zoomPercent();
@@ -598,6 +621,7 @@ public final class MainPanel extends JPanel {
             targetPanel.setSession(null);
             arrangePanel.setSession(null);
             trashPanel.setSession(null);
+            targetFilmstrip.setSession(null);
             return;
         }
         scanPool.submit(() -> {
@@ -620,6 +644,7 @@ public final class MainPanel extends JPanel {
                     targetPanel.setSession(null);
                     arrangePanel.setSession(null);
                     trashPanel.setSession(null);
+                    targetFilmstrip.setSession(null);
                     onTargetFolderError.accept(target);
                     return;
                 }
@@ -628,6 +653,7 @@ public final class MainPanel extends JPanel {
                 targetPanel.setSession(session);
                 arrangePanel.setSession(session);
                 trashPanel.setSession(session);
+                targetFilmstrip.setSession(session);
                 try {
                     targetWatcher.watch(target);
                 } catch (IOException e) {
@@ -743,9 +769,11 @@ public final class MainPanel extends JPanel {
         targetPanel.reloadThumbnails();
         arrangePanel.reloadThumbnails();
         trashPanel.reloadThumbnails();
+        targetFilmstrip.reloadThumbnails();
         targetPanel.refresh();
         arrangePanel.refresh();
         trashPanel.refresh();
+        targetFilmstrip.refresh();
         historyChanged();
 
         Path showing = viewer.photo();
@@ -794,6 +822,7 @@ public final class MainPanel extends JPanel {
         if (added) {
             targetPanel.refresh();
             arrangePanel.refresh();
+            targetFilmstrip.refresh();
         }
     }
 
@@ -803,6 +832,7 @@ public final class MainPanel extends JPanel {
         if (!saving && session != null && session.undo()) {
             targetPanel.refresh();
             arrangePanel.refresh();
+            targetFilmstrip.refresh();
             // 撤销的可能是"丢进垃圾桶"或者"从垃圾桶捡回来"，
             // 两种都会改变垃圾桶的内容——不刷新的话那块面板会停在旧画面上
             trashPanel.refresh();
@@ -816,6 +846,7 @@ public final class MainPanel extends JPanel {
         if (!saving && session != null && session.redo()) {
             targetPanel.refresh();
             arrangePanel.refresh();
+            targetFilmstrip.refresh();
             trashPanel.refresh();
             syncViewerEdits();
         }
@@ -913,6 +944,7 @@ public final class MainPanel extends JPanel {
         arrangePanel.moveSelectionTo(to);
         targetPanel.refresh();
         arrangePanel.refresh();
+        targetFilmstrip.refresh();
     }
 
     /**
@@ -934,6 +966,7 @@ public final class MainPanel extends JPanel {
         session.trash(index);
         targetPanel.refresh();
         arrangePanel.refresh();
+        targetFilmstrip.refresh();
         trashPanel.refresh();
         if (showingIt) {
             Path next = session.isEmpty() ? null
@@ -955,6 +988,7 @@ public final class MainPanel extends JPanel {
         if (session.untrash(photo, slot)) {
             targetPanel.refresh();
             arrangePanel.refresh();
+            targetFilmstrip.refresh();
             trashPanel.refresh();
         }
     }
@@ -1006,6 +1040,7 @@ public final class MainPanel extends JPanel {
                 result.failedSources().forEach(session::add);
                 targetPanel.refresh();
                 arrangePanel.refresh();
+                targetFilmstrip.refresh();
                 handleSaveFinished(result);
             });
         });
@@ -1252,6 +1287,11 @@ public final class MainPanel extends JPanel {
         return arrangePanel;
     }
 
+    /** 整理模式底部的目标照片带，给测试用。 */
+    TargetFilmstripPanel targetFilmstripForTest() {
+        return targetFilmstrip;
+    }
+
     /** 大图面板，给测试用。 */
     ViewerPanel viewerForTest() {
         return viewer;
@@ -1278,18 +1318,6 @@ public final class MainPanel extends JPanel {
     private JComponent leftColumn() {
         sourceTree.setPreferredSize(new Dimension(220, 400));
         return sourceTree;
-    }
-
-    /**
-     * 造一个占位面板。
-     *
-     * <p>这里的宽高不只是"占位"——JSplitPane 在没被显式指定分隔条位置时，
-     * 会按左侧组件的首选宽度来摆分隔条，所以这些尺寸决定了初始的三栏比例。
-     */
-    private static PlaceholderPanel placeholder(String title, int width, int height, Color background) {
-        PlaceholderPanel panel = new PlaceholderPanel(title, background);
-        panel.setPreferredSize(new Dimension(width, height));
-        return panel;
     }
 
     private void toggleMode() {

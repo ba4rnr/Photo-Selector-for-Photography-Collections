@@ -190,6 +190,31 @@ abstract class ThumbnailGridPanel extends JPanel {
         }
     }
 
+    /** 按照片路径选中；照片不在当前序列里就返回 false。 */
+    boolean selectPhoto(Path photo) {
+        int index = session == null || photo == null ? -1 : session.indexOf(photo);
+        if (index < 0) {
+            return false;
+        }
+        chosenIndex = index;
+        scrollToIndex(index);
+        repaint();
+        return true;
+    }
+
+    /** 把某一格滚进视野；换行处按实际行列计算。 */
+    void scrollToIndex(int index) {
+        if (session == null || index < 0 || index >= itemCount()) {
+            return;
+        }
+        updateMetrics();
+        int row = index / columns;
+        int column = index % columns;
+        Rectangle cell = new Rectangle(cellX(column), HEADER_HEIGHT + row * rowHeight(),
+                boxWidth, thumbnailHeight);
+        SwingUtilities.invokeLater(() -> scrollRectToVisible(cell));
+    }
+
     /** 取消当前点选；照片被外部删除、位置已经不存在时用。 */
     void clearSelection() {
         if (chosenIndex != -1) {
