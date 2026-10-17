@@ -3,8 +3,11 @@ package com.photoselector.ui;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.FontMetrics;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
@@ -80,13 +83,20 @@ final class MessageDialog extends JDialog {
     }
 
     private static JComponent buildBody(String message) {
-        // 正文居中：JTextArea 没法让每一行居中，改用带宽度约束的 HTML 标签。
-        // 宽度写进 HTML，长句子照样在这里折行。
         int textWidth = WIDTH - PAD * 2;
-        JLabel text = new JLabel(centeredHtml(message, textWidth));
+        JLabel text = new JLabel();
         text.setFont(Theme.FONT);
         text.setForeground(Theme.TEXT);
         text.setVerticalAlignment(SwingConstants.TOP);
+        // HTML 那个块会收缩到文字宽，光靠 text-align 只在这个块里生效；
+        // 把标签本身的水平对齐也设成居中，整块才会落在框的中线上
+        text.setHorizontalAlignment(SwingConstants.CENTER);
+
+        // 自己按像素宽度折行，再把每行用 <br> 拼成居中的 HTML。
+        // 不能把 width 写进 HTML：Swing 的 HTML 会把 px 按点距再放大一截，
+        // 排版宽度和标签实际宽度对不上，字会整块被推到右边去（实测偏了 80 像素）。
+        FontMetrics metrics = text.getFontMetrics(Theme.FONT);
+        text.setText(centeredHtml(wrap(message, metrics, textWidth)));
 
         int naturalHeight = text.getPreferredSize().height;
         Dimension wanted = new Dimension(textWidth, Math.min(naturalHeight, MAX_TEXT_HEIGHT));
@@ -112,14 +122,50 @@ final class MessageDialog extends JDialog {
         return body;
     }
 
-    /** 把纯文本包成"在给定宽度里居中、按行折行"的 HTML。 */
-    private static String centeredHtml(String message, int width) {
-        String escaped = message
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>");
-        return "<html><div style='width:" + width + "px; text-align:center;'>" + escaped + "</div></html>";
+    /** 把每一行拼成居中的 HTML；转义交给 {@link #escape}。 */
+    private static String centeredHtml(List<String> lines) {
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) {
+                body.append("<br>");
+            }
+            body.append(escape(lines.get(i)));
+        }
+        return "<html><div style='text-align:center;'>" + body + "</div></html>";
+    }
+
+    /**
+     * 按像素宽度折行。
+     *
+     * <p>逐字量宽再断行——中文没有词间空格，这样最稳妥；换行符本身也保留成空行。
+     */
+    private static List<String> wrap(String message, FontMetrics metrics, int maxWidth) {
+        List<String> lines = new ArrayList<>();
+        for (String paragraph : message.split("\n", -1)) {
+            if (paragraph.isEmpty()) {
+                lines.add("");
+                continue;
+            }
+            StringBuilder line = new StringBuilder();
+            int width = 0;
+            for (int i = 0; i < paragraph.length(); i++) {
+                char c = paragraph.charAt(i);
+                int charWidth = metrics.charWidth(c);
+                if (width + charWidth > maxWidth && line.length() > 0) {
+                    lines.add(line.toString());
+                    line.setLength(0);
+                    width = 0;
+                }
+                line.append(c);
+                width += charWidth;
+            }
+            lines.add(line.toString());
+        }
+        return lines;
+    }
+
+    private static String escape(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private JComponent buildFooter() {

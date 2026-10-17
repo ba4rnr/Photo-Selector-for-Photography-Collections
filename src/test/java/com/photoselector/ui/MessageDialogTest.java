@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +17,7 @@ import java.util.Set;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JLabel;
+import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,6 +64,27 @@ class MessageDialogTest {
         assertTrue(anyTextContains(dialog.getContentPane(), "text-align:center"),
                 "正文应当居中，而不是贴着左边");
         assertNotNull(findButton(dialog.getContentPane(), "确定"), "右下角应当有确定按钮");
+
+        // 真的落在中间：量出正文像素的左右边界，中心离对话框中线不能差太多
+        JLabel body = findBodyLabel(dialog.getContentPane());
+        assertNotNull(body, "应当找得到正文标签");
+        Point at = SwingUtilities.convertPoint(body, 0, 0, dialog.getContentPane());
+        int minX = Integer.MAX_VALUE;
+        int maxX = -1;
+        for (int y = Math.max(0, at.y); y < Math.min(image.getHeight(), at.y + body.getHeight()); y++) {
+            for (int x = Math.max(0, at.x); x < Math.min(image.getWidth(), at.x + body.getWidth()); x++) {
+                int rgb = image.getRGB(x, y);
+                if (((rgb >> 16) & 0xFF) > 150 && ((rgb >> 8) & 0xFF) > 150 && (rgb & 0xFF) > 150) {
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                }
+            }
+        }
+        assertTrue(maxX > 0, "正文应当画出可见的像素");
+        int textCenter = (minX + maxX) / 2;
+        int dialogCenter = image.getWidth() / 2;
+        assertTrue(Math.abs(textCenter - dialogCenter) <= 12,
+                "正文应当在中线上：文字中心 " + textCenter + "，对话框中心 " + dialogCenter);
         dialog.dispose();
     }
 
@@ -85,6 +108,22 @@ class MessageDialogTest {
             }
             if (child instanceof Container nested) {
                 AbstractButton found = findButton(nested, text);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JLabel findBodyLabel(Container container) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof JLabel label && label.getText() != null
+                    && label.getText().startsWith("<html>")) {
+                return label;
+            }
+            if (child instanceof Container nested) {
+                JLabel found = findBodyLabel(nested);
                 if (found != null) {
                     return found;
                 }
