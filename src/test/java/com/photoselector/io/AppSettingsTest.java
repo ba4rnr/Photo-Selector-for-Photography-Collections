@@ -1,6 +1,7 @@
 package com.photoselector.io;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,5 +41,37 @@ class AppSettingsTest {
 
         Files.writeString(file, "viewer.defaultZoomPercent=-5\n");
         assertEquals(18, new AppSettings(file).defaultZoomPercent(), "负数的倍率没有意义");
+    }
+
+    @Test
+    void 窗口位置大小与放大倍率互不覆盖() {
+        Path file = tempDir.resolve("preferences.properties");
+        AppSettings settings = new AppSettings(file);
+        AppSettings.WindowState state =
+                new AppSettings.WindowState(-1280, 80, 1100, 720, true);
+
+        settings.setDefaultZoomPercent(33);
+        settings.setWindowState(state);
+
+        AppSettings reloaded = new AppSettings(file);
+        assertEquals(state, reloaded.windowState().orElseThrow(),
+                "重新打开程序时应当读回上次的窗口边界");
+        assertEquals(33, reloaded.defaultZoomPercent(),
+                "保存窗口位置不能顺手把放大倍率清掉");
+    }
+
+    @Test
+    void 窗口设置不完整或尺寸无效时回退为居中打开() throws Exception {
+        Path file = tempDir.resolve("preferences.properties");
+        Files.writeString(file, """
+                window.x=10
+                window.y=20
+                window.width=0
+                window.height=700
+                window.maximized=true
+                """);
+
+        assertTrue(new AppSettings(file).windowState().isEmpty(),
+                "尺寸为 0 的窗口配置不能拿来恢复");
     }
 }

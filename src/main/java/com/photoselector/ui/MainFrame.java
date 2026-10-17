@@ -1,7 +1,10 @@
 package com.photoselector.ui;
 
 import java.awt.Dimension;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
@@ -35,9 +38,14 @@ import com.photoselector.ui.theme.Theme;
 @SuppressWarnings("serial") // Swing 组件都实现了 Serializable，但我们从不序列化界面，无需 serialVersionUID
 public final class MainFrame extends JFrame {
 
+    /** 判断一块旧窗口位置是否还落在屏幕上：至少留出这么多标题栏。 */
+    private static final int MIN_VISIBLE_WIDTH = 120;
+    private static final int MIN_VISIBLE_HEIGHT = 60;
+
     private final MainPanel mainPanel;
     private final WorkspaceStore workspaceStore;
     private final AppSettings settings;
+    private boolean restoreMaximizedOnOpen;
 
     /** 菜单里那两项：灰亮状态跟着撤销 / 重做的历史走。 */
     public MainFrame(WorkspaceStore workspaceStore, AppSettings settings) {
@@ -56,6 +64,14 @@ public final class MainFrame extends JFrame {
         // 关窗口现在只有一条路——MainPanel.requestClose()，菜单里的"退出"也走它。
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent e) {
+                if (restoreMaximizedOnOpen) {
+                    restoreMaximizedOnOpen = false;
+                    setExtendedState(MAXIMIZED_BOTH);
+                }
+            }
+
             @Override
             public void windowClosing(WindowEvent e) {
                 mainPanel.requestClose();
@@ -83,7 +99,55 @@ public final class MainFrame extends JFrame {
 
         setPreferredSize(new Dimension(1440, 900));
         pack();
-        setLocationRelativeTo(null); // 居中打开
+        restoreWindowState();
+    }
+
+    /**
+     * 恢复上次的窗口边界；若当时最大化，等窗口真正打开后再切回最大化。
+     *
+     * <p>显示器拔掉或分辨率变小后，旧坐标可能已经完全落在屏幕外。
+     * 这种情况不硬套旧位置，而是在当前可用区域里重新居中，免得窗口“打开却看不见”。
+     */
+    private void restoreWindowState() {
+        var saved = settings.windowState();
+        if (saved.isEmpty()) {
+            fitNewWindowOnScreen();
+            return;
+        }
+
+        AppSettings.WindowState state = saved.get();
+        Rectangle target = new Rectangle(state.x(), state.y(), state.width(), state.height());
+        if (screenShowing(target) == null) {
+            Rectangle usable = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getMaximumWindowBounds();
+            target.width = Math.min(target.width, usable.width);
+            target.height = Math.min(target.height, usable.height);
+            target.x = usable.x + (usable.width - target.width) / 2;
+            target.y = usable.y + (usable.height - target.height) / 2;
+        }
+        setBounds(target);
+        restoreMaximizedOnOpen = state.maximized();
+    }
+
+    /** 第一次打开时若出厂尺寸比屏幕还大，先缩到可用区域，再居中。 */
+    private void fitNewWindowOnScreen() {
+        Rectangle usable = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        setSize(Math.min(getWidth(), usable.width), Math.min(getHeight(), usable.height));
+        setLocationRelativeTo(null);
+    }
+
+    /** 找到与窗口矩形有足够可见交集的那块屏幕；全在屏幕外就返回 null。 */
+    private static Rectangle screenShowing(Rectangle window) {
+        for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .getScreenDevices()) {
+            Rectangle screen = device.getDefaultConfiguration().getBounds();
+            Rectangle visible = screen.intersection(window);
+            if (visible.width >= MIN_VISIBLE_WIDTH && visible.height >= MIN_VISIBLE_HEIGHT) {
+                return screen;
+            }
+        }
+        return null;
     }
 
     /** 撤销 / 重做的灰亮：工具栏按钮和菜单项一起跟着历史走。 */
@@ -253,6 +317,7 @@ public final class MainFrame extends JFrame {
 
     /** 真正退出：收掉后台线程池，再关窗口。 */
     private void exit() {
+        rememberWindowState();
         Workspace workspace = mainPanel.workspace();
         if (workspace != null) {
             try {
@@ -261,8 +326,30 @@ public final class MainFrame extends JFrame {
                 // 偏好文件写不进去不该阻止用户退出
             }
         }
-        mainPanel.shutdown();
         dispose();
+    }
+
+    /** 记下当前窗口边界；最大化状态单独存，打开时先落位再重新最大化。 */
+    private void rememberWindowState() {
+        Rectangle bounds = getBounds();
+        if (bounds.width <= 0 || bounds.height <= 0) {
+            return;
+        }
+        boolean maximized = (getExtendedState() & MAXIMIZED_BOTH) != 0;
+        settings.setWindowState(new AppSettings.WindowState(
+                bounds.x, bounds.y, bounds.width, bounds.height, maximized));
+    }
+
+    /**
+     * 窗口一旦销毁就收掉监听线程、扫描线程和取图线程。
+     *
+     * <p>正常退出会走到这里；测试或别的调用直接 {@code dispose()} 时也必须走同一条收尾路，
+     * 否则监听器会在临时目录被删掉后继续工作，甚至弹出一个没有主窗口依附的错误框。
+     */
+    @Override
+    public void dispose() {
+        mainPanel.shutdown();
+        super.dispose();
     }
 
     /** 素材文件夹扫描完之后的收尾：更新标题，或者报错。 */
