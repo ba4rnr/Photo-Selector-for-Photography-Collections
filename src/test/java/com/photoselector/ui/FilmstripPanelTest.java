@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.event.ComponentEvent;
 import java.awt.event.MouseEvent;
@@ -516,6 +517,54 @@ class FilmstripPanelTest {
     }
 
     @Test
+    void 连续右键过片_越过中线才跟随居中_到末尾后停止滚动() throws Exception {
+        Theme.install();
+        List<Path> photos = new ArrayList<>();
+        for (int i = 0; i < 24; i++) {
+            photos.add(TestImages.writeJpeg(tempDir.resolve("follow-" + i + ".jpg"), 900, 600));
+        }
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        FilmstripPanel filmstrip = new FilmstripPanel(loader);
+        JScrollPane scroll = filmstrip.wrapInScrollPane();
+
+        for (int width : new int[] {420, 760, 1100}) {
+            SwingUtilities.invokeAndWait(() -> {
+                scroll.setSize(width, 190);
+                filmstrip.setGroups(oneGroup("照片", photos), 120);
+                layoutTree(scroll);
+                scroll.getViewport().setViewPosition(new Point(0, 0));
+                filmstrip.setCurrentPhoto(photos.get(0));
+            });
+            flushEdt();
+
+            for (int i = 1; i < photos.size(); i++) {
+                int before = filmstrip.viewPositionXForTest();
+                int extent = scroll.getViewport().getExtentSize().width;
+                int maximum = Math.max(0, filmstrip.getPreferredSize().width - extent);
+                int cellCenter = filmstrip.photoCenterInViewForTest(photos.get(i));
+                int expected;
+                if (cellCenter > before + extent / 2 && before < maximum) {
+                    expected = Math.max(before, Math.min(maximum, cellCenter - extent / 2));
+                } else {
+                    expected = before;
+                }
+
+                SwingUtilities.invokeAndWait(() -> filmstrip.moveCurrent(1));
+                flushEdt();
+                assertEquals(expected, filmstrip.viewPositionXForTest(), 2,
+                        "宽度 " + width + "、第 " + i + " 张时滚动位置不对");
+            }
+
+            int extent = scroll.getViewport().getExtentSize().width;
+            int maximum = Math.max(0, filmstrip.getPreferredSize().width - extent);
+            assertEquals(maximum, filmstrip.viewPositionXForTest(), 2,
+                    "宽度 " + width + " 时，末尾应当停在内容最右端");
+        }
+        awaitIdle(loader);
+        loader.shutdown();
+    }
+
+    @Test
     void 点击位置要扣掉组内边距_点在边距或格子缝隙里不能选错照片() throws Exception {
         Theme.install();
         List<Path> photos = List.of(
@@ -604,5 +653,9 @@ class FilmstripPanelTest {
                 layoutTree(nested);
             }
         }
+    }
+
+    private static void flushEdt() throws Exception {
+        SwingUtilities.invokeAndWait(() -> { });
     }
 }

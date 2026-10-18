@@ -386,8 +386,13 @@ final class FilmstripPanel extends JPanel {
         if (next < 0 || next >= flat.size()) {
             return; // 到头了就不动，不绕回去
         }
-        setCurrentPhoto(flat.get(next));
-        scrollToPhoto(flat.get(next));
+        Path selected = flat.get(next);
+        setCurrentPhoto(selected);
+        if (index < 0) {
+            centerPhoto(selected); // 第一次按键没有起点，直接把选中的那张带进视口
+        } else {
+            followSelection(selected, delta);
+        }
     }
 
     /**
@@ -437,6 +442,55 @@ final class FilmstripPanel extends JPanel {
                 return;
             }
         }
+    }
+
+    /**
+     * 连续过片时的跟随滚动。
+     *
+     * <p>规则是“越过中线才跟随”：当前照片还在视口左半边时只移动选中框，
+     * 不滚动；越过中线且右侧还有内容时，把这张照片移到视口中央。到达内容
+     * 最右端后不再强行居中，让选中框自然向右走到末尾。向左过片对称处理。
+     */
+    private void followSelection(Path photo, int direction) {
+        if (!(getParent() instanceof JViewport viewport) || direction == 0) {
+            return;
+        }
+        Rectangle cell = photoCellRect(photo);
+        if (cell == null) {
+            return;
+        }
+        int extent = viewport.getExtentSize().width;
+        if (extent <= 0) {
+            return;
+        }
+        int current = viewport.getViewPosition().x;
+        int maximum = Math.max(0, getPreferredSize().width - extent);
+        int cellCenter = cell.x + cell.width / 2;
+        int viewCenter = current + extent / 2;
+        int target = current;
+        if (direction > 0 && current < maximum && cellCenter > viewCenter) {
+            target = Math.max(current, Math.min(maximum, cellCenter - extent / 2));
+        } else if (direction < 0 && current > 0 && cellCenter < viewCenter) {
+            target = Math.min(current, Math.max(0, cellCenter - extent / 2));
+        }
+        if (target != current) {
+            viewport.setViewPosition(new Point(target, viewport.getViewPosition().y));
+        }
+    }
+
+    /** 某张照片所在格子的矩形；组被收起或照片不存在时返回 null。 */
+    private Rectangle photoCellRect(Path photo) {
+        for (GroupBox box : computeLayout()) {
+            if (box.collapsed()) {
+                continue;
+            }
+            int index = groups.get(box.index()).photos().indexOf(photo);
+            if (index >= 0) {
+                return new Rectangle(box.x() + PAD + index * cellWidth,
+                        0, cellWidth - GAP, 1);
+            }
+        }
+        return null;
     }
 
     /**

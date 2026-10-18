@@ -246,8 +246,44 @@ final class TargetFilmstripPanel extends JPanel {
             return;
         }
         Path photo = session.entryAt(next).source();
-        selectPhoto(photo);
+        selectedPhoto = photo;
+        if (current < 0) {
+            centerPhoto(photo);
+        } else {
+            followSelection(next, delta);
+        }
+        repaint();
         onPhotoChosen.accept(photo);
+    }
+
+    /**
+     * 目标照片带也使用“越过中线才跟随”的滚动规则：
+     * 选中框在左半边时不动，越过中线后把当前格放到视口中央；
+     * 到达内容最右端后不再滚动，让选中框继续向右走。
+     */
+    private void followSelection(int index, int direction) {
+        if (!(getParent() instanceof JViewport viewport) || direction == 0
+                || index < 0 || index >= count()) {
+            return;
+        }
+        Rectangle cell = cellRect(index);
+        int extent = viewport.getExtentSize().width;
+        if (extent <= 0) {
+            return;
+        }
+        int current = viewport.getViewPosition().x;
+        int maximum = Math.max(0, getPreferredSize().width - extent);
+        int cellCenter = cell.x + cell.width / 2;
+        int viewCenter = current + extent / 2;
+        int target = current;
+        if (direction > 0 && current < maximum && cellCenter > viewCenter) {
+            target = Math.max(current, Math.min(maximum, cellCenter - extent / 2));
+        } else if (direction < 0 && current > 0 && cellCenter < viewCenter) {
+            target = Math.min(current, Math.max(0, cellCenter - extent / 2));
+        }
+        if (target != current) {
+            viewport.setViewPosition(new Point(target, viewport.getViewPosition().y));
+        }
     }
 
     private int dropIndexAt(int x) {
