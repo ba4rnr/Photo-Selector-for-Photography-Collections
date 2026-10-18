@@ -520,7 +520,7 @@ class ViewerPanelTest {
     }
 
     @Test
-    void 默认适应窗口的4000乘6000画幅在720乘1080查看区正好是18百分比() throws Exception {
+    void 默认适应窗口的4000乘6000画幅在720乘1080查看区正好是16百分比() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
         ViewerPanel viewer = new ViewerPanel(loader);
@@ -536,8 +536,8 @@ class ViewerPanelTest {
         waitUntil(viewer::hasImage, "原图");
 
         assertTrue(viewer.isFitToWindow());
-        assertEquals(18, viewer.zoomPercent(),
-                "4:6 画幅在 720×1080 有效查看区中适应结果应为 18%");
+        assertEquals(16, viewer.zoomPercent(),
+                "4:6 画幅在 720×1080 有效查看区中适应结果应为 16%");
         loader.shutdown();
     }
 

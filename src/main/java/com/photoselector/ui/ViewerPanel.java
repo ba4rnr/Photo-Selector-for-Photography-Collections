@@ -64,6 +64,10 @@ final class ViewerPanel extends JPanel {
     private static final double MIN_SCALE = 0.05;
     private static final double MAX_SCALE = 8.0;
 
+    /** 适应窗口时在理论贴合比例上再留出的空间（2 个百分点）。 */
+    private static final double FIT_REDUCTION = 0.02;
+    private static final double FIT_MIN_SCALE = 0.01;
+
     /**
      * 滚轮走的档位表。
      *
@@ -750,8 +754,11 @@ final class ViewerPanel extends JPanel {
             return 1.0;
         }
         Rectangle area = imageArea();
-        return Math.min((double) area.width / display.getWidth(),
+        double fitted = Math.min((double) area.width / display.getWidth(),
                 (double) area.height / display.getHeight());
+        // 不把图片刚好顶满窗口，留出 2 个百分点的呼吸空间；这是“适应窗口”
+        // 自己的显示比例，不影响固定百分比档位。
+        return Math.max(FIT_MIN_SCALE, fitted - FIT_REDUCTION);
     }
 
     private double currentScale() {
