@@ -261,8 +261,8 @@ public final class MainFrame extends JFrame {
         edit.add(redoItem);
 
         JMenu image = menu("图像");
-        // 旋转 / 翻转都先给左右（上下）两项；点完之后把工具拨回"选择"，
-        // 免得光标一直停在旋转图标上——菜单是一次性动作，不是模式
+        // 旋转 / 翻转都先给左右（上下）两项；点完之后裁切中留在裁切，
+        // 其余情况回到“选择”——菜单是一次性动作，不是工具模式。
         JMenu rotate = menu("旋转");
         rotate.add(imageAction(mainPanel, "向左转 90°", () -> mainPanel.rotateCurrentPhoto(false)));
         rotate.add(imageAction(mainPanel, "向右转 90°", () -> mainPanel.rotateCurrentPhoto(true)));
@@ -445,12 +445,12 @@ public final class MainFrame extends JFrame {
         return menu;
     }
 
-    /** 「图像」菜单里的一项：点一下做件事，并把光标工具拨回"选择"。 */
+    /** 「图像」菜单里的一项：点一下做件事，再回到裁切或选择工具。 */
     private static JMenuItem imageAction(MainPanel mainPanel, String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
         item.addActionListener(e -> {
             action.run();
-            mainPanel.toolBar().selectTool(CursorTool.SELECT);
+            mainPanel.finishImageAction();
         });
         return item;
     }

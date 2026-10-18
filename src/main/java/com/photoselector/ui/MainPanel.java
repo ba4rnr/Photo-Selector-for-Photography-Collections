@@ -300,7 +300,13 @@ public final class MainPanel extends JPanel {
         historyChanged();
         // 旋转 / 翻转是"点一下马上生效"的工具：选中它的同时也对当前这张做一次。
         toolBar.setOnToolChanged(tool -> {
-            viewer.setCursorTool(tool);
+            // 裁切中的旋转 / 翻转不是“换工具”，而是在裁切框还开着时改图像。
+            // 保留 CROP 状态，动作做完再把工具栏拨回裁切。
+            boolean stayInCrop = viewer.isCropMode()
+                    && (tool == CursorTool.ROTATE || tool == CursorTool.FLIP);
+            if (!stayInCrop) {
+                viewer.setCursorTool(tool);
+            }
             boolean action = false;
             if (tool == CursorTool.ROTATE) {
                 rotateCurrentPhoto(true);
@@ -312,7 +318,8 @@ public final class MainPanel extends JPanel {
             if (action) {
                 // 动作型工具做完就回到"选择"：否则主视图停在既不能拖出、
                 // 也不能平移的状态，看起来像突然失灵。
-                toolBar.selectTool(CursorTool.SELECT);
+                // 如果动作是从裁切里发出的，则回到裁切，裁切框和模式都不丢。
+                toolBar.selectTool(stayInCrop ? CursorTool.CROP : CursorTool.SELECT);
             }
         });
         // 撤销 / 重做是这块面板自己的逻辑，接线也放在这儿：谁拿到面板，
@@ -615,7 +622,7 @@ public final class MainPanel extends JPanel {
         }
     }
 
-    /** 裁切框选完成：写入中间商、刷新画面，并回到选择工具。 */
+    /** 裁切框选完成：写入中间商并刷新画面，裁切模式继续保留。 */
     private void applyCropToCurrentPhoto(CropRect crop) {
         editingPhoto().ifPresent(photo -> {
             Session session = targetPanel.session();
@@ -626,7 +633,11 @@ public final class MainPanel extends JPanel {
                 historyChanged();
             }
         });
-        toolBar.selectTool(CursorTool.SELECT);
+    }
+
+    /** 菜单里的旋转 / 翻转结束后，裁切中仍回裁切，否则回到选择。 */
+    public void finishImageAction() {
+        toolBar.selectTool(viewer.isCropMode() ? CursorTool.CROP : CursorTool.SELECT);
     }
 
     /** 有没有选中的照片、有没有目标文件夹——两个都有才谈得上编辑。 */

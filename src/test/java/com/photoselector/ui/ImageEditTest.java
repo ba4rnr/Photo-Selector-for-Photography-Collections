@@ -216,12 +216,50 @@ class ImageEditTest {
 
         CropRect crop = panel.targetPanelForTest().session().editsOf(photo).crop();
         assertTrue(crop != null, "裁切要记在中间商里");
-        assertEquals(CursorTool.SELECT, panel.toolBar().activeTool(),
-                "完成裁切后回到选择工具");
+        assertEquals(CursorTool.CROP, panel.toolBar().activeTool(),
+                "完成裁切后仍应停留在裁切工具");
+        assertTrue(viewer.isCropModeForTest(), "裁切框和压暗效果要继续保留");
+
+        SwingUtilities.invokeAndWait(() ->
+                panel.toolBar().selectTool(CursorTool.SELECT));
+        assertTrue(!viewer.isCropModeForTest(), "只有手动点选择才退出裁切");
 
         SwingUtilities.invokeAndWait(panel::undo);
         assertTrue(panel.targetPanelForTest().session().editsOf(photo).crop() == null,
                 "撤销裁切应当恢复整张画面");
+        panel.shutdown();
+    }
+
+    @Test
+    void 裁切中旋转和翻转不会退出裁切() throws Exception {
+        MainPanel panel = panelWithOnePhoto();
+        ViewerPanel viewer = panel.viewerForTest();
+        Path photo = viewer.photo();
+        CropRect initial = new CropRect(0.1, 0.2, 0.7, 0.6);
+        SwingUtilities.invokeAndWait(() -> {
+            panel.targetPanelForTest().session().setEdits(
+                    photo, EditState.NONE.withCrop(initial));
+            viewer.setEdits(panel.targetPanelForTest().session().editsOf(photo));
+        });
+
+        SwingUtilities.invokeAndWait(() -> {
+            panel.beginCrop();
+            panel.toolBar().toolButton(CursorTool.ROTATE).doClick(0);
+            panel.toolBar().toolButton(CursorTool.FLIP).doClick(0);
+        });
+
+        assertTrue(viewer.isCropModeForTest(), "旋转和翻转期间裁切模式不能丢");
+        assertEquals(CursorTool.CROP, panel.toolBar().activeTool(),
+                "动作完成后应回到裁切工具，而不是选择工具");
+        assertEquals(3, viewer.edits().quarters(),
+                "旋转 90° 后再水平翻转，按既有规则合成为 270° + 垂直镜像");
+        assertTrue(viewer.edits().flipVertical(), "翻转仍然和裁切并存");
+        assertTrue(viewer.edits().crop() != null,
+                "旋转和翻转不能把裁切框丢掉");
+
+        SwingUtilities.invokeAndWait(() ->
+                panel.toolBar().selectTool(CursorTool.PAN));
+        assertTrue(!viewer.isCropModeForTest(), "手动点平移才退出裁切");
         panel.shutdown();
     }
 

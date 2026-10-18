@@ -167,6 +167,8 @@ final class ViewerPanel extends JPanel {
 
     /** 裁切模式：显示未裁切的完整画面，用拖动框选新的裁切区域。 */
     private boolean cropMode;
+    /** 没有已保存裁切时，编辑框默认覆盖整张画面，先让四边/四角手柄可见。 */
+    private static final CropRect FULL_CROP = new CropRect(0, 0, 1, 1);
     private Point cropDragStart;
     private CropRect cropPreview;
     private CropRect cropOriginal;
@@ -217,6 +219,11 @@ final class ViewerPanel extends JPanel {
                     cropDragStart = pressed;
                     cropOriginal = edits.crop();
                     cropGrab = cropGrabAt(pressed);
+                    if (cropOriginal == null && cropGrab != CropGrab.NEW) {
+                        // 还没有裁切框时，边/角手柄对应的是整张画面。
+                        // 从画面内部拖动仍走 NEW，保留“直接框一块”的旧操作。
+                        cropOriginal = FULL_CROP;
+                    }
                     cropPreview = cropGrab == CropGrab.NEW ? null : cropOriginal;
                     repaint();
                 } else if (canPan()) {
@@ -249,11 +256,12 @@ final class ViewerPanel extends JPanel {
                     CropRect selected = cropGrab == CropGrab.NEW
                             ? normalizedCrop(cropDragStart, e.getPoint())
                             : adjustedCrop(cropDragStart, e.getPoint());
+                    CropRect original = cropOriginal;
                     cropDragStart = null;
                     cropPreview = null;
                     cropOriginal = null;
                     cropGrab = null;
-                    if (selected != null) {
+                    if (selected != null && !selected.equals(original)) {
                         onCropCommitted.accept(selected);
                     }
                     repaint();
@@ -1046,10 +1054,8 @@ final class ViewerPanel extends JPanel {
 
     /** 判断按下的位置是在移动已有选框、抓边角缩放，还是重新画一个。 */
     private CropGrab cropGrabAt(Point point) {
-        if (cropOriginal == null) {
-            return CropGrab.NEW;
-        }
-        Rectangle r = cropScreenRect(cropOriginal);
+        CropRect interaction = cropOriginal == null ? FULL_CROP : cropOriginal;
+        Rectangle r = cropScreenRect(interaction);
         int tolerance = 8;
         boolean left = Math.abs(point.x - r.x) <= tolerance;
         boolean right = Math.abs(point.x - (r.x + r.width)) <= tolerance;
@@ -1066,7 +1072,8 @@ final class ViewerPanel extends JPanel {
         if (bottom && acrossX) return CropGrab.S;
         if (left && acrossY) return CropGrab.W;
         if (right && acrossY) return CropGrab.E;
-        return r.contains(point) ? CropGrab.MOVE : CropGrab.NEW;
+        return cropOriginal != null && r.contains(point)
+                ? CropGrab.MOVE : CropGrab.NEW;
     }
 
     /** 移动 / 缩放已有选框，并保证四个边始终留在图片里。 */
@@ -1149,8 +1156,10 @@ final class ViewerPanel extends JPanel {
     }
 
     private void paintCropOverlay(Graphics2D g, Rectangle image) {
-        CropRect selection = cropPreview != null ? cropPreview : edits.crop();
-        if (selection == null || image.width <= 0 || image.height <= 0) {
+        CropRect selection = cropPreview != null
+                ? cropPreview
+                : edits.crop() != null ? edits.crop() : FULL_CROP;
+        if (image.width <= 0 || image.height <= 0) {
             return;
         }
         Rectangle selected = cropScreenRect(selection);
@@ -1168,23 +1177,31 @@ final class ViewerPanel extends JPanel {
         border.dispose();
     }
 
-    /** 四角和四边中点的小方块：告诉用户这里可以抓住缩放。 */
+    /** 四角和四边中点的白色裁切条：告诉用户这里可以抓住缩放。 */
     private static void paintCropHandles(Graphics2D g, Rectangle crop) {
-        int size = 7;
-        int half = size / 2;
+        int thickness = 3;
+        int length = Math.min(14, Math.max(4,
+                Math.min(crop.width, crop.height) / 4));
         int midX = crop.x + crop.width / 2;
         int midY = crop.y + crop.height / 2;
         int right = crop.x + crop.width;
         int bottom = crop.y + crop.height;
-        int[][] handles = {
-            {crop.x, crop.y}, {midX, crop.y}, {right, crop.y},
-            {crop.x, midY}, {right, midY},
-            {crop.x, bottom}, {midX, bottom}, {right, bottom}
-        };
         g.setColor(Theme.TEXT);
-        for (int[] handle : handles) {
-            g.fillRect(handle[0] - half, handle[1] - half, size, size);
-        }
+        // 四角画成向画面内部延伸的 L 形条，四边中点画短横条/竖条。
+        // 比原来的 7×7 小方块更接近 C1，也更容易看出拖动方向。
+        g.fillRect(crop.x, crop.y, length, thickness);
+        g.fillRect(crop.x, crop.y, thickness, length);
+        g.fillRect(right - length, crop.y, length, thickness);
+        g.fillRect(right - thickness, crop.y, thickness, length);
+        g.fillRect(crop.x, bottom - thickness, length, thickness);
+        g.fillRect(crop.x, bottom - length, thickness, length);
+        g.fillRect(right - length, bottom - thickness, length, thickness);
+        g.fillRect(right - thickness, bottom - length, thickness, length);
+
+        g.fillRect(midX - length / 2, crop.y, length, thickness);
+        g.fillRect(midX - length / 2, bottom - thickness, length, thickness);
+        g.fillRect(crop.x, midY - length / 2, thickness, length);
+        g.fillRect(right - thickness, midY - length / 2, thickness, length);
     }
 
     /** 图片绘制矩形；给裁切 / 网格测试用。 */
@@ -1193,8 +1210,13 @@ final class ViewerPanel extends JPanel {
     }
 
     /** 眼下是不是裁切模式。 */
-    boolean isCropModeForTest() {
+    boolean isCropMode() {
         return cropMode;
+    }
+
+    /** 兼容测试里的旧名字。 */
+    boolean isCropModeForTest() {
+        return isCropMode();
     }
 
     /** 留给图片的那块地方：表头以下、四周留白以内。 */

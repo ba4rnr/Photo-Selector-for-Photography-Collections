@@ -324,6 +324,43 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 进入裁切后整图四边和四角手柄立即可拖() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 400, 300);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        AtomicReference<CropRect> chosen = new AtomicReference<>();
+        viewer.setOnCropCommitted(chosen::set);
+        SwingUtilities.invokeAndWait(() -> viewer.setCursorTool(CursorTool.CROP));
+        Rectangle image = viewer.imageDrawRectForTest();
+
+        // 没有旧裁切框时，贴住图片右边中点向内拖，应当直接缩进整图选框。
+        Point rightEdge = new Point(image.x + image.width - 1,
+                image.y + image.height / 2);
+        Point inward = new Point(rightEdge.x - 45, rightEdge.y);
+        SwingUtilities.invokeAndWait(() -> {
+            sendMouse(viewer, rightEdge, MouseEvent.MOUSE_PRESSED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, inward, MouseEvent.MOUSE_DRAGGED, MouseEvent.BUTTON1_DOWN_MASK);
+            sendMouse(viewer, inward, MouseEvent.MOUSE_RELEASED, 0);
+        });
+
+        CropRect crop = chosen.get();
+        assertTrue(crop != null, "整图边缘手柄必须能直接开始裁切");
+        assertEquals(0.0, crop.x(), 0.01, "拖右边缘不应改变左边界");
+        assertEquals(0.0, crop.y(), 0.01, "拖右边缘不应改变上边界");
+        assertTrue(crop.width() < 0.95, "右边界应当向左缩进");
+        assertEquals(1.0, crop.height(), 0.01, "右边缘拖动不应改变高度");
+        loader.shutdown();
+    }
+
+    @Test
     void 三分网格只画在图片范围内() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
