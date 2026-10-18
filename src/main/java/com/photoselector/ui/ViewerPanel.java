@@ -1220,31 +1220,39 @@ final class ViewerPanel extends JPanel {
         int bottom = crop.y + crop.height - 1;
         int half = length / 2;
         int halfThickness = thickness / 2;
-        g.setColor(Theme.CROP_HANDLE);
+        Area handles = new Area();
 
         // 四个角是 L 形：横向条和纵向条只向画面内侧延伸，交叉点正好压住
         // 明暗边界。不能像十字那样四向都伸，否则角上会多出画面外的半截。
-        g.fillRect(crop.x - halfThickness, crop.y - halfThickness,
+        addCropHandle(handles, crop.x - halfThickness, crop.y - halfThickness,
                 length, thickness);                              // 左上横
-        g.fillRect(crop.x - halfThickness, crop.y - halfThickness,
+        addCropHandle(handles, crop.x - halfThickness, crop.y - halfThickness,
                 thickness, length);                              // 左上竖
-        g.fillRect(right - length + halfThickness, crop.y - halfThickness,
+        addCropHandle(handles, right - length + halfThickness, crop.y - halfThickness,
                 length, thickness);                              // 右上横
-        g.fillRect(right - halfThickness, crop.y - halfThickness,
+        addCropHandle(handles, right - halfThickness, crop.y - halfThickness,
                 thickness, length);                              // 右上竖
-        g.fillRect(crop.x - halfThickness, bottom - halfThickness,
+        addCropHandle(handles, crop.x - halfThickness, bottom - halfThickness,
                 length, thickness);                              // 左下横
-        g.fillRect(crop.x - halfThickness, bottom - length + halfThickness,
+        addCropHandle(handles, crop.x - halfThickness, bottom - length + halfThickness,
                 thickness, length);                              // 左下竖
-        g.fillRect(right - length + halfThickness, bottom - halfThickness,
+        addCropHandle(handles, right - length + halfThickness, bottom - halfThickness,
                 length, thickness);                              // 右下横
-        g.fillRect(right - halfThickness, bottom - length + halfThickness,
+        addCropHandle(handles, right - halfThickness, bottom - length + halfThickness,
                 thickness, length);                              // 右下竖
 
-        g.fillRect(midX - half, crop.y - halfThickness, length, thickness);
-        g.fillRect(midX - half, bottom - halfThickness, length, thickness);
-        g.fillRect(crop.x - halfThickness, midY - half, thickness, length);
-        g.fillRect(right - halfThickness, midY - half, thickness, length);
+        addCropHandle(handles, midX - half, crop.y - halfThickness, length, thickness);
+        addCropHandle(handles, midX - half, bottom - halfThickness, length, thickness);
+        addCropHandle(handles, crop.x - halfThickness, midY - half, thickness, length);
+        addCropHandle(handles, right - halfThickness, midY - half, thickness, length);
+        // 只填一次合并后的形状：两条半透明条若分别绘制，L 形转角会因为
+        // Alpha 混合两次而比周围更亮/更不透明。
+        g.setColor(Theme.CROP_HANDLE);
+        g.fill(handles);
+    }
+
+    private static void addCropHandle(Area handles, int x, int y, int width, int height) {
+        handles.add(new Area(new Rectangle(x, y, width, height)));
     }
 
     /** 图片绘制矩形；给裁切 / 网格测试用。 */
