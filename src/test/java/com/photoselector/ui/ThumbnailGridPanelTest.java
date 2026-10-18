@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 import java.util.List;
@@ -52,7 +53,9 @@ class ThumbnailGridPanelTest {
 
         @Override
         protected void paintHeader(Graphics2D g) {
-            // 假面板不需要表头
+            // 给“粘性表头”测试留一个明显的色块。
+            g.setColor(java.awt.Color.RED);
+            g.fillRect(0, 0, Math.min(120, getWidth()), HEADER_HEIGHT);
         }
 
         @Override
@@ -123,5 +126,52 @@ class ThumbnailGridPanelTest {
         assertTrue(grid.columnsForTest() < before, "缩略图变大之后一列放不下那么多了");
         assertEquals(210, grid.thumbnailWidth());
         loader.shutdown();
+    }
+
+    @Test
+    void 滚下缩略图网格后_表头仍粘在视口顶部() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        java.util.ArrayList<Path> items = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            items.add(TestImages.writeJpeg(tempDir.resolve("sticky-" + i + ".jpg"), 300, 200));
+        }
+        FakeGrid grid = new FakeGrid(loader, items);
+        javax.swing.JScrollPane scroll = grid.wrapInScrollPane();
+        SwingUtilities.invokeAndWait(() -> {
+            scroll.setSize(360, 300);
+            grid.setSession(new com.photoselector.core.Session(
+                    tempDir, com.photoselector.core.NumberingRule.DEFAULT));
+            layoutTree(scroll);
+            grid.dispatchEvent(new ComponentEvent(grid, ComponentEvent.COMPONENT_RESIZED));
+        });
+
+        int before = scroll.getViewport().getViewPosition().y;
+        assertTrue(before >= 0);
+        SwingUtilities.invokeAndWait(() -> scroll.getViewport().setViewPosition(new java.awt.Point(0, 300)));
+        int scrolled = scroll.getViewport().getViewPosition().y;
+        assertTrue(scrolled > 0, "前置条件：网格必须能向下滚动");
+
+        javax.swing.JViewport viewport = scroll.getViewport();
+        BufferedImage image = new BufferedImage(
+                Math.max(1, viewport.getWidth()), Math.max(1, viewport.getHeight()),
+                BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        viewport.paint(g);
+        g.dispose();
+
+        assertEquals(java.awt.Color.RED.getRGB() & 0xFFFFFF,
+                image.getRGB(3, 3) & 0xFFFFFF,
+                "向下滚动后，视口顶部仍应是固定在顶部的表头");
+        loader.shutdown();
+    }
+
+    private static void layoutTree(java.awt.Container container) {
+        container.doLayout();
+        for (java.awt.Component child : container.getComponents()) {
+            if (child instanceof java.awt.Container nested) {
+                layoutTree(nested);
+            }
+        }
     }
 }

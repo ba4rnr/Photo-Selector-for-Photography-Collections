@@ -113,10 +113,17 @@ abstract class ThumbnailGridPanel extends JPanel {
                 if (!SwingUtilities.isLeftMouseButton(e)) {
                     return;
                 }
-                if (onHeaderClick(e.getPoint())) {
+                int headerY = stickyHeaderY();
+                Point pressed = e.getPoint();
+                if (pressed.y >= headerY && pressed.y < headerY + HEADER_HEIGHT) {
+                    // 表头已经粘在视口顶部；子类的按钮坐标仍按 0..HEADER_HEIGHT 计算，
+                    // 所以点击时先扣掉滚动偏移。表头区域本身不能误选下面的照片。
+                    if (onHeaderClick(new Point(pressed.x, pressed.y - headerY))) {
+                        return;
+                    }
                     return;
                 }
-                int index = indexAt(e.getPoint());
+                int index = indexAt(pressed);
                 if (index >= 0) {
                     chosenIndex = index;
                     repaint();
@@ -454,14 +461,38 @@ abstract class ThumbnailGridPanel extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                 RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-        paintHeader(g2);
         if (session == null || itemCount() == 0) {
             paintEmptyHint(g2);
         } else {
             paintCells(g2);
             paintDropHint(g2);
         }
+        // 先画内容再画表头：向下滚动时内容会从表头底下经过，最后覆盖上去
+        // 才能形成“表头固定在视口顶部”的效果。
+        paintStickyHeader(g2);
         g2.dispose();
+    }
+
+    /** 表头应该贴在当前视口的哪一行；未放进滚动面板时就是面板顶部。 */
+    private int stickyHeaderY() {
+        Rectangle visible = getVisibleRect();
+        if (visible.height <= 0 || visible.y <= 0) {
+            return 0;
+        }
+        return Math.min(visible.y, Math.max(0, getHeight() - HEADER_HEIGHT));
+    }
+
+    /** 把表头画在视口顶部，而不是跟着内容一起滚出屏幕。 */
+    private void paintStickyHeader(Graphics2D g) {
+        int y = stickyHeaderY();
+        Graphics2D header = (Graphics2D) g.create();
+        header.setClip(0, y, Math.max(0, getWidth()), HEADER_HEIGHT);
+        // 表头盖住下方滚过的格子，必须先铺一层面板底色；否则格子会透出来。
+        header.setColor(Theme.PANEL);
+        header.fillRect(0, y, getWidth(), HEADER_HEIGHT);
+        header.translate(0, y);
+        paintHeader(header);
+        header.dispose();
     }
 
     /** 只画看得见的那几行。 */
