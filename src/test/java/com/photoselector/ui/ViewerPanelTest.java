@@ -435,6 +435,42 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 裁切手柄和选框内部使用对应的双箭头光标() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 400, 300);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(600, 500);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        CropRect crop = new CropRect(0.25, 0.25, 0.5, 0.5);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setEdits(EditState.NONE.withCrop(crop));
+            viewer.setCursorTool(CursorTool.CROP);
+        });
+        Rectangle image = viewer.imageDrawRectForTest();
+        Rectangle rect = screenRect(crop, image);
+
+        Point rightEdge = new Point(rect.x + rect.width, rect.y + rect.height / 2);
+        Point bottomRight = new Point(rect.x + rect.width, rect.y + rect.height);
+        Point inside = new Point(rect.x + 20, rect.y + 20);
+        dispatchMove(viewer, rightEdge);
+        assertEquals(java.awt.Cursor.E_RESIZE_CURSOR, viewer.getCursor().getType(),
+                "右边中点应当是左右双箭头");
+        dispatchMove(viewer, bottomRight);
+        assertEquals(java.awt.Cursor.SE_RESIZE_CURSOR, viewer.getCursor().getType(),
+                "右下角应当是斜向双箭头");
+        dispatchMove(viewer, inside);
+        assertEquals(java.awt.Cursor.MOVE_CURSOR, viewer.getCursor().getType(),
+                "选框内部应当是四向箭头");
+        loader.shutdown();
+    }
+
+    @Test
     void 滚轮在整百倍率之间跳() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
@@ -676,6 +712,11 @@ class ViewerPanelTest {
         int button = id == MouseEvent.MOUSE_DRAGGED ? MouseEvent.NOBUTTON : MouseEvent.BUTTON1;
         viewer.dispatchEvent(new MouseEvent(viewer, id, System.currentTimeMillis(), modifiers,
                 point.x, point.y, id == MouseEvent.MOUSE_PRESSED ? 1 : 0, false, button));
+    }
+
+    private static void dispatchMove(ViewerPanel viewer, Point point) {
+        viewer.dispatchEvent(new MouseEvent(viewer, MouseEvent.MOUSE_MOVED,
+                System.currentTimeMillis(), 0, point.x, point.y, 0, false, MouseEvent.NOBUTTON));
     }
 
     private static Rectangle screenRect(CropRect crop, Rectangle image) {

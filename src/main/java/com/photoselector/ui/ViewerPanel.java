@@ -218,12 +218,12 @@ final class ViewerPanel extends JPanel {
                     Point pressed = clampToImage(e.getPoint());
                     cropDragStart = pressed;
                     cropOriginal = edits.crop();
-                    cropGrab = cropGrabAt(pressed);
+                    cropGrab = cropGrabAt(pressed, cropOriginal);
                     if (cropOriginal == null && cropGrab != CropGrab.NEW) {
                         // 还没有裁切框时，边/角手柄对应的是整张画面。
-                        // 从画面内部拖动仍走 NEW，保留“直接框一块”的旧操作。
                         cropOriginal = FULL_CROP;
                     }
+                    setCropCursor(cropGrab);
                     cropPreview = cropGrab == CropGrab.NEW ? null : cropOriginal;
                     repaint();
                 } else if (canPan()) {
@@ -237,6 +237,12 @@ final class ViewerPanel extends JPanel {
             @Override
             public void mouseDragged(MouseEvent e) {
                 if (cropDragStart != null) {
+                    // 整图选框不能被“移动”，但用户从画面内部直接拖出一块新区域
+                    // 仍然是旧操作；第一次真正拖动后把它转成 NEW。
+                    if (cropGrab == CropGrab.MOVE && FULL_CROP.equals(cropOriginal)
+                            && e.getPoint().distance(cropDragStart) > 5) {
+                        cropGrab = CropGrab.NEW;
+                    }
                     cropPreview = cropGrab == CropGrab.NEW
                             ? normalizedCrop(cropDragStart, e.getPoint())
                             : adjustedCrop(cropDragStart, e.getPoint());
@@ -265,6 +271,7 @@ final class ViewerPanel extends JPanel {
                         onCropCommitted.accept(selected);
                     }
                     repaint();
+                    updateCropCursor(e.getPoint());
                     return;
                 }
                 dragStart = null;
@@ -274,11 +281,15 @@ final class ViewerPanel extends JPanel {
             @Override
             public void mouseMoved(MouseEvent e) {
                 setHoveredZoomChip(zoomChipAt(e.getPoint()));
+                updateCropCursor(e.getPoint());
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
                 setHoveredZoomChip(-1);
+                if (cropMode) {
+                    setCursor(Cursor.getDefaultCursor());
+                }
             }
 
             @Override
@@ -1053,8 +1064,8 @@ final class ViewerPanel extends JPanel {
     }
 
     /** 判断按下的位置是在移动已有选框、抓边角缩放，还是重新画一个。 */
-    private CropGrab cropGrabAt(Point point) {
-        CropRect interaction = cropOriginal == null ? FULL_CROP : cropOriginal;
+    private CropGrab cropGrabAt(Point point, CropRect original) {
+        CropRect interaction = original == null ? FULL_CROP : original;
         Rectangle r = cropScreenRect(interaction);
         int tolerance = 8;
         boolean left = Math.abs(point.x - r.x) <= tolerance;
@@ -1072,8 +1083,34 @@ final class ViewerPanel extends JPanel {
         if (bottom && acrossX) return CropGrab.S;
         if (left && acrossY) return CropGrab.W;
         if (right && acrossY) return CropGrab.E;
-        return cropOriginal != null && r.contains(point)
-                ? CropGrab.MOVE : CropGrab.NEW;
+        return r.contains(point) ? CropGrab.MOVE : CropGrab.NEW;
+    }
+
+    /** 裁切模式下按指针所在的手柄/选框区域切换系统双箭头光标。 */
+    private void updateCropCursor(Point point) {
+        if (!cropMode || !imageDrawRect().contains(point)) {
+            if (cropMode) {
+                setCursor(Cursor.getDefaultCursor());
+            }
+            return;
+        }
+        setCropCursor(cropGrabAt(point, edits.crop()));
+    }
+
+    private void setCropCursor(CropGrab grab) {
+        int type = switch (grab) {
+            case NW -> Cursor.NW_RESIZE_CURSOR;
+            case N -> Cursor.N_RESIZE_CURSOR;
+            case NE -> Cursor.NE_RESIZE_CURSOR;
+            case E -> Cursor.E_RESIZE_CURSOR;
+            case SE -> Cursor.SE_RESIZE_CURSOR;
+            case S -> Cursor.S_RESIZE_CURSOR;
+            case SW -> Cursor.SW_RESIZE_CURSOR;
+            case W -> Cursor.W_RESIZE_CURSOR;
+            case MOVE -> Cursor.MOVE_CURSOR;
+            case NEW -> Cursor.CROSSHAIR_CURSOR;
+        };
+        setCursor(Cursor.getPredefinedCursor(type));
     }
 
     /** 移动 / 缩放已有选框，并保证四个边始终留在图片里。 */
@@ -1184,24 +1221,25 @@ final class ViewerPanel extends JPanel {
                 Math.min(crop.width, crop.height) / 4));
         int midX = crop.x + crop.width / 2;
         int midY = crop.y + crop.height / 2;
-        int right = crop.x + crop.width;
-        int bottom = crop.y + crop.height;
+        int right = crop.x + crop.width - 1;
+        int bottom = crop.y + crop.height - 1;
+        int half = length / 2;
+        int halfThickness = thickness / 2;
         g.setColor(Theme.TEXT);
-        // 四角画成向画面内部延伸的 L 形条，四边中点画短横条/竖条。
-        // 比原来的 7×7 小方块更接近 C1，也更容易看出拖动方向。
-        g.fillRect(crop.x, crop.y, length, thickness);
-        g.fillRect(crop.x, crop.y, thickness, length);
-        g.fillRect(right - length, crop.y, length, thickness);
-        g.fillRect(right - thickness, crop.y, thickness, length);
-        g.fillRect(crop.x, bottom - thickness, length, thickness);
-        g.fillRect(crop.x, bottom - length, thickness, length);
-        g.fillRect(right - length, bottom - thickness, length, thickness);
-        g.fillRect(right - thickness, bottom - length, thickness, length);
+        // 手柄以裁切框线为中心向内外各伸一半；细框线正好落在手柄正中。
+        g.fillRect(crop.x - half, crop.y - halfThickness, length, thickness);
+        g.fillRect(crop.x - halfThickness, crop.y - half, thickness, length);
+        g.fillRect(right - half, crop.y - halfThickness, length, thickness);
+        g.fillRect(right - halfThickness, crop.y - half, thickness, length);
+        g.fillRect(crop.x - half, bottom - halfThickness, length, thickness);
+        g.fillRect(crop.x - halfThickness, bottom - half, thickness, length);
+        g.fillRect(right - half, bottom - halfThickness, length, thickness);
+        g.fillRect(right - halfThickness, bottom - half, thickness, length);
 
-        g.fillRect(midX - length / 2, crop.y, length, thickness);
-        g.fillRect(midX - length / 2, bottom - thickness, length, thickness);
-        g.fillRect(crop.x, midY - length / 2, thickness, length);
-        g.fillRect(right - thickness, midY - length / 2, thickness, length);
+        g.fillRect(midX - half, crop.y - halfThickness, length, thickness);
+        g.fillRect(midX - half, bottom - halfThickness, length, thickness);
+        g.fillRect(crop.x - halfThickness, midY - half, thickness, length);
+        g.fillRect(right - halfThickness, midY - half, thickness, length);
     }
 
     /** 图片绘制矩形；给裁切 / 网格测试用。 */
