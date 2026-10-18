@@ -55,6 +55,9 @@ public final class Theme {
     /** 裁切时盖在选区外的半透明遮罩。 */
     public static final Color CROP_MASK = new Color(0, 0, 0, 145);
 
+    /** 裁切框角/边上的提示条；比正文略透明，避免压住画面细节。 */
+    public static final Color CROP_HANDLE = new Color(195, 195, 195, 210);
+
     /** 三分网格辅助线：轻一点，只提示构图，不抢照片本身。 */
     public static final Color GRID_LINE = new Color(255, 255, 255, 85);
 

@@ -1205,19 +1205,14 @@ final class ViewerPanel extends JPanel {
         g.setColor(Theme.CROP_MASK);
         g.fill(mask);
 
-        Graphics2D border = (Graphics2D) g.create();
-        border.setColor(Theme.TEXT);
-        border.setStroke(new java.awt.BasicStroke(1f));
-        border.drawRect(selected.x, selected.y,
-                Math.max(0, selected.width - 1), Math.max(0, selected.height - 1));
-        paintCropHandles(border, selected);
-        border.dispose();
+        // 不再画白色矩形边框；选框边界只由明暗差表达，避免和手柄重复。
+        paintCropHandles(g, selected);
     }
 
     /** 四角和四边中点的白色裁切条：告诉用户这里可以抓住缩放。 */
     private static void paintCropHandles(Graphics2D g, Rectangle crop) {
-        int thickness = 3;
-        int length = Math.min(14, Math.max(4,
+        int thickness = 4;
+        int length = Math.min(18, Math.max(6,
                 Math.min(crop.width, crop.height) / 4));
         int midX = crop.x + crop.width / 2;
         int midY = crop.y + crop.height / 2;
@@ -1225,16 +1220,26 @@ final class ViewerPanel extends JPanel {
         int bottom = crop.y + crop.height - 1;
         int half = length / 2;
         int halfThickness = thickness / 2;
-        g.setColor(Theme.TEXT);
-        // 手柄以裁切框线为中心向内外各伸一半；细框线正好落在手柄正中。
-        g.fillRect(crop.x - half, crop.y - halfThickness, length, thickness);
-        g.fillRect(crop.x - halfThickness, crop.y - half, thickness, length);
-        g.fillRect(right - half, crop.y - halfThickness, length, thickness);
-        g.fillRect(right - halfThickness, crop.y - half, thickness, length);
-        g.fillRect(crop.x - half, bottom - halfThickness, length, thickness);
-        g.fillRect(crop.x - halfThickness, bottom - half, thickness, length);
-        g.fillRect(right - half, bottom - halfThickness, length, thickness);
-        g.fillRect(right - halfThickness, bottom - half, thickness, length);
+        g.setColor(Theme.CROP_HANDLE);
+
+        // 四个角是 L 形：横向条和纵向条只向画面内侧延伸，交叉点正好压住
+        // 明暗边界。不能像十字那样四向都伸，否则角上会多出画面外的半截。
+        g.fillRect(crop.x - halfThickness, crop.y - halfThickness,
+                length, thickness);                              // 左上横
+        g.fillRect(crop.x - halfThickness, crop.y - halfThickness,
+                thickness, length);                              // 左上竖
+        g.fillRect(right - length + halfThickness, crop.y - halfThickness,
+                length, thickness);                              // 右上横
+        g.fillRect(right - halfThickness, crop.y - halfThickness,
+                thickness, length);                              // 右上竖
+        g.fillRect(crop.x - halfThickness, bottom - halfThickness,
+                length, thickness);                              // 左下横
+        g.fillRect(crop.x - halfThickness, bottom - length + halfThickness,
+                thickness, length);                              // 左下竖
+        g.fillRect(right - length + halfThickness, bottom - halfThickness,
+                length, thickness);                              // 右下横
+        g.fillRect(right - halfThickness, bottom - length + halfThickness,
+                thickness, length);                              // 右下竖
 
         g.fillRect(midX - half, crop.y - halfThickness, length, thickness);
         g.fillRect(midX - half, bottom - halfThickness, length, thickness);
