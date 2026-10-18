@@ -568,6 +568,33 @@ class ViewerPanelTest {
     }
 
     @Test
+    void 滚轮档位里可以逐档到达16百分比() throws Exception {
+        Theme.install();
+        ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));
+        ViewerPanel viewer = new ViewerPanel(loader);
+        Path photo = TestImages.writeJpeg(
+                Files.createDirectories(tempDir.resolve("素材")).resolve("p.jpg"), 1200, 800);
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setSize(400, 300);
+            viewer.showPhoto(photo);
+        });
+        waitUntil(viewer::hasImage, "原图");
+
+        SwingUtilities.invokeAndWait(() -> {
+            viewer.setDefaultScale(0.14);
+            viewer.zoomStep(1);
+        });
+        assertEquals(16, viewer.zoomPercent(), "14% 往上滚应当先到 16%");
+
+        SwingUtilities.invokeAndWait(() -> viewer.zoomStep(1));
+        assertEquals(18, viewer.zoomPercent(), "16% 再往上滚应当到 18%");
+
+        SwingUtilities.invokeAndWait(() -> viewer.zoomStep(-1));
+        assertEquals(16, viewer.zoomPercent(), "18% 往下滚应当回到 16%");
+        loader.shutdown();
+    }
+
+    @Test
     void 滚轮缩放以鼠标所指的那一点为基准() throws Exception {
         Theme.install();
         ThumbnailLoader loader = new ThumbnailLoader(new ThumbnailService(tempDir.resolve("cache")));

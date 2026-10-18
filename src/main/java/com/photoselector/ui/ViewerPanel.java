@@ -77,7 +77,7 @@ final class ViewerPanel extends JPanel {
      * 滚到它们时不会有零头。
      */
     private static final double[] ZOOM_STEPS = {
-        0.05, 0.08, 0.10, 0.14, 0.18, 0.20, 0.25, 0.33, 0.50, 0.66,
+        0.05, 0.08, 0.10, 0.14, 0.16, 0.18, 0.20, 0.25, 0.33, 0.50, 0.66,
         1.00, 1.33, 2.00, 3.00, 4.00, 6.00, 8.00
     };
 
@@ -88,7 +88,7 @@ final class ViewerPanel extends JPanel {
      * 不会出现菜单里选了一个滚轮永远滚不出来的数。
      */
     static int[] defaultZoomChoices() {
-        return new int[] {14, 18, 25, 33, 50, 66, 100};
+        return new int[] {14, 16, 18, 25, 33, 50, 66, 100};
     }
 
     private final ThumbnailLoader loader;
