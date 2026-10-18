@@ -27,6 +27,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.plaf.basic.BasicMenuBarUI;
 
+import com.photoselector.PhotoSelectorApp;
 import com.photoselector.core.Workspace;
 import com.photoselector.io.AppSettings;
 import com.photoselector.io.Saver;
@@ -58,7 +59,7 @@ public final class MainFrame extends JFrame {
 
     /** 供测试指定缩略图缓存目录，避免碰用户真实缓存。 */
     MainFrame(WorkspaceStore workspaceStore, AppSettings settings, Path thumbnailCacheDir) {
-        super("摄影集照片筛选器");
+        super(PhotoSelectorApp.appName() + " " + PhotoSelectorApp.appVersion());
         this.workspaceStore = workspaceStore;
         this.settings = settings;
         this.mainPanel = new MainPanel(thumbnailCacheDir);
@@ -411,7 +412,7 @@ public final class MainFrame extends JFrame {
             return;
         }
         Path name = folder.getFileName();
-        setTitle("摄影集照片筛选器 — "
+        setTitle(PhotoSelectorApp.appName() + " " + PhotoSelectorApp.appVersion() + " — "
                 + (name == null ? folder : name)
                 + "（" + count + " 张）");
     }

@@ -105,6 +105,75 @@ class SaverTest {
     }
 
     @Test
+    void 超过九张后按编号自然顺序保存并重新扫描_顺序不能乱() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        List<Path> original = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            original.add(TestImages.writeJpeg(
+                    target.resolve(String.format("original-%02d.jpg", i)), 300, 200));
+        }
+        Session session = sessionFor(target);
+        session.seedExisting(original);
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            expected.add(NumberingRule.DEFAULT.nameFor(i) + ".jpg");
+        }
+        List<String> rescanned = PhotoFiles.imagesIn(target).stream()
+                .map(path -> path.getFileName().toString())
+                .toList();
+        assertEquals(expected, rescanned,
+                "090 之后应是 0100、0110、0120，不能按字典序把 0100 排到 020 前面");
+    }
+
+    @Test
+    void 混合插入换序和垃圾桶后_每个编号对应的文件内容仍与界面顺序一致() throws Exception {
+        Path target = Files.createDirectories(tempDir.resolve("成片"));
+        Path a = TestImages.writeJpeg(target.resolve("A.jpg"), 300, 200);
+        Path b = TestImages.writeJpeg(target.resolve("B.jpg"), 320, 200);
+        Path c = TestImages.writeJpeg(target.resolve("C.jpg"), 340, 200);
+        Path d = TestImages.writeJpeg(target.resolve("D.jpg"), 360, 200);
+        Path source = Files.createDirectories(tempDir.resolve("素材"));
+        Path p = TestImages.writeJpeg(source.resolve("P.jpg"), 380, 200);
+        Path q = TestImages.writeJpeg(source.resolve("Q.jpg"), 400, 200);
+
+        Session session = sessionFor(target);
+        session.seedExisting(List.of(a, b, c, d));
+        session.insert(1, p);  // A P B C D
+        session.add(q);        // A P B C D Q
+        session.move(0, 4);    // P B C D A Q
+        session.trash(1);      // P C D A Q；B 进垃圾桶
+
+        List<Path> expectedSources = List.of(p, c, d, a, q);
+        assertEquals(expectedSources, session.entries().stream()
+                .map(com.photoselector.core.TargetEntry::source).toList(),
+                "前置条件：界面顺序必须和预期一致");
+        List<byte[]> expectedBytes = expectedSources.stream().map(path -> {
+            try {
+                return Files.readAllBytes(path);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).toList();
+
+        Saver.Result result = new Saver().save(Saver.Plan.from(session));
+        assertFalse(result.hasProblems(), "不该有问题：" + result.problems());
+        assertEquals(5, result.finalOrder().size());
+        assertFalse(Files.exists(b), "垃圾桶里的 B 应当被删除");
+
+        for (int i = 0; i < expectedSources.size(); i++) {
+            Path saved = target.resolve(NumberingRule.DEFAULT.nameFor(i) + ".jpg");
+            assertArrayEquals(expectedBytes.get(i),
+                    Files.readAllBytes(saved),
+                    "第 " + i + " 个编号应当对应界面同位置的源文件："
+                            + expectedSources.get(i).getFileName());
+        }
+    }
+
+    @Test
     void 目标文件夹里已有同名文件时不覆盖() throws Exception {
         Path target = Files.createDirectories(tempDir.resolve("成片"));
         Path occupied = TestImages.writeJpeg(target.resolve("010.jpg"), 300, 200);

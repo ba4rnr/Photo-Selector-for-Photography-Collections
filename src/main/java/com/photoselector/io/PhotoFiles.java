@@ -29,7 +29,7 @@ public final class PhotoFiles {
                     .filter(Files::isRegularFile)
                     .filter(path -> !Saver.isTemporaryFile(path))
                     .filter(ImageSource::isSupported)
-                    .sorted()
+                    .sorted(PhotoFiles::compareFileNames)
                     .toList();
         }
     }
@@ -52,7 +52,8 @@ public final class PhotoFiles {
         }
 
         try (Stream<Path> children = Files.list(root)) {
-            for (Path child : children.filter(Files::isDirectory).sorted().toList()) {
+            for (Path child : children.filter(Files::isDirectory)
+                    .sorted(PhotoFiles::compareFileNames).toList()) {
                 try {
                     List<Path> photos = imagesIn(child);
                     if (!photos.isEmpty()) {
@@ -71,5 +72,78 @@ public final class PhotoFiles {
     static String displayName(Path folder) {
         Path name = folder.getFileName();
         return name == null ? folder.toString() : name.toString();
+    }
+
+    /**
+     * 文件名自然排序：连续数字按数值比较，而不是按字符字典序。
+     *
+     * <p>默认编号从 {@code 090} 到 {@code 0100} 时位数会增长；普通
+     * {@link Path#compareTo(Path)} 会把 {@code 0100} 排在 {@code 020} 前面，
+     * 保存后重新扫描就会让界面顺序看似全部乱掉。这里把数字段当成整数比较。
+     */
+    static int compareFileNames(Path left, Path right) {
+        return compareNatural(left.getFileName().toString(), right.getFileName().toString());
+    }
+
+    private static int compareNatural(String left, String right) {
+        int i = 0;
+        int j = 0;
+        while (i < left.length() && j < right.length()) {
+            char a = left.charAt(i);
+            char b = right.charAt(j);
+            if (Character.isDigit(a) && Character.isDigit(b)) {
+                int endA = digitEnd(left, i);
+                int endB = digitEnd(right, j);
+                int numberA = firstNonZero(left, i, endA);
+                int numberB = firstNonZero(right, j, endB);
+                int digitsA = endA - numberA;
+                int digitsB = endB - numberB;
+                if (digitsA != digitsB) {
+                    return Integer.compare(digitsA, digitsB);
+                }
+                for (int k = 0; k < digitsA; k++) {
+                    int diff = Character.compare(left.charAt(numberA + k),
+                            right.charAt(numberB + k));
+                    if (diff != 0) {
+                        return diff;
+                    }
+                }
+                // 数值相同但前导零数量不同：零少的排前面，保证排序稳定可预期。
+                int widthA = endA - i;
+                int widthB = endB - j;
+                if (widthA != widthB) {
+                    return Integer.compare(widthA, widthB);
+                }
+                i = endA;
+                j = endB;
+                continue;
+            }
+
+            int diff = Character.compare(Character.toLowerCase(a), Character.toLowerCase(b));
+            if (diff != 0) {
+                return diff;
+            }
+            i++;
+            j++;
+        }
+        int byLength = Integer.compare(left.length(), right.length());
+        return byLength != 0 ? byLength : left.compareTo(right);
+    }
+
+    private static int digitEnd(String text, int start) {
+        int end = start;
+        while (end < text.length() && Character.isDigit(text.charAt(end))) {
+            end++;
+        }
+        return end;
+    }
+
+    private static int firstNonZero(String text, int start, int end) {
+        int at = start;
+        while (at < end && text.charAt(at) == '0') {
+            at++;
+        }
+        // 全零数字段仍要保留一个数字位，否则 000 会被当成空串。
+        return at == end ? end - 1 : at;
     }
 }

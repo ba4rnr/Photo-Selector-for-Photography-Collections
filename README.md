@@ -3,6 +3,8 @@
 Photo Selector —— 一个本地运行的桌面工具，服务于「拍摄 → 挑片 → 归档成片」里的挑片环节：
 打开一个拍摄文件夹，快速过片，把要留的挑进目标文件夹，并自动重新编号。
 
+当前版本：**1.1**
+
 ## 简介
 
 - 素材目录树支持双击浏览每个子文件夹；底部胶片条像 Lightroom 一样横向滚动、按子文件夹分组、可收起
@@ -66,15 +68,15 @@ mvnw.cmd package
 New-Item -ItemType Directory -Force target\jpackage-input | Out-Null
 Copy-Item target\photo-selector.jar target\jpackage-input\photo-selector.jar -Force
 jpackage --type app-image --dest dist --name "摄影集照片筛选器" `
-  --app-version 0.1.0 --vendor BA4RNR `
+  --app-version 1.1.0 --vendor BA4RNR `
   --input target\jpackage-input --main-jar photo-selector.jar `
   --main-class com.photoselector.PhotoSelectorApp
 Compress-Archive -LiteralPath "dist\摄影集照片筛选器" `
-  -DestinationPath "dist\PhotoSelector-0.1.0-windows-x64.zip" -Force
+  -DestinationPath "dist\PhotoSelector-1.1.0-windows-x64.zip" -Force
 ```
 
 成品在 `dist\摄影集照片筛选器\`，双击其中的 EXE 即可运行；
-`dist\PhotoSelector-0.1.0-windows-x64.zip` 可直接拷贝到另一台 Windows 电脑。
+`dist\PhotoSelector-1.1.0-windows-x64.zip` 可直接拷贝到另一台 Windows 电脑。
 
 ## 现在可以试什么
 

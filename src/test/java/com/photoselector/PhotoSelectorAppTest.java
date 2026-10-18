@@ -12,5 +12,6 @@ class PhotoSelectorAppTest {
     @Test
     void 程序名称应为摄影集照片筛选器() {
         assertEquals("摄影集照片筛选器", PhotoSelectorApp.appName());
+        assertEquals("1.1", PhotoSelectorApp.appVersion());
     }
 }

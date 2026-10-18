@@ -19,6 +19,7 @@ import com.photoselector.ui.theme.Theme;
 public final class PhotoSelectorApp {
 
     private static final String APP_NAME = "摄影集照片筛选器";
+    private static final String APP_VERSION = "1.1";
 
     private PhotoSelectorApp() {
         // 工具类，禁止实例化
@@ -31,6 +32,11 @@ public final class PhotoSelectorApp {
      */
     public static String appName() {
         return APP_NAME;
+    }
+
+    /** 当前发行版本，显示在主窗口标题和打包信息中。 */
+    public static String appVersion() {
+        return APP_VERSION;
     }
 
     public static void main(String[] args) {
